@@ -23,6 +23,22 @@ select(flail_casting) → true  → flail_string_only            ← 扔出中�
 绳子层（`flail_rope_layer`）**单独叠在最上、不参与象限切分** —— 否则拼合时会被切成四段。
 
 ---
+## 1.2.0.1 — 补 JEI 配方展示（作者 2026-10-19）
+
+`registerVanillaCategoryExtensions` 里给 `FlailRecipe` 加了一条 `ICraftingCategoryExtension`：
+2×2 网格、**球在左上、线在右下**的对角摆法，与 `FlailRecipe` 认的 `(0,3)` 对角一致。
+
+**为什么必须加**：JEI 30.x 对 crafting 类配方**不是自动展示**的 ——
+要 `IExtendableCraftingRecipeCategory.addExtension` 注册才会出现
+（组合球那两条也一直是靠这里）。不注册的话玩家在 JEI 里搜「流星锤」什么配方都看不到。
+
+接口签名是 30.x 的：`getIngredients` / `getWidth` / `getHeight` 带 `RecipeHolder<T>`，
+材料位用 `SlotDisplay.ItemStackSlotDisplay(ItemStackTemplate)`（**要 Template 不是 ItemStack**）。
+
+材料格放模板（任意球 + 线），因为真正的判据是 `FlailRecipe.matches` 在运行期按
+「是球 + 满耐久 + 线」算的，JEI 只负责画给人看，不必穷举 19 种球。
+
+---
 ## 1.2.0.0 — 新增大类物品「流星锤」（作者 2026-10-19 规格）
 
 ### 一、物品

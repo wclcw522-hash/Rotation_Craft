@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStackTemplate;
 import com.mcmodworkspace.moreballs.ModComponents;
 import mezz.jei.api.registration.ISubtypeRegistration;
 import com.mcmodworkspace.moreballs.ModTags;
+import com.mcmodworkspace.moreballs.FlailRecipe;
 import com.mcmodworkspace.moreballs.ModItems;
 import com.mcmodworkspace.moreballs.MoreBalls;
 import java.util.Collections;
@@ -338,6 +339,14 @@ public class MoreBallsJeiPlugin implements IModPlugin {
         registration.getCraftingCategory().addExtension(
                 BallComboRecipe.Vertical.class,
                 comboExtension(1, 2, halfStack()));
+        // ===== 流星锤（作者 2026-10-19）=====
+        //
+        // ⚠️ **必须在这里注册**：JEI 对 crafting 类配方不是自动展示的 ——
+        //    不注册 extension，玩家在 JEI 里搜「流星锤」什么配方都看不到。
+        //    （证据：JEI 30.x 有 IExtendableCraftingRecipeCategory + ICraftingCategoryExtension，
+        //     组合球那两条也正是靠这里才显示出来的。）
+        registration.getCraftingCategory().addExtension(FlailRecipe.class, flailExtension());
+
         // 四合一：2×2 四格，都是示例四分之一球
         registration.getCraftingCategory().addExtension(
                 BallComboRecipe.Square.class,
@@ -350,6 +359,55 @@ public class MoreBallsJeiPlugin implements IModPlugin {
      * <p>{@code getIngredients} 返回的列表长度必须是 {@code width * height}，
      * 顺序按行左到右、上到下 —— JEI 会拿它铺到合成网格里。</p>
      */
+    /**
+     * 流星锤配方的 JEI 展示：2×2 网格，「球在左上、线在右下」的对角摆法。
+     *
+     * <p>⚠️ 接口签名是 30.x 的（都带 {@code RecipeHolder}）：
+     * {@code getIngredients} / {@code getWidth} / {@code getHeight} 是抽象方法，
+     * {@code setRecipe} 有五参重载。抄的是同文件 {@code comboExtension} 的写法。</p>
+     *
+     * <p>材料位放**模板**：真正的判据是 {@code FlailRecipe.matches} 在运行期按
+     * 「是球 + 满耐久 + 线」算的，JEI 只负责画给人看，不必穷举 19 种球。</p>
+     */
+    private static ICraftingCategoryExtension<FlailRecipe> flailExtension() {
+        return new ICraftingCategoryExtension<>() {
+            @Override
+            public List<SlotDisplay> getIngredients(RecipeHolder<FlailRecipe> holder) {
+                // 2×2 = 4 格：0 球、1 空、2 空、3 线
+                return List.of(
+                        anyBallDisplay(),           // 左上：任意球
+                        SlotDisplay.Empty.INSTANCE, // 右上：空
+                        SlotDisplay.Empty.INSTANCE, // 左下：空
+                        stringDisplay());           // 右下：线
+            }
+
+            @Override
+            public int getWidth(RecipeHolder<FlailRecipe> holder) {
+                return 2;
+            }
+
+            @Override
+            public int getHeight(RecipeHolder<FlailRecipe> holder) {
+                return 2;
+            }
+        };
+    }
+    /** 「任意球」的材料位展示 —— 取标签里第一个球做代表（JEI 只画一个示意） */
+    private static SlotDisplay anyBallDisplay() {
+        for (net.minecraft.world.item.Item item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
+            ItemStack probe = new ItemStack(item);
+            if (!probe.isEmpty() && probe.is(ModTags.Items.BALLS)) {
+                return new SlotDisplay.ItemStackSlotDisplay(net.minecraft.world.item.ItemStackTemplate.fromNonEmptyStack(probe));
+            }
+        }
+        return SlotDisplay.Empty.INSTANCE;
+    }
+
+    /** 「一根线」的材料位展示 */
+    private static SlotDisplay stringDisplay() {
+        return new SlotDisplay.ItemStackSlotDisplay(
+                new net.minecraft.world.item.ItemStackTemplate(net.minecraft.world.item.Items.STRING));
+    }
     private static <R extends CraftingRecipe> ICraftingCategoryExtension<R> comboExtension(
             int width, int height, SlotDisplay ingredient) {
         return new ICraftingCategoryExtension<>() {
