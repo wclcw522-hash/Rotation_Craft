@@ -293,10 +293,76 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
             return;
         }
 
+        // ===== tick 侧词条（作者 2026-10-19：全部搬过来）=====
+        //
+        // 球的词条按触发时机分三批：撞方块 / 打生物 / 每刻持续。
+        // 前两批已经搬过，这里是第三批 —— 只搬签名不依赖 BallProjectile 的那几条。
+        //
+        // ⚠️ 搬不了的（签名强制要 BallProjectile）：
+        //   【引雷】BallThunder.release(level, ball, pierce)
+        //   【导电】BallConduction 整个类都收 BallProjectile
+        //   【尖啸】BallExtraTraits.shriek(ball, ...) / steerWisdom
+        //   【智慧】挂在尖啸的轨迹修正器上，同理
+        //   【潮涌】tickTidalSurge 读写球的浸水/浮力状态
+        //   【变形】命中后把球换成方块并 discard —— 锤头换了就回收不回来，故不做
+        if (this.level() instanceof ServerLevel traitLevel) {
+            BallBehavior.BallProfile profile = this.profile();
+
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE)) {
+                com.mcmodworkspace.moreballs.BallIlluminate.tick(traitLevel, this.position());
+            }
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_LENS)) {
+                com.mcmodworkspace.moreballs.BallLens.tick(traitLevel, this.position());
+            }
+            this.flailMagnetTick(traitLevel, profile);
+        }
+
         switch (this.stage()) {
             case SPIN -> tickSpin();
             case FLYING -> tickFlying();
             case RETURNING -> tickReturning();
+        }
+    }
+
+    /**
+     * 【磁吸】—— 照搬 BallProjectile.magnetTick。
+     *
+     * 把半径 profile.magnetRadius() 内的金属掉落物 / 生物朝锤头拽。
+     * 生物那一路按金属装备数加权（(件数+1)/2，浮点除法），并排除掷出者本人。
+     */
+    private void flailMagnetTick(ServerLevel level, BallBehavior.BallProfile profile) {
+        if (!profile.hasMagnet()) {
+            return;
+        }
+        double speed = this.getDeltaMovement().length();
+        if (speed < 1.0E-3D) {
+            return;
+        }
+        Vec3 self = this.position();
+        double pull = speed * com.mcmodworkspace.moreballs.BallProspecting.MAGNET_SPEED_RATIO;
+        double radius = profile.magnetRadius();
+
+        for (net.minecraft.world.entity.item.ItemEntity item : level.getEntitiesOfClass(
+                net.minecraft.world.entity.item.ItemEntity.class,
+                this.getBoundingBox().inflate(radius),
+                it -> it.isAlive()
+                        && com.mcmodworkspace.moreballs.BallProspecting.isMetalEquipment(it.getItem()))) {
+            Vec3 toSelf = self.subtract(item.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            item.setDeltaMovement(toSelf.normalize().scale(pull));
+        }
+
+        for (LivingEntity living : level.getEntitiesOfClass(LivingEntity.class,
+                this.getBoundingBox().inflate(radius),
+                le -> le.isAlive() && le != this.getOwner())) {
+            Vec3 toSelf = self.subtract(living.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            double factor = (com.mcmodworkspace.moreballs.BallProspecting.countMetalEquipment(living) + 1) / 2.0D;
+            living.setDeltaMovement(toSelf.normalize().scale(pull * factor));
         }
     }
 
