@@ -284,24 +284,74 @@ public class FlailItem extends Item {
     /**
      * 让它能显示耐久条 —— 耐久照抄内嵌球那一套（{@code TOUGHNESS_LEFT} / {@code profile.toughness()}）。
      */
-    // 耐久条直接委托给内嵌球的**实例方法**（BallItem 里是非 static）——
-    // 这样「流星锤的耐久条」和「那颗球的耐久条」必然一致，不会两处维护漂移。
+    // ===== 耐久条 =====
+    //
+    // ⚠️⚠️ **不能委托给内嵌球**（作者 2026-10-19 报「球耐久条好像不显示」）。
+    //
+    //    上一版写的是 `inner.getItem().isBarVisible(inner)` —— 那个方法读的是
+    //    **内嵌球自己**的 `TOUGHNESS_LEFT`。而流星锤消耗耐久时写的是**流星锤这层**的
+    //    `TOUGHNESS_LEFT`（`FlailHeadEntity.consumeOneToughness`），
+    //    内嵌球那份永远满 ⇒ `left < max` 恒 false ⇒ **耐久条永远不显示**。
+    //
+    //    现在直接读流星锤自己的组件；上限取 `profile.toughness()`（从内嵌球推导，
+    //    所以「这颗球本来多少耐久」仍跟着球走，只有「还剩多少」是本层的）。
+    // 耐久条配色与满宽 —— 与 `BallItem` 里那四个 private 常量**同值**。
+    // 不改它们的可见性去 public：那是无谓地扩大 API 面，复制三个 int 更省事，
+    // 而且颜色本来就是原版风格（绿 / 黄 / 红），不会各自漂移。
+    private static final int BAR_COLOR_HIGH = 0xFF00E000;
+    private static final int BAR_COLOR_MID = 0xFFFFD000;
+    private static final int BAR_COLOR_LOW = 0xFFFF3000;
+    private static final int BAR_FULL_WIDTH = 13;
+
+    private static int flailMaxToughness(ItemStack stack) {
+        return profileOf(stack).toughness();
+    }
+
+    private static int flailRemainingToughness(ItemStack stack, int max) {
+        Integer left = stack.get(ModComponents.TOUGHNESS_LEFT.get());
+        return left == null ? max : left;
+    }
+
     @Override
     public boolean isBarVisible(ItemStack stack) {
-        ItemStack inner = ballOf(stack);
-        return !inner.isEmpty() && inner.getItem().isBarVisible(inner);
+        int max = flailMaxToughness(stack);
+        return !stack.isEmpty() && max > 0 && max != BallBehavior.TOUGH_FOREVER
+                && flailRemainingToughness(stack, max) < max;
     }
 
     @Override
     public int getBarWidth(ItemStack stack) {
-        ItemStack inner = ballOf(stack);
-        return inner.isEmpty() ? 0 : inner.getItem().getBarWidth(inner);
+        int max = flailMaxToughness(stack);
+        if (max <= 0 || max == BallBehavior.TOUGH_FOREVER) {
+            return 0;
+        }
+        int left = Math.min(flailRemainingToughness(stack, max), max);
+        return Math.round(BAR_FULL_WIDTH * left / (float) max);
     }
 
     @Override
     public int getBarColor(ItemStack stack) {
-        ItemStack inner = ballOf(stack);
-        return inner.isEmpty() ? 0xFFFFFF : inner.getItem().getBarColor(inner);
+        int max = flailMaxToughness(stack);
+        if (max <= 0 || max == BallBehavior.TOUGH_FOREVER) {
+            return BAR_COLOR_HIGH;
+        }
+        float ratio = Math.min(flailRemainingToughness(stack, max), max) / (float) max;
+        if (ratio > 0.5F) {
+            return BAR_COLOR_HIGH;
+        }
+        return ratio > 0.25F ? BAR_COLOR_MID : BAR_COLOR_LOW;
+    }
+
+    /** 耐久是否已经用光 —— 用光了就不能再扔（作者 2026-10-19） */
+    public static boolean isBroken(ItemStack stack) {
+        if (!isFlail(stack)) {
+            return false;
+        }
+        int max = flailMaxToughness(stack);
+        if (max <= 0 || max == BallBehavior.TOUGH_FOREVER) {
+            return false;
+        }
+        return flailRemainingToughness(stack, max) <= 0;
     }
 
     /**
@@ -329,6 +379,18 @@ public class FlailItem extends Item {
         if (!isFlail(stack)) {
             return InteractionResult.PASS;
         }
+        // ===== 耐久耗尽：不能再扔，直接掉一根线并销毁（作者 2026-10-19）=====
+        //
+        // 作者原话：「耐久耗尽还能扔绳子，应该耐久耗尽后掉一根线直接爆掉」。
+        // 判据是 `isBroken(stack)`（本层 TOUGHNESS_LEFT ≤ 0）。
+        if (isBroken(stack)) {
+            if (!level.isClientSide()) {
+                player.drop(new ItemStack(net.minecraft.world.item.Items.STRING, 1), false);
+                stack.shrink(1);   // 直接销毁这把锤
+            }
+            return InteractionResult.CONSUME;
+        }
+
         // 作者 2026-10-19：回收完之后必须**松开再按**才算下一次蓄力。
         // 玩家还按着右键时（isUsingItem 为真）不响应，松手后 FlailCastHandler 会清标记。
         if (isRecovered(stack) && player.isUsingItem()) {

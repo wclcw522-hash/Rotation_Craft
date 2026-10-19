@@ -1,3 +1,41 @@
+## 1.2.1.2 — 收回速度减半 + 耐久条修复 + 耐久耗尽即毁（作者 2026-10-19）
+
+### ① 收回速度减半
+
+`RECOVER_SPEED_NUMERATOR` **60 → 30**（回收速度 = 数值 / 重量，格每秒）。
+
+### ② 耐久条不显示 —— 委托错了对象
+
+上一版的 `isBarVisible` / `getBarWidth` / `getBarColor` 全都转发给**内嵌球**：
+
+```java
+public boolean isBarVisible(ItemStack stack) {
+    ItemStack inner = ballOf(stack);
+    return !inner.isEmpty() && inner.getItem().isBarVisible(inner);   // ✗
+}
+```
+
+那个方法读的是**内嵌球自己**的 `TOUGHNESS_LEFT` 组件。而流星锤消耗耐久时写的是
+**流星锤这层**的 `TOUGHNESS_LEFT`（`FlailHeadEntity.consumeOneToughness`），
+内嵌球那份永远满 ⇒ `left < max` 恒 false ⇒ **耐久条永远不显示**。
+
+现在三个方法直接读本层组件；上限仍取 `profile.toughness()`（从内嵌球推导），
+所以「这颗球本来多少耐久」照样跟着球走，只有「还剩多少」是本层的。
+
+配色常量（`0xFF00E000` / `0xFFFFD000` / `0xFFFF3000` / 满宽 13）在 `BallItem` 里是 private，
+这里按**同值自建** —— 不改别人的可见性去 public，那等于无谓扩大 API 面。
+
+### ③ 耐久耗尽还能扔
+
+新增 `FlailItem.isBroken(stack)`（本层剩余 ≤ 0，永久坚固除外）。
+`use()` 开头拦：已耗尽 ⇒ **掉一根线 + 销毁这把锤**，不进入蓄力。
+
+### ④ 顺带
+
+`consumeOneToughness` 在回收途中扣到 0 时本来就走 `shatter()`（掷出者脚下掉线），
+这条路径没变。
+
+---
 ## 1.2.1.1 — 补 1.2.1.0 里没落地的两条
 
 `1.2.1.0` 声称做了九条，**修复后遍历查出两条其实没写进去**：
