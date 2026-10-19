@@ -34,6 +34,30 @@ public final class FlailCastHandler {
     private FlailCastHandler() {
     }
 
+    /**
+     * <b>每次登录都把状态归零</b>（作者 2026-10-19 要求）。
+     *
+     * <p>存档里可能留着「扔出中」标记或孤儿锤头实体 —— 那样玩家一进游戏，
+     * 手里每把流星锤都只显示一根绳、新做的也立刻变纯线，且找不回来。
+     * 登录时无条件清一次：范围内的锤头实体全部撤回并移除，物品标记一起清掉。</p>
+     */
+    @SubscribeEvent
+    public static void onPlayerLogin(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        // ① 把周围还活着的锤头全部收回来（物品走 returnFlailToOwner，不会丢）
+        var heads = player.level().getEntitiesOfClass(FlailHeadEntity.class,
+                player.getBoundingBox().inflate(FlailItem.MAX_LINE_LENGTH + 8.0D),
+                h -> h.getOwner() == player && !h.isRemoved());
+        for (FlailHeadEntity h : heads) {
+            h.retireToOwner();
+        }
+        // ② 物品上的三个状态标记一并清掉
+        FlailItem.clearCastingFlags(player);
+        MoreBalls.LOGGER.info("[flail] 登录状态归零：收回 {} 个锤头、清除扔出中标记", heads.size());
+    }
+
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {

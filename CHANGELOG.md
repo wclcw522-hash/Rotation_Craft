@@ -1,3 +1,36 @@
+## 1.2.1.4 — 存档修复：孤儿锤头导致「永远只显示一根绳」
+
+### 现象
+
+作者 2026-10-19 报：一次测试把锤头扔出去没回来，之后**手里每把流星锤都只能拉绳子**，
+新做一把也立刻变成没有锤头的纯线形态，改不回来。
+
+### 根因
+
+`FlailCastHandler.onPlayerTick` 每 tick 用 `FlailItem.findHead(...) != null` 同步
+`FLAIL_CASTING`（「扔出中」组件）。那个孤儿锤头还在玩家 34 格内活着 ⇒
+`findHead` 一直返回它 ⇒ **所有流星锤都被标成「已扔出」** ⇒ 显示纯线形态。
+
+而 `findHead` 原先只筛「owner 是自己且未移除」，**没有任何寿命/距离上限** ——
+卡住的锤头可以永久霸占这个状态。
+
+### 三层兜底
+
+1. **`findHead` 加寿命上限** —— `head.tickCount < MAX_HEAD_LIFE`（6000 刻 = 5 分钟）。
+   超时的锤头不再被认作「已扔出」，物品立刻恢复带球形态。
+2. **锤头自我超时回收** —— `FlailHeadEntity.tick()` 开头判 `tickCount > MAX_HEAD_LIFE`
+   就 `returnFlailAndDiscard()`：把流星锤还给玩家（原本那一格 → 空格 → 脚下）并移除自己。
+3. **每次登录无条件归零** —— `PlayerLoggedInEvent` 里
+   - 扫玩家周围 `MAX_LINE_LENGTH + 8` 格内所有自己的锤头，走新加的 `retireToOwner()`
+     （SPIN 态直接丢，因为它对应的物品就在手上；其它态走归还流程）
+   - 再 `FlailItem.clearCastingFlags(player)` 把背包 + 副手里所有流星锤的
+     `FLAIL_CASTING` 与 `FLAIL_RECOVERED` 标记清掉
+   - 打一行日志：`[flail] 登录状态归零：收回 N 个锤头、清除扔出中标记`
+
+**存档本身不用改** —— 「扔出中」记在**物品组件的 NBT** 里，不是玩家数据里的独立字段。
+这两层清理（登录归零 + 寿命上限）会在主人下次进游戏时自动把背包里那些卡住的流星锤修好。
+
+---
 ## 1.2.1.3 — 修回收三连 bug（作者 2026-10-19）
 
 三条现象，三个独立根因：

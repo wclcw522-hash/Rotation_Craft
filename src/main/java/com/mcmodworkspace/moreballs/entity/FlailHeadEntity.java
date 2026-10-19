@@ -107,6 +107,15 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
      * 改成 0.7，必须真的被拉到手上才算。</p>
      */
     private static final double ARRIVE_DISTANCE = 0.7D;
+
+    /**
+     * 锤头最长寿命（刻）= 5 分钟。
+     *
+     * <p>作者 2026-10-19：存档里有个锤头扔出去再也没回来，导致手里每把流星锤都
+     * 被判成「已扔出」，一直只显示一根绳、新的流星锤也立刻变纯线。
+     * 超过这个寿命的锤头视为孤儿，自己把物品还回去并从世界移除。</p>
+     */
+    public static final int MAX_HEAD_LIFE = 6000;
     /** 到线长上限时给的回弹速度 */
     private static final double SNAP_BACK_SPEED = 0.35D;
 
@@ -275,6 +284,12 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
         if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity livingA) {
             this.storeAnchor(handAnchor(livingA));
+        }
+
+        // 超时兜底：孤儿锤头自我回收，避免永久占着「已扔出」这个状态
+        if (!this.level().isClientSide() && this.tickCount > MAX_HEAD_LIFE) {
+            returnFlailAndDiscard();
+            return;
         }
 
         switch (this.stage()) {
@@ -527,6 +542,22 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
     }
 
     /** 主人没了：把流星锤还回背包后再消失，绝不留孤儿锤头 */
+    /**
+     * 公开版「把这把锤还回去并消失」—— 登录清理用。
+     *
+     * <p>与内部 {@code returnFlailAndDiscard} 的区别：这个方法先判定阶段，
+     * 只有非 SPIN（真的扔出去了、或卡住了）才收，避免把正在蓄力的锤头误删。</p>
+     */
+    public void retireToOwner() {
+        if (!this.level().isClientSide()) {
+            if (this.stage() == Stage.SPIN) {
+                this.discard();   // 蓄力中的直接丢（物品还在手上，不需要归还）
+            } else {
+                this.returnFlailAndDiscard();
+            }
+        }
+    }
+
     private void returnFlailAndDiscard() {
         Entity owner = this.getOwner();
         if (owner instanceof LivingEntity living) {

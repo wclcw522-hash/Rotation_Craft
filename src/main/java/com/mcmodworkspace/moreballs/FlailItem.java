@@ -523,8 +523,29 @@ public class FlailItem extends Item {
     public static com.mcmodworkspace.moreballs.entity.FlailHeadEntity findHead(Level level, Player player) {
         var heads = level.getEntitiesOfClass(com.mcmodworkspace.moreballs.entity.FlailHeadEntity.class,
                 player.getBoundingBox().inflate(MAX_LINE_LENGTH + 4.0D),
-                head -> head.getOwner() == player && !head.isRemoved());
+                // ⚠️ `tickCount < MAX_HEAD_LIFE` 是**兜底**（作者 2026-10-19 存档里有个锤头
+                //    扔出去再也没回来，导致手里每把流星锤都被判成「已扔出」、只显示一根绳）。
+                //    超过寿命的锤头视为孤儿，不再认它 —— 这样即使实体还赖在世界上，
+                //    物品也能恢复正常形态（实体本身由 FlailHeadEntity.tick 自行超时回收）。
+                head -> head.getOwner() == player && !head.isRemoved()
+                        && head.tickCount < com.mcmodworkspace.moreballs.entity.FlailHeadEntity.MAX_HEAD_LIFE);
         return heads.isEmpty() ? null : heads.get(0);
+    }
+
+    /** 把所有流星锤上的「扔出中」标记清掉（登录兜底用） */
+    public static void clearCastingFlags(net.minecraft.world.entity.player.Player player) {
+        var inv = player.getInventory();
+        for (int slot = 0; slot < inv.getContainerSize(); slot++) {
+            ItemStack s = inv.getItem(slot);
+            if (isFlail(s)) {
+                setCasting(s, false);
+                markRecovered(s, false);
+            }
+        }
+        if (isFlail(player.getOffhandItem())) {
+            setCasting(player.getOffhandItem(), false);
+            markRecovered(player.getOffhandItem(), false);
+        }
     }
     public static List<String> ruleLocations() {
         return List.of("BallPouchItem", "BallCuttingGate", "BallPickupHandler");
