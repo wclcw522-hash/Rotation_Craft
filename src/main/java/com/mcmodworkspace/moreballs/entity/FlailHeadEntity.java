@@ -47,7 +47,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * 它没有速度，所以 {@code impactDamage()} 那套「按速度缩放」在 SPIN 下不适用，
  * 直接用基础伤害（作者的「依照基础伤害造成伤害」）。</p>
  */
-public class FlailHeadEntity extends ThrowableItemProjectile {
+public class FlailHeadEntity extends BallProjectile {
 
     /** 当前阶段 */
     public enum Stage {
@@ -273,12 +273,24 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
     // ===== 主循环 =====
 
     @Override
+    /**
+     * 主 tick —— <b>FLYING 阶段完全交给球</b>（作者 2026-10-20：锤头一切照搬球）。
+     *
+     * <p>球的 `tick()` 里依次跑：`ballTickPre()`（上限/回归/票据）→ `super.tick()`
+     * （物理 + 碰撞检测）→ `ballTickPost()`（照明 / 透镜 / 磁吸 / 智慧 / 熔融 / 静止 / 回归）。
+     * 继承后**一个都不用搬**，全自动。</p>
+     *
+     * <p>SPIN 与 RETURNING 两段是锤头独有的，位置不由物理决定，所以走自己的状态机。</p>
+     */
+    // ⚠️ 这里**故意不写 @Override**：javac 会报「Override 不是可重复的批注接口」
+    //    （签名与 BallProjectile.tick() 完全一致，报错信息有误导性）。去掉不影响覆盖行为。
     public void tick() {
-        super.tick();
-
-        // ⚠️ **锤头绝不能单独存在**（作者强调）：主人没了 / 下线了 / 死了 ⇒ 立刻收场，
-        //    并把流星锤还回背包，绝不留一个孤儿锤头在世界里。
+        // 主人没了 / 超时：收场（任何阶段都要判）
         if (!this.level().isClientSide() && !ownerAlive()) {
+            returnFlailAndDiscard();
+            return;
+        }
+        if (!this.level().isClientSide() && this.tickCount > MAX_HEAD_LIFE) {
             returnFlailAndDiscard();
             return;
         }
@@ -287,40 +299,10 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
             this.storeAnchor(handAnchor(livingA));
         }
 
-        // 超时兜底：孤儿锤头自我回收，避免永久占着「已扔出」这个状态
-        if (!this.level().isClientSide() && this.tickCount > MAX_HEAD_LIFE) {
-            returnFlailAndDiscard();
-            return;
-        }
-
-        // ===== tick 侧词条（作者 2026-10-19：全部搬过来）=====
-        //
-        // 球的词条按触发时机分三批：撞方块 / 打生物 / 每刻持续。
-        // 前两批已经搬过，这里是第三批 —— 只搬签名不依赖 BallProjectile 的那几条。
-        //
-        // ⚠️ 搬不了的（签名强制要 BallProjectile）：
-        //   【引雷】BallThunder.release(level, ball, pierce)
-        //   【导电】BallConduction 整个类都收 BallProjectile
-        //   【尖啸】BallExtraTraits.shriek(ball, ...) / steerWisdom
-        //   【智慧】挂在尖啸的轨迹修正器上，同理
-        //   【潮涌】tickTidalSurge 读写球的浸水/浮力状态
-        //   【变形】命中后把球换成方块并 discard —— 锤头换了就回收不回来，故不做
-        if (this.level() instanceof ServerLevel traitLevel) {
-            BallBehavior.BallProfile profile = this.profile();
-
-            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE)) {
-                com.mcmodworkspace.moreballs.BallIlluminate.tick(traitLevel, this.position());
-            }
-            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_LENS)) {
-                com.mcmodworkspace.moreballs.BallLens.tick(traitLevel, this.position());
-            }
-            this.flailMagnetTick(traitLevel, profile);
-        }
-
         switch (this.stage()) {
             case SPIN -> tickSpin();
-            case FLYING -> tickFlying();
             case RETURNING -> tickReturning();
+            case FLYING -> super.tick();   // ← 球的完整 tick
         }
     }
 
@@ -813,178 +795,68 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
     // ===== 命中 =====
 
     @Override
+    /**
+     * 命中生物 —— <b>直接用球那一套</b>（作者 2026-10-20：锤头一切尽可能照搬球）。
+     *
+     * <p>继承 {@link BallProjectile} 之后，球的 `onHitEntity` 里那一整套词条
+     * （移形换位 / 善良 / 熔融 / 魔法 / 金光闪闪 / 敛财 / 招蜂引蝶 / 封印 / 尖刺 / 敌对球特效）
+     * 全部原样生效，不需要再一条条搬。</p>
+     *
+     * <p>这里只加两件事：</p>
+     * <ul>
+     *   <li>首次回收之后 `traitsDisabled` ⇒ 整段跳过（作者规格：回收后不再造成伤害）</li>
+     *   <li>击退倍率：SPIN 0.5 倍、FLYING 2 倍（球没有这个概念）</li>
+     * </ul>
+     */
+    // 同上：故意不写 @Override
     protected void onHitEntity(EntityHitResult hitResult) {
-        // ===== 临时侦测（作者 2026-10-19）：确认命中段到底走到哪一步 =====
-        if (!this.level().isClientSide()) {
-            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
-                    "[flail][命中] 进入 tick={} stage={} target={} side={}",
-                    this.tickCount, this.stage(),
-                    hitResult.getEntity().getName().getString(), this.level().isClientSide());
-        }
-        super.onHitEntity(hitResult);
-
         if (this.level().isClientSide()) {
             return;
         }
         if (this.getOwner() == hitResult.getEntity()) {
-            return;   // 不打主人
-        }
-        if (this.tickCount < SPAWN_GRACE_TICKS) {
-            return;   // 出手宽限期（照搬 BallProjectile）
-        }
-
-        // 首次回收之后：**不再造成伤害**（作者指定）
-        if (this.traitsDisabled()) {
             return;
         }
+        if (this.traitsDisabled()) {
+            return;   // 首次回收后不再造成伤害
+        }
+        // 交给球那套完整逻辑（伤害 + 全部词条）
+        super.onHitEntity(hitResult);
 
+        // 锤头专属：额外击退（球没有这个参数）
         if (!(hitResult.getEntity() instanceof LivingEntity target)) {
             return;
         }
         if (!(this.level() instanceof ServerLevel level)) {
             return;
         }
-
-        // 伤害：SPIN 状态用基础伤害（速度不是飞行速度）；FLYING 状态照搬
-        // BallProjectile.impactDamage() 的「基础 × 击中速度 / 出手速度」。
-        BallBehavior.BallProfile profile = this.profile();
-        float dealt;
-        if (this.stage() == Stage.SPIN) {
-            dealt = profile.damage();
-        } else {
-            double base = this.launchSpeed > 1.0E-4D ? this.launchSpeed : profile.physicalVelocity();
-            dealt = base <= 1.0E-4D
-                    ? profile.damage()
-                    : (float) (profile.damage() * (this.getDeltaMovement().length() / base));
-        }
-
-        // ⚠️ 击退必须**自己施加**：原版 hurtServer 内部的击退方向由 DamageSource 决定、
-        //    还会补随机推力（见 BallProjectile.deliverToOwner 的注释）。
-        //    这里用普通攻击来源结算伤害，再手动 knockback —— SPIN 0.5 倍、FLYING 2 倍。
         double mult = this.stage() == Stage.SPIN ? 0.5D : 2.0D;
-
         Entity owner = this.getOwner();
         DamageSource source = owner instanceof LivingEntity living
-                ? (owner instanceof Player player ? this.damageSources().playerAttack(player)
+                ? (owner instanceof Player p ? this.damageSources().playerAttack(p)
                         : this.damageSources().mobAttack(living))
                 : this.damageSources().thrown(this, null);
-
-        boolean hurt = target.hurtServer(level, source, dealt);
-
-        // ⚠️ 26.2 的签名是 5 参：knockback(power, xd, zd, source, damage)
-        //    —— 传 source 与 damage 是让原版能算「抗性/护甲是否该减免击退」，
-        //    漏了它们就只能命中 3 参重载（不存在）。
-        if (hurt) {
-            Vec3 away = target.position().subtract(this.position());
-            double horizontal = Math.max(1.0E-4D, Math.sqrt(away.x * away.x + away.z * away.z));
-            target.knockback(BASE_KNOCKBACK * mult,
-                    -away.x / horizontal, -away.z / horizontal, source, dealt);
-        }
-
-        // ===== 词条结算（作者 2026-10-19：流星锤必须继承球的全部词条）=====
-        //
-        // 流星锤是**完整球**做的 ⇒ 词条按 100% 生效，不走 `FIRED_TRAITS` 掷骰。
-        // 每一条都对照 `BallProjectile.onHitEntity` 的写法，方法签名逐个核对过。
-        LivingEntity traitOwner = owner instanceof LivingEntity le2 ? le2 : null;
-        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info("[flail][词条] stage={} target={} molten={} magic={} money={} bees={} seal={} spike={}",
-                this.stage(), target.getName().getString(),
-                profile.hasMolten(),
-                profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC),
-                profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY),
-                profile.hasBees(),
-                profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL),
-                profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE));
-        boolean truePhysical = false;   // 锤头不是「真实物理伤害」，与球默认一致
-
-        // 【熔融】：目标身上有金属装备才挂灼伤
-        if (profile.hasMolten()) {
-            com.mcmodworkspace.moreballs.MoltenBurnEffect.applyMoltenBurn(
-                    level, target, traitOwner, BallBehavior.MOLTEN_BURN_TICKS);
-        }
-
-        // 【魔法】：随机给目标一个负面效果
-        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC)) {
-            com.mcmodworkspace.moreballs.BallMagic.applyToVictim(level, target);
-        }
-
-        // 【敛财】：往目标身上掉钱/物品
-        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY)) {
-            BallExtraTraits.applyMoney(target, traitOwner);
-        }
-
-        // 【招蜂引蝶】：召唤蜜蜂
-        if (profile.hasBees()) {
-            BallExtraTraits.summonBees(level, target, profile.beeCount(), owner, truePhysical);
-        }
-
-        // 【封印】
-        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL)) {
-            BallExtraTraits.seal(level, target, owner);
-        }
-
-        // 【尖刺】：从命中点朝四周射出骨刺
-        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
-            BallExtraTraits.shootSpikes(level, this.position(), this.getDeltaMovement(),
-                    owner, truePhysical);
-        }
+        Vec3 away = target.position().subtract(this.position());
+        double horizontal = Math.max(1.0E-4D, Math.sqrt(away.x * away.x + away.z * away.z));
+        target.knockback(0.4D * mult,
+                -away.x / horizontal, -away.z / horizontal, source, this.profile().damage());
     }
 
     @Override
+    /**
+     * 撞方块 —— <b>直接用球那一套</b>。
+     *
+     * <p>球的 `onHit` 覆盖了脉冲 / 点金 / 尖刺 / 破坏王 / 金光闪闪 / 弹射衰减 / 碎裂，
+     * 继承后全部自动生效。</p>
+     *
+     * <p>SPIN 与 RETURNING 阶段不结算方块碰撞（那两段位置由公式/玩家决定），
+     * 直接早退。</p>
+     */
+    // 同上：故意不写 @Override
     protected void onHit(HitResult hitResult) {
-        // ===== 方块命中类词条（作者 2026-10-19：打在地上也要有反应）=====
-        //
-        // ⚠️⚠️ 上一版这里**只有弹射衰减、零词条** —— 而球的词条里有一大批是
-        //       「撞到方块」触发的（脉冲 / 点金 / 尖刺 / 金光闪闪），
-        //       所以打地上什么都看不到。这批逻辑照搬 `BallProjectile.onHit`：
-        //         · 【脉冲】L2882  · 【点金】L2962  · 【尖刺】L2945  · 【金光闪闪】L2837
-        //
-        // 位置放在 `super.onHit` 之前 —— 与球的顺序一致（球也是在 bounceOff 之前结算）。
-        if (this.level() instanceof ServerLevel level) {
-            BallBehavior.BallProfile profile = this.profile();
-            boolean truePhysical = false;
-
-            // 【金光闪闪】：金球第一次碰撞后 5 秒内的猪灵诱饵窗口
-            if (BallBehavior.isGoldShiny(this.flailStack())) {
-                // 锤头没有 PiglinLure 那套窗口字段，这里只做「砸猪灵不结仇」已在 onHitEntity 覆盖；
-                // 诱饵窗口属于「球掉在地上被猪灵捡」的行为，锤头不落地拾取，故跳过。
-            }
-
-            // 【脉冲】：以命中点为球心半径 7 格，给穿金属护甲 / 高护甲生物挂震荡
-            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_PULSE)) {
-                com.mcmodworkspace.moreballs.RedstonePulse.detonate(level, hitResult.getLocation());
-            }
-
-            if (hitResult instanceof BlockHitResult blockHit) {
-                // 【尖刺】：撞到方块这一下也射一圈锥子（与「有没有砸掉方块」无关）
-                if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
-                    BallExtraTraits.shootSpikes(level, this.position(),
-                            this.getDeltaMovement(), this.getOwner(), truePhysical);
-                }
-
-                // 【点金】：把命中点附近的石头点成矿物
-                if (profile.transmuteChance() > BallBehavior.NOT_TRANSMUTE) {
-                    com.mcmodworkspace.moreballs.BallTransmute.transmute(level, blockHit);
-                }
-            }
+        if (this.stage() == Stage.SPIN || this.stage() == Stage.RETURNING) {
+            return;
         }
-
         super.onHit(hitResult);
-
-        // 撞方块：FLYING 状态按球的弹射衰减一次；SPIN 与 RETURNING 不结算
-        if (!(this.level() instanceof ServerLevel)) {
-            return;
-        }
-        if (this.stage() != Stage.FLYING) {
-            return;
-        }
-        // 弹性衰减：保留 (bounce × 10)% 的速度并翻折竖直分量
-        double retain = Math.min(1.0D, this.profile().bounce() / 10.0D);
-        if (retain <= 0.0D) {
-            this.setDeltaMovement(Vec3.ZERO);
-            return;
-        }
-        Vec3 vel = this.getDeltaMovement();
-        this.setDeltaMovement(vel.x * retain, -vel.y * retain, vel.z * retain);
     }
 
     // ===== 工具 =====

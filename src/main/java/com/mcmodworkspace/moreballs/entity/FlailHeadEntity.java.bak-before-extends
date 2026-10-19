@@ -1,0 +1,1044 @@
+package com.mcmodworkspace.moreballs.entity;
+
+import com.mcmodworkspace.moreballs.BallBehavior;
+import com.mcmodworkspace.moreballs.BallClusterTier;
+import com.mcmodworkspace.moreballs.BallExtraTraits;
+import com.mcmodworkspace.moreballs.FlailItem;
+import com.mcmodworkspace.moreballs.ModComponents;
+import com.mcmodworkspace.moreballs.ModItems;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrowableItemProjectile;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+
+/**
+ * <b>流星锤的锤头</b>（作者 2026-10-19 规格）。
+ *
+ * <h2>为什么不继承 {@link BallProjectile}（作者反复强调）</h2>
+ * <p>锤头与球「伤害逻辑与特性逻辑相同」，但<b>是两种不同的实体</b>：</p>
+ * <ul>
+ *   <li>球可以被捡起、可以被怪接住；<b>锤头不行</b></li>
+ *   <li>锤头的生命周期绑在掷出者与那条线上，<b>不能单独存在</b></li>
+ * </ul>
+ * <p>继承会把这些行为一起带过来。所以这里是独立类，只<b>复制</b>「伤害公式 / 耐久扣除 /
+ * 词条判定顺序」三段逻辑（见 {@code docs/流星锤-通读记录.md} 的行号对照）。</p>
+ *
+ * <h2>状态机</h2>
+ * <pre>
+ * SPIN（手持蓄力，绕玩家转）──松手──> FLYING ──线 30 格 / 手动回收──> RETURNING ──到达──> 收回
+ * </pre>
+ *
+ * <p>⚠️ <b>SPIN 状态的锤头位置不由物理驱动</b>，每 tick 按公式算出来再 {@code setPos}；
+ * 它没有速度，所以 {@code impactDamage()} 那套「按速度缩放」在 SPIN 下不适用，
+ * 直接用基础伤害（作者的「依照基础伤害造成伤害」）。</p>
+ */
+public class FlailHeadEntity extends ThrowableItemProjectile {
+
+    /** 当前阶段 */
+    public enum Stage {
+        /** 手持蓄力，绕掷出者做圆周运动 */
+        SPIN,
+        /** 已脱手，按球的物理飞行 */
+        FLYING,
+        /** 被回收中，朝掷出者飞回 */
+        RETURNING
+    }
+
+    private static final EntityDataAccessor<Byte> STAGE =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.BYTE);
+    /** 当前线长（格 × 100 存成 int，避免浮点同步精度问题） */
+    private static final EntityDataAccessor<Integer> LINE_LENGTH =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.INT);
+    /** 首次回收后置 true —— 除弹性与重量外所有词条停效、且不再造成伤害 */
+    private static final EntityDataAccessor<Boolean> TRAITS_DISABLED =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.BOOLEAN);
+    /** 回收时玩家是否按着右键 —— 松开就停（作者 2026-10-19 指定） */
+    private static final EntityDataAccessor<Boolean> RETRIEVING =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.BOOLEAN);
+    /** 线另一端（掷出者主手）的世界坐标 —— 渲染拴绳用 */
+    private static final EntityDataAccessor<Float> ANCHOR_X =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> ANCHOR_Y =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> ANCHOR_Z =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
+
+    /** 线长上限（格），作者指定 30 */
+    public static final double MAX_LINE = FlailItem.MAX_LINE_LENGTH;
+
+    /** 环绕半径 / 高度，作者指定 1.5 / 1.75 */
+    public static final double SPIN_RADIUS = FlailItem.SPIN_RADIUS;
+    public static final double SPIN_HEIGHT = FlailItem.SPIN_HEIGHT;
+
+    /** 环绕角速度：2π / 20 刻 */
+    private static final float SPIN_STEP = (float) (Math.PI * 2.0D / FlailItem.SPIN_PERIOD_TICKS);
+
+    /** 出手宽限期（照搬 BallProjectile.SPAWN_GRACE_TICKS） */
+    private static final int SPAWN_GRACE_TICKS = 2;
+
+    /** 回收格每秒 → 格每刻的换算 */
+    private static final double TICKS_PER_SECOND = 20.0D;
+
+    /** 原版默认击退强度 —— 作者要的 0.5 倍 / 2 倍都基于它 */
+    private static final double BASE_KNOCKBACK = 0.4D;
+    /** 回收遇阻时的反弹衰减 */
+    private static final double RECOVER_BOUNCE = 0.55D;
+    /** 离玩家多近算到家 */
+    /**
+     * 离主手多近算「到家」。
+     *
+     * <p>⚠️ 原来写的 1.6 —— 作者 2026-10-19 报「回收时瞬间就完成了」。
+     * 原因很直接：按住右键那一刻锤头还在**环绕**（离主手 1.5 格半径），
+     * 距离本来就小于 1.6 ⇒ 第一个 tick 就判到家 ⇒ 立刻 {@code finishReturn}。
+     * 改成 0.7，必须真的被拉到手上才算。</p>
+     */
+    private static final double ARRIVE_DISTANCE = 0.7D;
+
+    /**
+     * 锤头最长寿命（刻）= 5 分钟。
+     *
+     * <p>作者 2026-10-19：存档里有个锤头扔出去再也没回来，导致手里每把流星锤都
+     * 被判成「已扔出」，一直只显示一根绳、新的流星锤也立刻变纯线。
+     * 超过这个寿命的锤头视为孤儿，自己把物品还回去并从世界移除。</p>
+     */
+    public static final int MAX_HEAD_LIFE = 6000;
+    /** 到线长上限时给的回弹速度 */
+    private static final double SNAP_BACK_SPEED = 0.35D;
+
+    /** 环绕角度（弧度） */
+    private float spinAngle;
+
+    /** 掷出时占用的背包格 —— 回收必回这一格（作者指定） */
+    private int originSlot = -1;
+
+    /** 记下的出手速度，供「按速度缩放伤害」用（照搬 BallProjectile.launchSpeed） */
+    private double launchSpeed;
+    /** 本次 FLYING 是否已为「到线长上限」扣过耐久（避免每 tick 反复扣） */
+    private boolean lineCapConsumed;
+
+    public FlailHeadEntity(EntityType<? extends FlailHeadEntity> type, Level level) {
+        super(type, level);
+        this.setNoGravity(true);   // SPIN 阶段不受重力；FLYING 时再放开
+    }
+
+    // ===== 同步与存档 =====
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(STAGE, (byte) Stage.SPIN.ordinal());
+        builder.define(LINE_LENGTH, 0);
+        builder.define(TRAITS_DISABLED, false);
+        builder.define(RETRIEVING, false);
+        builder.define(ANCHOR_X, 0.0F);
+        builder.define(ANCHOR_Y, 0.0F);
+        builder.define(ANCHOR_Z, 0.0F);
+    }
+
+    @Override
+    protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
+        output.putByte("FlailStage", (byte) stage().ordinal());
+        output.putInt("FlailLine", this.getEntityData().get(LINE_LENGTH));
+        output.putBoolean("FlailTraitsOff", this.getEntityData().get(TRAITS_DISABLED));
+        output.putInt("FlailOriginSlot", this.originSlot);
+        output.putDouble("FlailLaunchSpeed", this.launchSpeed);
+    }
+
+    @Override
+    protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
+        this.getEntityData().set(STAGE, input.getByteOr("FlailStage", (byte) 0));
+        this.getEntityData().set(LINE_LENGTH, input.getIntOr("FlailLine", 0));
+        this.getEntityData().set(TRAITS_DISABLED, input.getBooleanOr("FlailTraitsOff", false));
+        this.originSlot = input.getIntOr("FlailOriginSlot", -1);
+        this.launchSpeed = input.getDoubleOr("FlailLaunchSpeed", 0.0D);
+    }
+
+    public Stage stage() {
+        return Stage.values()[this.getEntityData().get(STAGE)];
+    }
+
+    public void setStage(Stage value) {
+        this.getEntityData().set(STAGE, (byte) value.ordinal());
+    }
+
+    public double lineLength() {
+        return this.getEntityData().get(LINE_LENGTH) / 100.0D;
+    }
+
+    private void setLineLength(double value) {
+        this.getEntityData().set(LINE_LENGTH, (int) Math.round(value * 100.0D));
+    }
+
+    public boolean traitsDisabled() {
+        return this.getEntityData().get(TRAITS_DISABLED);
+    }
+
+    /** 回收开关 —— 玩家按住右键 true、松开 false（作者 2026-10-19：按住才回收） */
+    public void setRetrieving(boolean value) {
+        this.getEntityData().set(RETRIEVING, value);
+    }
+
+    public boolean isRetrieving() {
+        return this.getEntityData().get(RETRIEVING);
+    }
+
+    /** 线另一端坐标（渲染拴绳用） */
+    public Vec3 anchor() {
+        return new Vec3(this.getEntityData().get(ANCHOR_X),
+                this.getEntityData().get(ANCHOR_Y),
+                this.getEntityData().get(ANCHOR_Z));
+    }
+
+    private void storeAnchor(Vec3 v) {
+        this.getEntityData().set(ANCHOR_X, (float) v.x);
+        this.getEntityData().set(ANCHOR_Y, (float) v.y);
+        this.getEntityData().set(ANCHOR_Z, (float) v.z);
+    }
+
+    /** 掷出者主手坐标 —— 拴绳起点 */
+    public static Vec3 handAnchor(net.minecraft.world.entity.LivingEntity owner) {
+        Vec3 look = owner.getLookAngle();
+        Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+        if (flat.lengthSqr() < 1.0E-6D) { flat = new Vec3(0.0D, 0.0D, 1.0D); }
+        flat = flat.normalize();
+        Vec3 right = new Vec3(-flat.z, 0.0D, flat.x);
+        return owner.position().add(right.scale(0.35D)).add(0.0D, owner.getBbHeight() * 0.75D, 0.0D);
+    }
+
+    public void setOriginSlot(int slot) {
+        this.originSlot = slot;
+    }
+
+    public int originSlot() {
+        return this.originSlot;
+    }
+
+    /** 这把流星锤的物品栈（含内嵌球与耐久组件） */
+    public ItemStack flailStack() {
+        return this.getItem();
+    }
+
+    public BallBehavior.BallProfile profile() {
+        ItemStack flail = this.flailStack();
+        return FlailItem.profileOf(flail);
+    }
+
+    // ===== 拾取与碰撞：作者要求锤头绝不能被捡 / 被怪接 =====
+
+    /**
+     * 永远不可被「拾取」—— 原版中键复制、漏斗、以及本模组的接球都看这个。
+     *
+     * <p>⚠️ 这一条加上 {@code canBeCollidedWith()} 返回 false，配合「它本来就不是
+     * {@code ItemEntity}、也不是 {@code BallProjectile}」，四层一起保证
+     * 「锤头不能被捡、不能被怪接」——见通读记录里的类型隔离结论。</p>
+     */
+    @Override
+    public boolean isPickable() {
+        return false;
+    }
+
+    @Override
+    public boolean canBeCollidedWith(@org.jspecify.annotations.Nullable Entity other) {
+        return false;
+    }
+
+    /** 球一律不显示名字标签（与 {@code BallProjectile} 同一口径）；锤头同理 */
+    @Override
+    public boolean shouldShowName() {
+        return false;
+    }
+
+    @Override
+    protected Item getDefaultItem() {
+        return ModItems.FLAIL.get();
+    }
+
+    // ===== 主循环 =====
+
+    @Override
+    public void tick() {
+        super.tick();
+
+        // ⚠️ **锤头绝不能单独存在**（作者强调）：主人没了 / 下线了 / 死了 ⇒ 立刻收场，
+        //    并把流星锤还回背包，绝不留一个孤儿锤头在世界里。
+        if (!this.level().isClientSide() && !ownerAlive()) {
+            returnFlailAndDiscard();
+            return;
+        }
+
+        if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity livingA) {
+            this.storeAnchor(handAnchor(livingA));
+        }
+
+        // 超时兜底：孤儿锤头自我回收，避免永久占着「已扔出」这个状态
+        if (!this.level().isClientSide() && this.tickCount > MAX_HEAD_LIFE) {
+            returnFlailAndDiscard();
+            return;
+        }
+
+        // ===== tick 侧词条（作者 2026-10-19：全部搬过来）=====
+        //
+        // 球的词条按触发时机分三批：撞方块 / 打生物 / 每刻持续。
+        // 前两批已经搬过，这里是第三批 —— 只搬签名不依赖 BallProjectile 的那几条。
+        //
+        // ⚠️ 搬不了的（签名强制要 BallProjectile）：
+        //   【引雷】BallThunder.release(level, ball, pierce)
+        //   【导电】BallConduction 整个类都收 BallProjectile
+        //   【尖啸】BallExtraTraits.shriek(ball, ...) / steerWisdom
+        //   【智慧】挂在尖啸的轨迹修正器上，同理
+        //   【潮涌】tickTidalSurge 读写球的浸水/浮力状态
+        //   【变形】命中后把球换成方块并 discard —— 锤头换了就回收不回来，故不做
+        if (this.level() instanceof ServerLevel traitLevel) {
+            BallBehavior.BallProfile profile = this.profile();
+
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE)) {
+                com.mcmodworkspace.moreballs.BallIlluminate.tick(traitLevel, this.position());
+            }
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_LENS)) {
+                com.mcmodworkspace.moreballs.BallLens.tick(traitLevel, this.position());
+            }
+            this.flailMagnetTick(traitLevel, profile);
+        }
+
+        switch (this.stage()) {
+            case SPIN -> tickSpin();
+            case FLYING -> tickFlying();
+            case RETURNING -> tickReturning();
+        }
+    }
+
+    /**
+     * 【磁吸】—— 照搬 BallProjectile.magnetTick。
+     *
+     * 把半径 profile.magnetRadius() 内的金属掉落物 / 生物朝锤头拽。
+     * 生物那一路按金属装备数加权（(件数+1)/2，浮点除法），并排除掷出者本人。
+     */
+    private void flailMagnetTick(ServerLevel level, BallBehavior.BallProfile profile) {
+        if (!profile.hasMagnet()) {
+            return;
+        }
+        double speed = this.getDeltaMovement().length();
+        if (speed < 1.0E-3D) {
+            return;
+        }
+        Vec3 self = this.position();
+        double pull = speed * com.mcmodworkspace.moreballs.BallProspecting.MAGNET_SPEED_RATIO;
+        double radius = profile.magnetRadius();
+
+        for (net.minecraft.world.entity.item.ItemEntity item : level.getEntitiesOfClass(
+                net.minecraft.world.entity.item.ItemEntity.class,
+                this.getBoundingBox().inflate(radius),
+                it -> it.isAlive()
+                        && com.mcmodworkspace.moreballs.BallProspecting.isMetalEquipment(it.getItem()))) {
+            Vec3 toSelf = self.subtract(item.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            item.setDeltaMovement(toSelf.normalize().scale(pull));
+        }
+
+        for (LivingEntity living : level.getEntitiesOfClass(LivingEntity.class,
+                this.getBoundingBox().inflate(radius),
+                le -> le.isAlive() && le != this.getOwner())) {
+            Vec3 toSelf = self.subtract(living.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            double factor = (com.mcmodworkspace.moreballs.BallProspecting.countMetalEquipment(living) + 1) / 2.0D;
+            living.setDeltaMovement(toSelf.normalize().scale(pull * factor));
+        }
+    }
+
+    private boolean ownerAlive() {
+        Entity owner = this.getOwner();
+        return owner instanceof LivingEntity living && living.isAlive() && !living.isRemoved();
+    }
+
+    /** SPIN：位置完全由公式算出来，不用物理 */
+    private void tickSpin() {
+        Entity owner = this.getOwner();
+        if (!(owner instanceof LivingEntity living)) {
+            return;
+        }
+        // 作者 2026-10-19：「旋转方向反过来」⇒ 从 +（逆时针）改成 -（顺时针）
+        this.spinAngle -= SPIN_STEP;
+        if (this.spinAngle < -(float) (Math.PI * 2.0D)) {
+            this.spinAngle += (float) (Math.PI * 2.0D);
+        }
+
+        Vec3 pos = spinPosition(living, this.spinAngle);
+        this.setPos(pos.x, pos.y, pos.z);
+        this.setDeltaMovement(Vec3.ZERO);
+        this.setLineLength(distanceToOwner(living));
+
+        this.getEntityData().set(LINE_LENGTH, (int) Math.round(this.lineLength() * 100.0D));
+    }
+
+    /**
+     * 环绕位置 —— <b>紧贴碰撞箱右侧、平行于矢状面</b>（作者 2026-10-19 明确）。
+     *
+     * <p>矢状面由「前后轴 + 上下轴」张成，法线是玩家的<b>右向量</b>。
+     * 所以圆周落在这个竖直面内：</p>
+     * <pre>
+     * 圆心 = 玩家位置 + 右向量 × 0.35（碰撞箱半宽），高度 = 脚下 + 1.75
+     * 锤头 = 圆心 + 前向量 × R·cos(θ) + 上向量 × R·sin(θ)
+     * </pre>
+     * <p>⚠️ 必须用 {@code getLookAngle()} 取前向 —— 用世界坐标轴的话玩家转身时圆不跟着转。</p>
+     */
+    private Vec3 spinPosition(LivingEntity owner, float angle) {
+        Vec3 look = owner.getLookAngle();
+        Vec3 flatLook = new Vec3(look.x, 0.0D, look.z);
+        if (flatLook.lengthSqr() < 1.0E-6) {
+            flatLook = new Vec3(0.0D, 0.0D, 1.0D);
+        }
+        flatLook = flatLook.normalize();
+        Vec3 right = new Vec3(-flatLook.z, 0.0D, flatLook.x);   // 前向 × UP
+        Vec3 up = new Vec3(0.0D, 1.0D, 0.0D);
+
+        Vec3 center = owner.position()
+                .add(right.scale(owner.getBbWidth() * 0.5D))
+                .add(0.0D, SPIN_HEIGHT, 0.0D);
+
+        return center
+                .add(flatLook.scale(SPIN_RADIUS * Math.cos(angle)))
+                .add(up.scale(SPIN_RADIUS * Math.sin(angle)));
+    }
+
+    /**
+     * 把一个点从方块内部抬出来 —— 修「锤头卡进地里无法回收」（作者 2026-10-19 报）。
+     *
+     * <p>只在服务端做（客户端靠同步）。命中方块就往上找最多 4 格，找到空位为止。</p>
+     */
+    private Vec3 liftOutOfBlocks(Vec3 pos) {
+        if (this.level().isClientSide()) {
+            return pos;
+        }
+        net.minecraft.core.BlockPos base = net.minecraft.core.BlockPos.containing(pos);
+        if (this.level().getBlockState(base).getCollisionShape(this.level(), base).isEmpty()) {
+            return pos;
+        }
+        for (int dy = 1; dy <= 4; dy++) {
+            net.minecraft.core.BlockPos up = base.above(dy);
+            if (this.level().getBlockState(up).getCollisionShape(this.level(), up).isEmpty()) {
+                return new Vec3(pos.x, up.getY() + 0.05D, pos.z);
+            }
+        }
+        return pos;
+    }
+    /** 松手：以球的物理飞出（作者：与球逻辑相同的运动方式） */
+    /**
+     * 松手：<b>无论锤头此刻在圆周的哪个位置，先瞬移到「最高点」，再按准心方向飞出</b>
+     * （作者 2026-10-19 指定）。
+     *
+     * <p>「最高点」= 圆心 + UP × 半径，也就是圆周的正上方 —— 出手位置固定，
+     * 玩家不用赌松手时机。</p>
+     *
+     * @param velocityMultiplier 蓄力倍率（来自 {@code BallCharge.velocityMultiplier}）
+     */
+    public void launch(net.minecraft.world.entity.LivingEntity shooter, float velocityMultiplier) {
+        this.setStage(Stage.FLYING);
+        this.setNoGravity(false);
+
+        // ① 瞬移到蓄力旋转的最高点
+        Vec3 top = spinTop(shooter);
+        this.setPos(top.x, top.y, top.z);
+
+        // ② 按球的物理飞出：物理速度 × 蓄力倍率
+        BallBehavior.BallProfile profile = this.profile();
+        float speed = (float) (profile.physicalVelocity() * Math.max(0.1F, velocityMultiplier));
+        this.launchSpeed = speed;
+
+        Vec3 dir = shooter.getLookAngle();
+        if (dir.lengthSqr() < 1.0E-6D) {
+            dir = new Vec3(0.0D, 0.0D, 1.0D);
+        }
+        this.setDeltaMovement(dir.normalize().scale(speed));
+        this.hurtMarked = true;
+    }
+
+    /**
+     * 蓄力圆周的最高点 = 圆心 + UP × 半径。
+     *
+     * <p>圆心与 {@link #spinPosition} 同一套：碰撞箱右侧平面、离地 {@code SPIN_HEIGHT}。</p>
+     */
+    public Vec3 spinTop(net.minecraft.world.entity.LivingEntity owner) {
+        Vec3 look = owner.getLookAngle();
+        Vec3 flatLook = new Vec3(look.x, 0.0D, look.z);
+        if (flatLook.lengthSqr() < 1.0E-6D) {
+            flatLook = new Vec3(0.0D, 0.0D, 1.0D);
+        }
+        flatLook = flatLook.normalize();
+        Vec3 right = new Vec3(-flatLook.z, 0.0D, flatLook.x);
+        return owner.position()
+                .add(right.scale(owner.getBbWidth() * 0.5D))
+                .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
+    }
+
+    private void tickFlying() {
+        this.setLineLength(distanceToOwner());
+
+        // 到线长上限：扣 1 点耐久 + 速度归零 + 给一个朝掷出者的小速度（作者指定）
+        if (this.lineLength() >= MAX_LINE) {
+            this.setDeltaMovement(Vec3.ZERO);
+            Vec3 toOwner = ownerEye().subtract(this.position());
+            if (toOwner.lengthSqr() > 1.0E-6) {
+                this.setDeltaMovement(toOwner.normalize().scale(0.3D));
+            }
+            consumeOneToughness("到达线长上限");
+        }
+    }
+
+    /** 开始回收：扣 1 点耐久，并让词条从此失效（作者指定） */
+    public void beginReturning(LivingEntity owner) {
+        if (this.stage() == Stage.RETURNING) {
+            return;
+        }
+        this.setStage(Stage.RETURNING);
+        this.setNoGravity(false);   // 回收时**受重力影响**（作者指定）
+        this.getEntityData().set(TRAITS_DISABLED, true);
+        this.setDeltaMovement(Vec3.ZERO);
+        this.consumeOneToughness("开始回收");
+    }
+
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <p>作者 2026-10-19：「按住右键时回收，松开会停止，直接照着掷出者移动」。</p>
+     *
+     * <p>⚠️ 速度<b>完全覆盖</b>，不保留原有竖直分量 —— 上一版写的是
+     * {@code current.y + pull.y * 0.35}，锤头带着上冲速度一路飞上天。</p>
+     */
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <p>作者 2026-10-19 二次修订：「回收的时候不要被地形卡住」，
+     * 尤其锤头低于玩家时它会被地面挡住、一直弹开扣耐久。</p>
+     *
+     * <h2>做法：回收期间**不走物理、不做碰撞检测**</h2>
+     * <p>原先是每 tick 射线检测 + 沿法线弹开。问题在于锤头一旦掉进沟里或低于主手，
+     * 它朝上的路径**必被地面挡住**，于是永远在弹、永远回不来，还白扣耐久。</p>
+     *
+     * `setPos(当前位置 + 朝主手的单位向量 × 每刻距离)` 算出 ——
+     * 像一根绳子把它拽回来，地形不参与。这是作者要的「保持不动来收回锤头」：
+     * 玩家自己不动，锤头直线回来。</p>
+     */
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <h2>作者 2026-10-19 的最终要求</h2>
+     * <ul>
+     *   <li><b>回收走物理</b> —— 不能穿墙、不能直接 setPos 落位</li>
+     *   <li><b>绳子有物理体积，但只对方块生效、不影响生物</b> ——
+     *       碰撞箱缩到 0.2（绳子粗细），且 {@code isPickable} / {@code canBeCollidedWith}
+     *       全返回 false，生物碰不到它</li>
+     *   <li><b>不被地形卡住</b> —— 碰方块时<b>沿面滑动</b>（减掉法线分量），不是弹开</li>
+     * </ul>
+     *
+     * <h2>为什么必须滑动而不是弹开</h2>
+     * <p>锤头低于玩家时，它朝主手的路径<b>必被地面挡住</b>。原先撞到就沿法线反弹 + 扣耐久，
+     * 于是它在地上反复弹、永远回不来，还白扣耐久 —— 这就是作者报的
+     * 「非常频繁地卡在地上」。改成减掉法线分量后，它贴着地面滑回来。</p>
+     */
+    private void tickReturning() {
+        if (!(this.getOwner() instanceof net.minecraft.world.entity.LivingEntity living)) {
+            return;
+        }
+        Vec3 target = handAnchor(living);
+        double distance = target.distanceTo(this.position());
+        if (distance < ARRIVE_DISTANCE) {
+            this.finishReturn(living);
+            return;
+        }
+        this.setLineLength(distance);
+
+        if (!this.isRetrieving()) {
+            // 松开右键：原地落下（不再被拉）
+            this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
+            return;
+        }
+
+        // ===== 回收：**完全不受地形限制**（作者 2026-10-19 第三次修订）=====
+        //
+        // 作者原话：「我要的回收是具有物理碰撞、并且**完全不受地形限制**的回收。」
+        //
+        // 这两件事并不矛盾：
+        //   · 「有物理碰撞」= 投掷飞行阶段照常吃方块碰撞、能打生物、能被打 —— 没变；
+        //   · 「不受地形限制」= **回收阶段**的路径不再做任何方块检测。
+        //
+        // 我前两版都错在同一个地方：一直在回收路径上做 `level().clip(...)`（先是撞到就弹开，
+        // 后来改成沿面滑动），但锤头低于玩家时朝主手的路径**必被地面挡住**，
+        // 只要检测还在，它就一定上不来。
+        //
+        // 碰撞体积本身还在（`isPickable` / `canBeCollidedWith` 仍是 false，生物碰不到），
+        // 只是这条「绳子拉回」的路径不再受方块阻挡。
+        double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+        perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
+
+        Vec3 dir = target.subtract(this.position()).normalize();
+        Vec3 next = this.position().add(dir.scale(perTick));
+        this.setPos(next.x, next.y, next.z);
+        this.setDeltaMovement(Vec3.ZERO);
+        this.hurtMarked = true;
+    }
+    private void finishReturn(LivingEntity owner) {
+        if (this.level().isClientSide()) {
+            this.discard();
+            return;
+        }
+        returnFlailToOwner(owner);
+
+        // ===== 收尾标记（作者 2026-10-19）=====
+        //
+        // ⚠️ 两件事必须一起做，漏一个就会出问题：
+        //   · markRetrieving(false) —— 不清的话 `getUseAnimation` 永远返回 NONE
+        //     （回收后再蓄力看不到拉弓动作），HUD 也永远判成「回收中」而不显示蓄力文字
+        //   · markRecovered(true)   —— 玩家必须松开右键才能再蓄力
+        //
+        // 注意这里取的是**主手**：回收完成时物品还在原格（扔出时它就没离开过），
+        // 所以主手那把就是被回收的这把。
+        if (owner instanceof Player p) {
+            for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
+                ItemStack h = p.getItemInHand(hand);
+                if (FlailItem.isFlail(h)) {
+                    FlailItem.markRetrieving(h, false);
+                    FlailItem.markRecovered(h, true);
+                    // ⚠️ 还要主动清 `FLAIL_CASTING`（作者 2026-10-19 报「第二次扔出绳子」）。
+                    //    那个标记本该由 `FlailCastHandler` 下一 tick 按 findHead 同步，
+                    //    但这一 tick 内它还残留 true ⇒ 贴图仍是纯线形态 ⇒ 看起来"又扔出一根绳"。
+                    FlailItem.setCasting(h, false);
+                }
+            }
+        }
+        this.discard();
+    }
+
+    /** 归还流星锤：**先试原本那一格**，被占就找最近空格，全满掉脚下（作者指定） */
+    private void returnFlailToOwner(LivingEntity owner) {
+        ItemStack flail = this.flailStack().copy();
+        if (flail.isEmpty()) {
+            return;
+        }
+        if (owner instanceof Player player) {
+            var inventory = player.getInventory();
+            int slot = this.originSlot;
+
+            // ⚠️⚠️ **物品从来没有离开过手**（作者 2026-10-19 报「回收后多一把流星锤」）。
+            //
+            //   扔出时只把 `FLAIL_CASTING` 置 true 让贴图变成纯线形态，**主手这一格
+            //   始终是那把流星锤**。所以回收时如果照旧 `inventory.add(flail)`，
+            //   就等于凭空再造一把 —— 表现就是「回收后多出一个新的流星锤」。
+            //
+            //   正确顺序：原格还是流星锤 ⇒ 什么都不做；原格空 ⇒ 放回；
+            //   原格被别的占了但手里另有一把流星锤 ⇒ 也不动（手上那把就是它）；
+            //   都没有才找空格 / 掉落。
+            if (slot >= 0 && slot < inventory.getContainerSize()) {
+                ItemStack cur = inventory.getItem(slot);
+                if (FlailItem.isFlail(cur)) {
+                    return;                       // ← 关键：不 add
+                }
+                if (cur.isEmpty()) {
+                    inventory.setItem(slot, flail);
+                    return;
+                }
+            }
+            if (FlailItem.isFlail(player.getMainHandItem())) {
+                return;                           // 手里那把就是它
+            }
+            if (inventory.add(flail)) {
+                return;
+            }
+            player.drop(flail, false);
+            return;
+        }
+        // 非玩家掷出者（目前不会有，留作扩展）
+        if (!owner.getSlot(0).set(flail)) {
+            this.spawnAtLocation((ServerLevel) this.level(), flail, 0.1F);
+        }
+    }
+
+    /** 主人没了：把流星锤还回背包后再消失，绝不留孤儿锤头 */
+    /**
+     * 公开版「把这把锤还回去并消失」—— 登录清理用。
+     *
+     * <p>与内部 {@code returnFlailAndDiscard} 的区别：这个方法先判定阶段，
+     * 只有非 SPIN（真的扔出去了、或卡住了）才收，避免把正在蓄力的锤头误删。</p>
+     */
+    public void retireToOwner() {
+        if (!this.level().isClientSide()) {
+            if (this.stage() == Stage.SPIN) {
+                this.discard();   // 蓄力中的直接丢（物品还在手上，不需要归还）
+            } else {
+                this.returnFlailAndDiscard();
+            }
+        }
+    }
+
+    private void returnFlailAndDiscard() {
+        Entity owner = this.getOwner();
+        if (owner instanceof LivingEntity living) {
+            returnFlailToOwner(living);
+        } else {
+            ItemStack flail = this.flailStack().copy();
+            if (!flail.isEmpty() && this.level() instanceof ServerLevel level) {
+                this.spawnAtLocation(level, flail, 0.1F);
+            }
+        }
+        this.discard();
+    }
+
+    // ===== 耐久（写回物品栈，不走实体字段）=====
+
+    /**
+     * 扣 1 点耐久 —— <b>写回 {@code TOUGHNESS_LEFT} 组件</b>，不走实体字段。
+     *
+     * <p>⚠️ 这是流星锤与球最大的实现差异：球的耐久活在实体上（回收时由
+     * {@code BallItem.applyToughness} 写回），而流星锤在飞行途中就要能扣，
+     * 所以直接改物品栈的组件。</p>
+     */
+    public void consumeOneToughness(String cause) {
+        if (this.level().isClientSide()) {
+            return;
+        }
+        ItemStack carried = this.flailStack();
+        if (carried.isEmpty()) {
+            return;
+        }
+        BallBehavior.BallProfile profile = this.profile();
+        int max = profile.toughness();
+        if (max == BallBehavior.TOUGH_FOREVER || max <= BallBehavior.NOT_TOUGH) {
+            return;   // 永久坚固 / 不坚固 ⇒ 没有耐久可扣
+        }
+
+        // ⚠️⚠️ **耐久必须写在玩家物品栏那一把上**（作者 2026-10-19：「耐久是根本不扣」）。
+        //
+        //   原来的写法是 `this.setItem(after)` —— 那只改**锤头实体自己**复制的那份物品栈，
+        //   而锤头 discard 之后它就不存在了，玩家手上那一把从头到尾没人碰过 ⇒ 耐久永远不变。
+        //
+        //   现在直接定位到玩家的物品栏格子（优先 originSlot、其次主手、再次副手），
+        //   在**那一份**上写 TOUGHNESS_LEFT，并同步锤头内部那份做缓存。
+        ItemStack live = findLiveFlail();
+        if (live.isEmpty()) {
+            return;
+        }
+        Integer leftComp = live.get(ModComponents.TOUGHNESS_LEFT.get());
+        int remaining = (leftComp == null ? max : leftComp) - 1;
+        if (remaining <= 0) {
+            this.shatter();
+            return;
+        }
+        live.set(ModComponents.TOUGHNESS_LEFT.get(), remaining);
+        // 锤头内部那份同步一下（tooltip / 渲染读到的是它）
+        ItemStack mirror = FlailItem.worldForm(live);   // 锤头那份不带 CASTING，否则世界里只剩绳
+        this.setItem(mirror);
+    }
+
+    /**
+     * 找到玩家物品栏里**真正的那把**流星锤。
+     *
+     * <p>顺序：{@code originSlot} → 主手 → 副手 → 背包里第一个流星锤。</p>
+     */
+    private ItemStack findLiveFlail() {
+        if (!(this.getOwner() instanceof Player player)) {
+            return ItemStack.EMPTY;
+        }
+        var inv = player.getInventory();
+        if (this.originSlot >= 0 && this.originSlot < inv.getContainerSize()) {
+            ItemStack s = inv.getItem(this.originSlot);
+            if (FlailItem.isFlail(s)) {
+                return s;
+            }
+        }
+        ItemStack main = player.getMainHandItem();
+        if (FlailItem.isFlail(main)) {
+            return main;
+        }
+        ItemStack off = player.getOffhandItem();
+        if (FlailItem.isFlail(off)) {
+            return off;
+        }
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (FlailItem.isFlail(s)) {
+                return s;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /**
+     * 破碎：<b>在掷出者脚下掉一根线</b>（作者指定），然后消失。
+     *
+     * <p>⚠️ 刻意<b>不吃【变形】</b>：{@code BallProjectile.burst()} 对【变形】是
+     * 「不变碎裂、原地变方块并 return」，照搬会导致「变形了但没掉线」，
+     * 与作者给的破碎产物冲突。理由见通读记录。</p>
+     */
+    private void shatter() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            this.discard();
+            return;
+        }
+        Entity owner = this.getOwner();
+        Vec3 dropAt = owner != null ? owner.position() : this.position();
+
+        BallBehavior.BallSound sound = this.profile().sound();
+        level.playSound(null, dropAt.x, dropAt.y, dropAt.z,
+                sound.resolveBreakSound(), net.minecraft.sounds.SoundSource.NEUTRAL, 0.8F * sound.volume(), 1.2F);
+
+        net.minecraft.world.entity.item.ItemEntity string =
+                new net.minecraft.world.entity.item.ItemEntity(level, dropAt.x, dropAt.y + 0.2D, dropAt.z,
+                        new ItemStack(net.minecraft.world.item.Items.STRING, 1));
+        level.addFreshEntity(string);
+
+        this.level().broadcastEntityEvent(this, (byte) 3);
+        this.discard();
+    }
+
+    // ===== 命中 =====
+
+    @Override
+    protected void onHitEntity(EntityHitResult hitResult) {
+        // ===== 临时侦测（作者 2026-10-19）：确认命中段到底走到哪一步 =====
+        if (!this.level().isClientSide()) {
+            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                    "[flail][命中] 进入 tick={} stage={} target={} side={}",
+                    this.tickCount, this.stage(),
+                    hitResult.getEntity().getName().getString(), this.level().isClientSide());
+        }
+        super.onHitEntity(hitResult);
+
+        if (this.level().isClientSide()) {
+            return;
+        }
+        if (this.getOwner() == hitResult.getEntity()) {
+            return;   // 不打主人
+        }
+        if (this.tickCount < SPAWN_GRACE_TICKS) {
+            return;   // 出手宽限期（照搬 BallProjectile）
+        }
+
+        // 首次回收之后：**不再造成伤害**（作者指定）
+        if (this.traitsDisabled()) {
+            return;
+        }
+
+        if (!(hitResult.getEntity() instanceof LivingEntity target)) {
+            return;
+        }
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+
+        // 伤害：SPIN 状态用基础伤害（速度不是飞行速度）；FLYING 状态照搬
+        // BallProjectile.impactDamage() 的「基础 × 击中速度 / 出手速度」。
+        BallBehavior.BallProfile profile = this.profile();
+        float dealt;
+        if (this.stage() == Stage.SPIN) {
+            dealt = profile.damage();
+        } else {
+            double base = this.launchSpeed > 1.0E-4D ? this.launchSpeed : profile.physicalVelocity();
+            dealt = base <= 1.0E-4D
+                    ? profile.damage()
+                    : (float) (profile.damage() * (this.getDeltaMovement().length() / base));
+        }
+
+        // ⚠️ 击退必须**自己施加**：原版 hurtServer 内部的击退方向由 DamageSource 决定、
+        //    还会补随机推力（见 BallProjectile.deliverToOwner 的注释）。
+        //    这里用普通攻击来源结算伤害，再手动 knockback —— SPIN 0.5 倍、FLYING 2 倍。
+        double mult = this.stage() == Stage.SPIN ? 0.5D : 2.0D;
+
+        Entity owner = this.getOwner();
+        DamageSource source = owner instanceof LivingEntity living
+                ? (owner instanceof Player player ? this.damageSources().playerAttack(player)
+                        : this.damageSources().mobAttack(living))
+                : this.damageSources().thrown(this, null);
+
+        boolean hurt = target.hurtServer(level, source, dealt);
+
+        // ⚠️ 26.2 的签名是 5 参：knockback(power, xd, zd, source, damage)
+        //    —— 传 source 与 damage 是让原版能算「抗性/护甲是否该减免击退」，
+        //    漏了它们就只能命中 3 参重载（不存在）。
+        if (hurt) {
+            Vec3 away = target.position().subtract(this.position());
+            double horizontal = Math.max(1.0E-4D, Math.sqrt(away.x * away.x + away.z * away.z));
+            target.knockback(BASE_KNOCKBACK * mult,
+                    -away.x / horizontal, -away.z / horizontal, source, dealt);
+        }
+
+        // ===== 词条结算（作者 2026-10-19：流星锤必须继承球的全部词条）=====
+        //
+        // 流星锤是**完整球**做的 ⇒ 词条按 100% 生效，不走 `FIRED_TRAITS` 掷骰。
+        // 每一条都对照 `BallProjectile.onHitEntity` 的写法，方法签名逐个核对过。
+        LivingEntity traitOwner = owner instanceof LivingEntity le2 ? le2 : null;
+        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info("[flail][词条] stage={} target={} molten={} magic={} money={} bees={} seal={} spike={}",
+                this.stage(), target.getName().getString(),
+                profile.hasMolten(),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY),
+                profile.hasBees(),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE));
+        boolean truePhysical = false;   // 锤头不是「真实物理伤害」，与球默认一致
+
+        // 【熔融】：目标身上有金属装备才挂灼伤
+        if (profile.hasMolten()) {
+            com.mcmodworkspace.moreballs.MoltenBurnEffect.applyMoltenBurn(
+                    level, target, traitOwner, BallBehavior.MOLTEN_BURN_TICKS);
+        }
+
+        // 【魔法】：随机给目标一个负面效果
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC)) {
+            com.mcmodworkspace.moreballs.BallMagic.applyToVictim(level, target);
+        }
+
+        // 【敛财】：往目标身上掉钱/物品
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY)) {
+            BallExtraTraits.applyMoney(target, traitOwner);
+        }
+
+        // 【招蜂引蝶】：召唤蜜蜂
+        if (profile.hasBees()) {
+            BallExtraTraits.summonBees(level, target, profile.beeCount(), owner, truePhysical);
+        }
+
+        // 【封印】
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL)) {
+            BallExtraTraits.seal(level, target, owner);
+        }
+
+        // 【尖刺】：从命中点朝四周射出骨刺
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
+            BallExtraTraits.shootSpikes(level, this.position(), this.getDeltaMovement(),
+                    owner, truePhysical);
+        }
+    }
+
+    @Override
+    protected void onHit(HitResult hitResult) {
+        // ===== 撞方块：搬运球的「词条 → 碎裂/扣耐久 → 推开」完整流程 =====
+        //
+        // ⚠️⚠️ 之前这里只有一句弹射衰减，导致三个现象（作者 2026-10-20 报）：
+        //   ① 蜜饯球这种**不坚固**的锤头永远不碎（球那边撞到就 burst 掉）
+        //   ② 滴水石球贴着方块反复触发 onHit，石锥喷个不停（没推开）
+        //   ③ 坚固球撞方块不扣耐久
+        //
+        // 现在照 BallProjectile.onHit 的顺序重做：
+        //   词条结算 → 不坚固就碎 → 撞面推开 → 扣 1 耐久
+        BallBehavior.BallProfile profile = this.profile();
+        boolean isBlockHit = hitResult instanceof BlockHitResult;
+
+        if (this.level() instanceof ServerLevel level) {
+            boolean truePhysical = false;
+
+            // 【脉冲】
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_PULSE)) {
+                com.mcmodworkspace.moreballs.RedstonePulse.detonate(level, hitResult.getLocation());
+            }
+            if (isBlockHit) {
+                BlockHitResult blockHit = (BlockHitResult) hitResult;
+                // 【尖刺】—— 只在「真的碰到方块」这一下触发一次（以前贴着方块会连喷）
+                if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
+                    BallExtraTraits.shootSpikes(level, this.position(),
+                            this.getDeltaMovement(), this.getOwner(), truePhysical);
+                }
+                // 【点金】
+                if (profile.transmuteChance() > BallBehavior.NOT_TRANSMUTE) {
+                    com.mcmodworkspace.moreballs.BallTransmute.transmute(level, blockHit);
+                }
+            }
+        }
+
+        super.onHit(hitResult);
+
+        if (!(this.level() instanceof ServerLevel)) {
+            return;
+        }
+        if (this.stage() != Stage.FLYING) {
+            return;   // SPIN / RETURNING 不结算方块碰撞
+        }
+
+        // ===== 不坚固 ⇒ 撞到就碎（与球一致：burst 掉，在掷出者脚下留一根线）=====
+        if (!profile.isTough()) {
+            this.shatter();
+            return;
+        }
+
+        if (!isBlockHit) {
+            return;
+        }
+
+        // ===== 坚固球撞方块：扣 1 耐久 + 沿法线推开 =====
+        this.consumeOneToughness("撞到方块");
+
+        BlockHitResult blockHit2 = (BlockHitResult) hitResult;
+        net.minecraft.core.Direction face = blockHit2.getDirection();
+        Vec3 vel = this.getDeltaMovement();
+
+        // 沿法线推出去一点，避免下一 tick 还嵌在方块里反复触发 onHit
+        this.setPos(this.getX() + face.getStepX() * 0.02D,
+                this.getY() + face.getStepY() * 0.02D,
+                this.getZ() + face.getStepZ() * 0.02D);
+
+        // 弹射衰减：bounce 档位决定保留多少速度；0 就停下
+        double retain = Math.min(1.0D, profile.bounce() / 10.0D);
+        if (retain <= 0.0D) {
+            this.setDeltaMovement(Vec3.ZERO);
+            return;
+        }
+        double dot = vel.x * face.getStepX() + vel.y * face.getStepY() + vel.z * face.getStepZ();
+        Vec3 reflected = new Vec3(
+                vel.x - 2.0D * dot * face.getStepX(),
+                vel.y - 2.0D * dot * face.getStepY(),
+                vel.z - 2.0D * dot * face.getStepZ());
+        this.setDeltaMovement(reflected.scale(retain));
+    }
+
+    // ===== 工具 =====
+
+    private Vec3 ownerEye() {
+        Entity owner = this.getOwner();
+        return owner == null ? this.position() : owner.position().add(0.0D, owner.getEyeHeight(), 0.0D);
+    }
+
+    private double distanceToOwner() {
+        return distanceToOwner(this.getOwner());
+    }
+
+    private double distanceToOwner(Entity owner) {
+        return owner == null ? 0.0D : owner.position().add(0.0D, owner.getEyeHeight(), 0.0D)
+                .distanceTo(this.position());
+    }
+
+    /** 让外部（投掷处理器）能在 SPIN 期间更新持有的栈（耐久变化要同步过去） */
+    @Override
+    public void setItem(ItemStack stack) {
+        super.setItem(stack);
+    }
+
+    /** 是否还能被围绕（SPIN 阶段且主人活着） */
+    public boolean canSpin() {
+        return this.stage() == Stage.SPIN && ownerAlive();
+    }
+
+    /** 满耐久判定（合成时要校验，和 {@code FlailItem.of} 同一口径） */
+    public static boolean isPristine(ItemStack flail) {
+        ItemStack ball = FlailItem.ballOf(flail);
+        return !ball.isEmpty() && !BallClusterTier.of(ball).isClustered();
+    }
+}
