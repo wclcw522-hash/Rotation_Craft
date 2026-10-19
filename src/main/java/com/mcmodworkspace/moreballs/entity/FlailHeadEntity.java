@@ -747,6 +747,13 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
     @Override
     protected void onHitEntity(EntityHitResult hitResult) {
+        // ===== 临时侦测（作者 2026-10-19）：确认命中段到底走到哪一步 =====
+        if (!this.level().isClientSide()) {
+            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                    "[flail][命中] 进入 tick={} stage={} target={} side={}",
+                    this.tickCount, this.stage(),
+                    hitResult.getEntity().getName().getString(), this.level().isClientSide());
+        }
         super.onHitEntity(hitResult);
 
         if (this.level().isClientSide()) {
