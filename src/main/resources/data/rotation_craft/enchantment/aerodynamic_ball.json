@@ -16,6 +16,6 @@
   "slots": [
     "mainhand"
   ],
-  "supported_items": [ "#minecraft:enchantable/crossbow", "rotation_craft:flail" ],
+  "supported_items": "#rotation_craft:flail_enchantable",
   "weight": 1
 }

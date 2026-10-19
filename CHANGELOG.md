@@ -23,6 +23,69 @@ select(flail_casting) → true  → flail_string_only            ← 扔出中�
 绳子层（`flail_rope_layer`）**单独叠在最上、不参与象限切分** —— 否则拼合时会被切成四段。
 
 ---
+## 1.2.0.2 — 修「生成世界卡死」：三个附魔的 `supported_items` 写成了非法形式（作者 2026-10-19 实测）
+
+### 现象
+进游戏**生成世界即卡死/崩**。
+
+### 真因（日志原文）
+```
+Not a valid resource location: #minecraft:enchantable/crossbow
+Non [a-z0-9_.-] character in namespace of identifier
+```
+```
+Unbound values in registry minecraft:enchantment:
+  [rotation_craft:aerodynamic_ball, rotation_craft:lightness, rotation_craft:swiftness]
+Failed to load registries due to errors
+```
+
+`1.2.0.0` 里为了让流星锤能附这三个魔，把
+
+```json
+"supported_items": "#minecraft:enchantable/crossbow"
+```
+
+改成了**数组**：
+
+```json
+"supported_items": [ "#minecraft:enchantable/crossbow", "rotation_craft:flail" ]   ← ✗
+```
+
+**这是错的。** `supported_items` 的类型是 `HolderSet`，序列化形式只有两种：
+- **单个 Identifier** —— `"rotation_craft:flail"`，或引用标签 `"#namespace:path"`
+- **数组** —— 元素**必须是注册名**，**不能带 `#`**
+
+数组里放 `"#minecraft:enchantable/crossbow"` 会被当成 Identifier 解析，而 `#` 不在
+`[a-z0-9_.-]` 里 ⇒ 三个附魔全部解析失败 ⇒ `minecraft:enchantment` 注册表加载失败
+⇒ 世界无法生成。
+
+### 修法
+新建自有物品标签 `data/rotation_craft/tags/item/flail_enchantable.json`，
+在标签里同时引用弩标签与流星锤：
+
+```json
+{
+  "replace": false,
+  "values": [
+    "#minecraft:enchantable/crossbow",
+    "rotation_craft:flail"
+  ]
+}
+```
+
+三个附魔的 `supported_items` 统一指回**单个标签字符串**：
+`"supported_items": "#rotation_craft:flail_enchantable"`。
+
+**没有直接往 `#minecraft:enchantable/crossbow` 里塞 flail** —— 那会让「流星锤算作弩」，
+语义不对，而且污染原版标签。
+
+### 自测
+`runClient` 到主菜单，**无 `Registry Loading` / `Unbound values` / `Not a valid resource` 错误**。
+
+> 教训：`HolderSet` 的两种序列化形式不能混用。改数据文件时先确认字段类型，
+> 别按「数组看起来更灵活」的直觉来。
+
+---
 ## 1.2.0.1 — 补 JEI 配方展示（作者 2026-10-19）
 
 `registerVanillaCategoryExtensions` 里给 `FlailRecipe` 加了一条 `ICraftingCategoryExtension`：
