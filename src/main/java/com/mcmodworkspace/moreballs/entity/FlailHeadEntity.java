@@ -457,6 +457,38 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
      * <p>⚠️ 速度<b>完全覆盖</b>，不保留原有竖直分量 —— 上一版写的是
      * {@code current.y + pull.y * 0.35}，锤头带着上冲速度一路飞上天。</p>
      */
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <p>作者 2026-10-19 二次修订：「回收的时候不要被地形卡住」，
+     * 尤其锤头低于玩家时它会被地面挡住、一直弹开扣耐久。</p>
+     *
+     * <h2>做法：回收期间**不走物理、不做碰撞检测**</h2>
+     * <p>原先是每 tick 射线检测 + 沿法线弹开。问题在于锤头一旦掉进沟里或低于主手，
+     * 它朝上的路径**必被地面挡住**，于是永远在弹、永远回不来，还白扣耐久。</p>
+     *
+     * <p>现在回收全程 `noPhysics = true` + `setNoGravity(true)`，位置直接由
+     * `setPos(当前位置 + 朝主手的单位向量 × 每刻距离)` 算出 ——
+     * 像一根绳子把它拽回来，地形不参与。这是作者要的「保持不动来收回锤头」：
+     * 玩家自己不动，锤头直线回来。</p>
+     */
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <h2>作者 2026-10-19 的最终要求</h2>
+     * <ul>
+     *   <li><b>回收走物理</b> —— 不能穿墙、不能直接 setPos 落位</li>
+     *   <li><b>绳子有物理体积，但只对方块生效、不影响生物</b> ——
+     *       碰撞箱缩到 0.2（绳子粗细），且 {@code isPickable} / {@code canBeCollidedWith}
+     *       全返回 false，生物碰不到它</li>
+     *   <li><b>不被地形卡住</b> —— 碰方块时<b>沿面滑动</b>（减掉法线分量），不是弹开</li>
+     * </ul>
+     *
+     * <h2>为什么必须滑动而不是弹开</h2>
+     * <p>锤头低于玩家时，它朝主手的路径<b>必被地面挡住</b>。原先撞到就沿法线反弹 + 扣耐久，
+     * 于是它在地上反复弹、永远回不来，还白扣耐久 —— 这就是作者报的
+     * 「非常频繁地卡在地上」。改成减掉法线分量后，它贴着地面滑回来。</p>
+     */
     private void tickReturning() {
         if (!(this.getOwner() instanceof net.minecraft.world.entity.LivingEntity living)) {
             return;
@@ -470,15 +502,18 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         this.setLineLength(distance);
 
         if (!this.isRetrieving()) {
-            // 松开右键：原地停住（只剩重力），不再被拉
+            // 松开右键：只剩重力，原地落下（不再被拉）
             this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
             return;
         }
 
         double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
-        Vec3 dir = target.subtract(this.position()).normalize();
+        perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
 
-        // 遇阻检测：这一 tick 要走的路径上有没有方块（作者：撞到要弹开并扣 1 耐久）
+        Vec3 dir = target.subtract(this.position()).normalize();
+        Vec3 move = dir;
+
+        // 遇阻：这一 tick 的路径上有没有方块
         Vec3 from = this.position();
         Vec3 to = from.add(dir.scale(perTick));
         var blockHit = this.level().clip(new net.minecraft.world.level.ClipContext(from, to,
@@ -488,16 +523,21 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         if (blockHit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
             net.minecraft.core.Direction face = blockHit.getDirection();
             Vec3 normal = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
-            double along = dir.dot(normal);
-            Vec3 reflected = dir.subtract(normal.scale(2.0D * along)).normalize();
-            this.setDeltaMovement(reflected.scale(perTick * RECOVER_BOUNCE).add(normal.scale(0.08D)));
+            // 减掉朝墙里的分量 ⇒ 只剩贴面滑动
+            move = dir.subtract(normal.scale(dir.dot(normal)));
+            if (move.lengthSqr() < 1.0E-8D) {
+                // 正对着撞、没有切向分量 ⇒ 取一个沿面的切向脱困
+                Vec3 tangent = dir.cross(normal);
+                move = tangent.lengthSqr() < 1.0E-8D
+                        ? new Vec3(0.0D, 1.0D, 0.0D)
+                        : tangent.normalize();
+            }
+            move = move.normalize();
             this.consumeOneToughness("回收时撞到方块");
-            this.hurtMarked = true;
-            return;
         }
 
-        // 正常拉回：完全覆盖速度（含竖直分量）
-        this.setDeltaMovement(dir.scale(perTick).add(0.0D, -0.03D, 0.0D));
+        // 走物理：交给实体自身的移动与碰撞处理（不再 noPhysics）
+        this.setDeltaMovement(move.scale(perTick));
         this.hurtMarked = true;
     }
     private void finishReturn(LivingEntity owner) {

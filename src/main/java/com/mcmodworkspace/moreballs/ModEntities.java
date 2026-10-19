@@ -63,7 +63,7 @@ public final class ModEntities {
             ENTITIES.register("flail_head", () -> EntityType.Builder
                     .<com.mcmodworkspace.moreballs.entity.FlailHeadEntity>of(
                             com.mcmodworkspace.moreballs.entity.FlailHeadEntity::new, MobCategory.MISC)
-                    .sized(0.3F, 0.3F)
+                    .sized(0.2F, 0.2F)
                     .clientTrackingRange(6)
                     .updateInterval(5)
                     .build(ResourceKey.create(Registries.ENTITY_TYPE,

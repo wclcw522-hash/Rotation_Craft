@@ -189,6 +189,19 @@ public final class ModComponents {
      * 期间 {@code FlailItem.use()} 直接返回、不 {@code startUsingItem} ——
      * 否则玩家还按着右键，原版会立刻接着蓄力，看起来像「自动扔出」。</p>
      */
+    /**
+     * <b>正在回收锤头</b>（作者 2026-10-19 指定）。
+     *
+     * <p>用途只有一个：让 {@code FlailItem.getUseAnimation} 在回收期间返回
+     * {@code NONE}，这样玩家按住右键回收时**不会做出拉弓那种蓄力动作**。</p>
+     *
+     * <p>为什么要单独一个组件而不是复用 {@code FLAIL_CASTING}：那个在**蓄力时也是 true**
+     * （锤头存在就算），拿它做判据会把正常蓄力的动作也一起抹掉。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_RETRIEVING =
+            COMPONENTS.registerComponentType("flail_retrieving", builder -> builder
+                    .persistent(Codec.BOOL)
+                    .networkSynchronized(ByteBufCodecs.BOOL));
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_RECOVERED =
             COMPONENTS.registerComponentType("flail_recovered", builder -> builder
                     .persistent(Codec.BOOL)

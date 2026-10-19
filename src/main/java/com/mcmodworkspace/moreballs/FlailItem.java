@@ -151,6 +151,22 @@ public class FlailItem extends Item {
         }
     }
 
+    /** 标记「正在回收锤头」—— 让装备动画变成 NONE，不做蓄力动作 */
+    public static void markRetrieving(ItemStack stack, boolean value) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        if (value) {
+            stack.set(ModComponents.FLAIL_RETRIEVING.get(), Boolean.TRUE);
+        } else {
+            stack.remove(ModComponents.FLAIL_RETRIEVING.get());
+        }
+    }
+
+    public static boolean isRetrieving(ItemStack stack) {
+        return !stack.isEmpty() && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_RETRIEVING.get()));
+    }
+
     public static boolean isRecovered(ItemStack stack) {
         return !stack.isEmpty() && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_RECOVERED.get()));
     }
@@ -407,6 +423,7 @@ public class FlailItem extends Item {
                     head.beginReturning(player);    // 首次按住 ⇒ 进入回收并扣 1 耐久
                 }
                 head.setRetrieving(true);           // 按住才拉
+                markRetrieving(stack, true);        // 动画变 NONE，不做蓄力动作
             }
             player.startUsingItem(hand);            // 借用「使用中」状态来检测松开
             return InteractionResult.CONSUME;
@@ -433,6 +450,12 @@ public class FlailItem extends Item {
      */
     @Override
     public net.minecraft.world.item.ItemUseAnimation getUseAnimation(ItemStack stack) {
+        // 回收中不显示蓄力动作（作者 2026-10-19：「回收动作不应该和蓄力的一样，
+        // 应该保持不动来收回锤头」）。判据用独立的 FLAIL_RETRIEVING，
+        // 因为 FLAIL_CASTING 在蓄力时也是 true，拿它会让正常蓄力也没动作。
+        if (isRetrieving(stack)) {
+            return net.minecraft.world.item.ItemUseAnimation.NONE;
+        }
         return net.minecraft.world.item.ItemUseAnimation.BOW;
     }
 
