@@ -446,6 +446,9 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         this.setStage(Stage.RETURNING);
         this.setNoGravity(false);   // 回收时**受重力影响**（作者指定）
         this.getEntityData().set(TRAITS_DISABLED, true);
+        // 回收全程不吃方块碰撞（作者 2026-10-19 第三版：完全不受地形限制）
+        this.noPhysics = true;
+        this.setDeltaMovement(Vec3.ZERO);
         this.consumeOneToughness("开始回收");
     }
 
@@ -502,42 +505,33 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         this.setLineLength(distance);
 
         if (!this.isRetrieving()) {
-            // 松开右键：只剩重力，原地落下（不再被拉）
+            // 松开右键：原地落下（不再被拉）
             this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
             return;
         }
 
+        // ===== 回收：**完全不受地形限制**（作者 2026-10-19 第三次修订）=====
+        //
+        // 作者原话：「我要的回收是具有物理碰撞、并且**完全不受地形限制**的回收。」
+        //
+        // 这两件事并不矛盾：
+        //   · 「有物理碰撞」= 投掷飞行阶段照常吃方块碰撞、能打生物、能被打 —— 没变；
+        //   · 「不受地形限制」= **回收阶段**的路径不再做任何方块检测。
+        //
+        // 我前两版都错在同一个地方：一直在回收路径上做 `level().clip(...)`（先是撞到就弹开，
+        // 后来改成沿面滑动），但锤头低于玩家时朝主手的路径**必被地面挡住**，
+        // 只要检测还在，它就一定上不来。
+        //
+        // 所以现在：回收期间 `noPhysics = true` + 直接按位移落位，地形完全不参与。
+        // 碰撞体积本身还在（`isPickable` / `canBeCollidedWith` 仍是 false，生物碰不到），
+        // 只是这条「绳子拉回」的路径不再受方块阻挡。
         double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
         perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
 
         Vec3 dir = target.subtract(this.position()).normalize();
-        Vec3 move = dir;
-
-        // 遇阻：这一 tick 的路径上有没有方块
-        Vec3 from = this.position();
-        Vec3 to = from.add(dir.scale(perTick));
-        var blockHit = this.level().clip(new net.minecraft.world.level.ClipContext(from, to,
-                net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                net.minecraft.world.level.ClipContext.Fluid.NONE,
-                net.minecraft.world.phys.shapes.CollisionContext.empty()));
-        if (blockHit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
-            net.minecraft.core.Direction face = blockHit.getDirection();
-            Vec3 normal = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
-            // 减掉朝墙里的分量 ⇒ 只剩贴面滑动
-            move = dir.subtract(normal.scale(dir.dot(normal)));
-            if (move.lengthSqr() < 1.0E-8D) {
-                // 正对着撞、没有切向分量 ⇒ 取一个沿面的切向脱困
-                Vec3 tangent = dir.cross(normal);
-                move = tangent.lengthSqr() < 1.0E-8D
-                        ? new Vec3(0.0D, 1.0D, 0.0D)
-                        : tangent.normalize();
-            }
-            move = move.normalize();
-            this.consumeOneToughness("回收时撞到方块");
-        }
-
-        // 走物理：交给实体自身的移动与碰撞处理（不再 noPhysics）
-        this.setDeltaMovement(move.scale(perTick));
+        Vec3 next = this.position().add(dir.scale(perTick));
+        this.setPos(next.x, next.y, next.z);
+        this.setDeltaMovement(Vec3.ZERO);
         this.hurtMarked = true;
     }
     private void finishReturn(LivingEntity owner) {
@@ -659,8 +653,8 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         if (this.level().isClientSide()) {
             return;
         }
-        ItemStack flail = this.flailStack();
-        if (flail.isEmpty()) {
+        ItemStack carried = this.flailStack();
+        if (carried.isEmpty()) {
             return;
         }
         BallBehavior.BallProfile profile = this.profile();
@@ -668,16 +662,61 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         if (max == BallBehavior.TOUGH_FOREVER || max <= BallBehavior.NOT_TOUGH) {
             return;   // 永久坚固 / 不坚固 ⇒ 没有耐久可扣
         }
-        // 剩余耐久：优先读组件，没有组件说明是满耐久
-        Integer left = flail.get(ModComponents.TOUGHNESS_LEFT.get());
-        int remaining = (left == null ? max : left) - 1;
+
+        // ⚠️⚠️ **耐久必须写在玩家物品栏那一把上**（作者 2026-10-19：「耐久是根本不扣」）。
+        //
+        //   原来的写法是 `this.setItem(after)` —— 那只改**锤头实体自己**复制的那份物品栈，
+        //   而锤头 discard 之后它就不存在了，玩家手上那一把从头到尾没人碰过 ⇒ 耐久永远不变。
+        //
+        //   现在直接定位到玩家的物品栏格子（优先 originSlot、其次主手、再次副手），
+        //   在**那一份**上写 TOUGHNESS_LEFT，并同步锤头内部那份做缓存。
+        ItemStack live = findLiveFlail();
+        if (live.isEmpty()) {
+            return;
+        }
+        Integer leftComp = live.get(ModComponents.TOUGHNESS_LEFT.get());
+        int remaining = (leftComp == null ? max : leftComp) - 1;
         if (remaining <= 0) {
             this.shatter();
             return;
         }
-        ItemStack after = flail.copy();
-        after.set(ModComponents.TOUGHNESS_LEFT.get(), remaining);
-        this.setItem(after);
+        live.set(ModComponents.TOUGHNESS_LEFT.get(), remaining);
+        // 锤头内部那份同步一下（tooltip / 渲染读到的是它）
+        ItemStack mirror = FlailItem.worldForm(live);   // 锤头那份不带 CASTING，否则世界里只剩绳
+        this.setItem(mirror);
+    }
+
+    /**
+     * 找到玩家物品栏里**真正的那把**流星锤。
+     *
+     * <p>顺序：{@code originSlot} → 主手 → 副手 → 背包里第一个流星锤。</p>
+     */
+    private ItemStack findLiveFlail() {
+        if (!(this.getOwner() instanceof Player player)) {
+            return ItemStack.EMPTY;
+        }
+        var inv = player.getInventory();
+        if (this.originSlot >= 0 && this.originSlot < inv.getContainerSize()) {
+            ItemStack s = inv.getItem(this.originSlot);
+            if (FlailItem.isFlail(s)) {
+                return s;
+            }
+        }
+        ItemStack main = player.getMainHandItem();
+        if (FlailItem.isFlail(main)) {
+            return main;
+        }
+        ItemStack off = player.getOffhandItem();
+        if (FlailItem.isFlail(off)) {
+            return off;
+        }
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (FlailItem.isFlail(s)) {
+                return s;
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     /**

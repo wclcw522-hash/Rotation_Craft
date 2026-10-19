@@ -1,3 +1,53 @@
+## 1.2.1.8 — 回收时锤头消失只剩绳：锤头实体永远用带球形态
+
+### 现象
+
+扔出后、落地后都能看见锤头；**一旦开始回收锤头就没了，只剩一根绳**。
+
+### 排查（先列全清单，再逐项证伪）
+
+按「回收态与其它态的全部差异」列清单：
+
+| # | 差异 | 判定 |
+|---|---|---|
+| 1 | `setStage(RETURNING)` | ✗ 渲染不读 stage |
+| 2 | `setNoGravity(false)` | ✗ SPIN 也没重力、FLYING 有重力，两者都能看见 |
+| 3 | `TRAITS_DISABLED = true` | ✗ 渲染不读 |
+| 4 | `noPhysics = true` | ✗ 不影响渲染 |
+| 5 | `setDeltaMovement(ZERO)` | ✗ |
+| 6 | `consumeOneToughness` 里的 `this.setItem(...)` | 可疑，一并修 |
+| 7 | **`FLAIL_CASTING` / `FLAIL_RETRIEVING` ⇒ 物品模型换成 `flail_string_only`** | **✓ 真因** |
+| 8 | 实体尺寸 `sized(0.2)` | ✗ 已证伪 |
+
+> 第 8 条是上一版误判 —— 看到 `sized(0.3)` 改成 `0.2` 就断定「画小了」，
+> 作者一句「扔出去和在地上都能看见锤头，回收开始后就没有了」直接否掉。
+> 教训已写进 AGENTS「禁止找到一处可疑就下结论」。
+
+### 真因
+
+`items/flail.json` 最外层 `select(flail_casting)`：组件为 true 时物品模型整个换成
+`flail_string_only`（纯线）。而锤头实体是**用物品模型渲染的**
+（`ThrownItemRenderer` 按 `state.item` 画），那份物品栈带着 `FLAIL_CASTING=true`
+⇒ 世界里只剩一根绳。
+
+### 修法：手上形态与世界形态分开
+
+新增 `FlailItem.worldForm(stack)` —— 复制并剥掉
+`FLAIL_CASTING` / `FLAIL_RETRIEVING` / `FLAIL_RECOVERED`。
+
+锤头实体的物品栈一律用 `worldForm`：
+- `onUseTick` 创建锤头时 `head.setItem(worldForm(stack))`
+- `consumeOneToughness` 回写锤头那份时用 `worldForm(live)`
+
+手上那把照旧带 `FLAIL_CASTING=true`（显示纯线）。两者各管各的。
+
+### 同一版顺带修的
+
+- `RECOVER_SPEED_NUMERATOR` `60.0D` → `30.0D`（上一版替换串写成 `= 60;`，源码是 `= 60.0D`，没命中）
+- `releaseUsing` 松开回收时补 `markRetrieving(stack, false)`
+- `tickReturning` 删掉全部方块碰撞检测；`beginReturning` 设 `noPhysics = true`
+
+---
 ## 1.2.1.6 — 回收逻辑三处修复（作者 2026-10-19，要求两次遍历）
 
 ### ① 回收后凭空多一把流星锤

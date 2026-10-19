@@ -59,7 +59,7 @@ public class FlailItem extends Item {
     /**
      * 回收速度公式的分子：{@code 60 / 重量} 格每秒。
      */
-    public static final double RECOVER_SPEED_NUMERATOR = 60.0D;
+    public static final double RECOVER_SPEED_NUMERATOR = 30.0D;   // 作者 2026-10-19：收回速度减半
 
     /**
      * 回收速度的<b>下限保护</b> —— 重量装进这个数的下限。
@@ -170,6 +170,31 @@ public class FlailItem extends Item {
     public static boolean isRecovered(ItemStack stack) {
         return !stack.isEmpty() && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_RECOVERED.get()));
     }
+    /**
+     * <b>给世界里的锤头实体用的物品形态</b> —— 永远带球、不显示成纯线。
+     *
+     * <p>⚠️ 作者 2026-10-19 报「回收开始后锤头消失只剩一根绳」。</p>
+     *
+     * <p>根因：`items/flail.json` 最外层是 `select(flail_casting)` ——
+     * 组件为 true 时物品模型整个换成 `flail_string_only`（纯线）。
+     * 而锤头实体是用**物品模型**渲染的（`ThrownItemRenderer` 按 `state.item` 画），
+     * 所以只要那份物品栈带着 `FLAIL_CASTING=true`，世界里就只剩一根绳。</p>
+     *
+     * <p>正确做法是把「手上的形态」和「世界里的形态」分开：
+     * 手上那把要显示纯线（表示已经扔出去了），世界里的锤头必须永远是球 + 绳。
+     * 这个 helper 就是给后者用的 —— 复制一份并剥掉 `FLAIL_CASTING` / `FLAIL_RETRIEVING`。</p>
+     */
+    public static ItemStack worldForm(ItemStack stack) {
+        if (!isFlail(stack)) {
+            return stack;
+        }
+        ItemStack out = stack.copy();
+        out.remove(ModComponents.FLAIL_CASTING.get());
+        out.remove(ModComponents.FLAIL_RETRIEVING.get());
+        out.remove(ModComponents.FLAIL_RECOVERED.get());
+        return out;
+    }
+
     public static boolean isCasting(ItemStack stack) {
         return isFlail(stack) && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_CASTING.get()));
     }
@@ -495,7 +520,7 @@ public class FlailItem extends Item {
             return;
         }
         head.setOwner(player);
-        head.setItem(stack.copy());
+        head.setItem(worldForm(stack));   // 世界里永远带球形态
         head.setOriginSlot(player.getInventory().getSelectedSlot());
         head.setPos(player.getX(), player.getY() + SPIN_HEIGHT, player.getZ());
         serverLevel.addFreshEntity(head);
@@ -528,7 +553,8 @@ public class FlailItem extends Item {
             return false;
         }
         if (head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
-            head.setRetrieving(false);   // 松开 ⇒ 停止回收
+            head.setRetrieving(false);       // 松开 ⇒ 停止回收
+            markRetrieving(stack, false);    // 动画恢复 BOW（否则永远是 NONE）
             return true;
         }
         // 蓄力等级：和球完全同一套算法
