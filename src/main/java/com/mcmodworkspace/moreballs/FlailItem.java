@@ -486,6 +486,7 @@ public class FlailItem extends Item {
         }
         if (existing != null) {
             existing.setRetrieving(true);   // 回收中：保持「按住」标志
+            markRetrieving(stack, true);    // 动画变 NONE
             return;
         }
         var head = com.mcmodworkspace.moreballs.ModEntities.FLAIL_HEAD.get().create(serverLevel,

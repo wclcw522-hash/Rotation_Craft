@@ -152,6 +152,13 @@ public final class MoreBallsClient {
         } else {
             probe = stack;
         }
+        // ⚠️ 回收锤头时**不显示蓄力文字**（作者 2026-10-19）。
+        //    回收同样靠 startUsingItem 维持「使用中」，所以 isUsingItem 为真 ——
+        //    不判这一条的话，按住右键回收时会一直挂着「蓄力 x / y」。
+        if (com.mcmodworkspace.moreballs.FlailItem.isFlail(stack)
+                && com.mcmodworkspace.moreballs.FlailItem.isRetrieving(stack)) {
+            return;
+        }
         if (!BallBehavior.handles(probe)) {
             return;
         }

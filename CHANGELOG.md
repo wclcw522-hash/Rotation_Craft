@@ -1,3 +1,44 @@
+## 1.2.1.6 — 回收逻辑三处修复（作者 2026-10-19，要求两次遍历）
+
+### ① 回收后凭空多一把流星锤
+
+**根因**（第一遍遍历查出，`returnFlailToOwner` L561/L572）：
+它取锤头里存的那份物品，往 `originSlot` 放；那格被占就 `inventory.add(...)`。
+但**扔出时物品从来没有离开过手** —— 只把 `FLAIL_CASTING` 置 true 让贴图变纯线形态，
+主手这一格始终是那把流星锤。于是 `add` 就等于凭空再造一把。
+
+**修法**：归还前先看原格
+- 原格**还是流星锤** ⇒ 什么都不做（关键）
+- 原格**空** ⇒ 放回
+- 原格被别的占了但**手里另有一把流星锤** ⇒ 也不动
+- 都没有才找空格 / 掉落
+
+### ② 回收时仍显示「蓄力 x / y」
+
+**根因**：`MoreBallsClient.onRenderGui` 只判 `player.isUsingItem()` + `BallBehavior.handles(probe)`。
+回收同样靠 `startUsingItem` 维持「使用中」⇒ `isUsingItem` 为真 ⇒ 照显示。
+
+**修法**：加一条 `FlailItem.isFlail(stack) && FlailItem.isRetrieving(stack)` 就 return。
+
+### ③ 动画标记只在按下的那一 tick 设过
+
+`use()` 里有 `markRetrieving(stack, true)`，但**后续每 tick 走的是 `onUseTick`**，
+那条分支没设 ⇒ 第二个 tick 起动画又变回 BOW。
+
+**修法**：`onUseTick` 的回收分支补 `markRetrieving(stack, true)`。
+
+### ④ 第二遍遍历又抓到两处（差点又漏）
+
+- **`finishReturn` 没清 `FLAIL_RETRIEVING`** —— 上一轮的替换锚点因换行符差异静默失败。
+  不清的话回收后 `getUseAnimation` 永远返回 `NONE`（再蓄力看不到拉弓），
+  HUD 也永远判成「回收中」而不显示蓄力文字。
+- **`finishReturn` 没主动清 `FLAIL_CASTING`** —— `FlailCastHandler` 要下一 tick 才同步，
+  这一 tick 内贴图仍是纯线形态 ⇒ 就是作者报的「第二次扔出绳子」。
+
+现在 `finishReturn` 对**两只手**都做三件事：`markRetrieving(false)` /
+`markRecovered(true)` / `setCasting(false)`。
+
+---
 ## 1.2.1.5 — 回收走物理 + 沿面滑动 + 回收期无蓄力动作（作者 2026-10-19）
 
 ### ① 锤头频繁卡在地上

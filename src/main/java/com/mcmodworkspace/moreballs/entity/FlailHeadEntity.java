@@ -546,11 +546,27 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
             return;
         }
         returnFlailToOwner(owner);
-        // 标记「刚回收完」—— 玩家必须松开右键才能再蓄力（作者 2026-10-19）
+
+        // ===== 收尾标记（作者 2026-10-19）=====
+        //
+        // ⚠️ 两件事必须一起做，漏一个就会出问题：
+        //   · markRetrieving(false) —— 不清的话 `getUseAnimation` 永远返回 NONE
+        //     （回收后再蓄力看不到拉弓动作），HUD 也永远判成「回收中」而不显示蓄力文字
+        //   · markRecovered(true)   —— 玩家必须松开右键才能再蓄力
+        //
+        // 注意这里取的是**主手**：回收完成时物品还在原格（扔出时它就没离开过），
+        // 所以主手那把就是被回收的这把。
         if (owner instanceof Player p) {
-            ItemStack h = p.getMainHandItem();
-            if (FlailItem.isFlail(h)) {
-                FlailItem.markRecovered(h, true);
+            for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
+                ItemStack h = p.getItemInHand(hand);
+                if (FlailItem.isFlail(h)) {
+                    FlailItem.markRetrieving(h, false);
+                    FlailItem.markRecovered(h, true);
+                    // ⚠️ 还要主动清 `FLAIL_CASTING`（作者 2026-10-19 报「第二次扔出绳子」）。
+                    //    那个标记本该由 `FlailCastHandler` 下一 tick 按 findHead 同步，
+                    //    但这一 tick 内它还残留 true ⇒ 贴图仍是纯线形态 ⇒ 看起来"又扔出一根绳"。
+                    FlailItem.setCasting(h, false);
+                }
             }
         }
         this.discard();
@@ -565,9 +581,28 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         if (owner instanceof Player player) {
             var inventory = player.getInventory();
             int slot = this.originSlot;
-            if (slot >= 0 && slot < inventory.getContainerSize() && inventory.getItem(slot).isEmpty()) {
-                inventory.setItem(slot, flail);
-                return;
+
+            // ⚠️⚠️ **物品从来没有离开过手**（作者 2026-10-19 报「回收后多一把流星锤」）。
+            //
+            //   扔出时只把 `FLAIL_CASTING` 置 true 让贴图变成纯线形态，**主手这一格
+            //   始终是那把流星锤**。所以回收时如果照旧 `inventory.add(flail)`，
+            //   就等于凭空再造一把 —— 表现就是「回收后多出一个新的流星锤」。
+            //
+            //   正确顺序：原格还是流星锤 ⇒ 什么都不做；原格空 ⇒ 放回；
+            //   原格被别的占了但手里另有一把流星锤 ⇒ 也不动（手上那把就是它）；
+            //   都没有才找空格 / 掉落。
+            if (slot >= 0 && slot < inventory.getContainerSize()) {
+                ItemStack cur = inventory.getItem(slot);
+                if (FlailItem.isFlail(cur)) {
+                    return;                       // ← 关键：不 add
+                }
+                if (cur.isEmpty()) {
+                    inventory.setItem(slot, flail);
+                    return;
+                }
+            }
+            if (FlailItem.isFlail(player.getMainHandItem())) {
+                return;                           // 手里那把就是它
             }
             if (inventory.add(flail)) {
                 return;
