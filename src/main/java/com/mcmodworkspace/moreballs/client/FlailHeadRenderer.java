@@ -99,6 +99,13 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
         // 的 LeashState 有两个关键点：
         //   start / end —— **相对实体渲染原点**的坐标（poseStack 已在此原点）
         //   slack       —— 是否允许下垂（拴绳的松弛效果）
+        // ⚠️ 物品栈空了就别画绳（作者 2026-10-19 报「锤头消失只剩绳」）：
+        //    回收完成那一瞬 `discard()` 已下发，但客户端这一帧还可能留着实体壳，
+        //    此时 getItem() 为空 ⇒ 锤头本体不渲染、绳却照画。加这一道闸。
+        if (flailState.item.isEmpty()) {   // ItemStackRenderState.isEmpty()
+            return;
+        }
+
         var leash = new net.minecraft.client.renderer.entity.state.EntityRenderState.LeashState();
         leash.start = Vec3.ZERO;                                  // 锤头这端
         leash.end = new Vec3(flailState.anchorX, flailState.anchorY, flailState.anchorZ);

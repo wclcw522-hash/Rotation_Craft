@@ -98,7 +98,15 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
     /** 回收遇阻时的反弹衰减 */
     private static final double RECOVER_BOUNCE = 0.55D;
     /** 离玩家多近算到家 */
-    private static final double ARRIVE_DISTANCE = 1.6D;
+    /**
+     * 离主手多近算「到家」。
+     *
+     * <p>⚠️ 原来写的 1.6 —— 作者 2026-10-19 报「回收时瞬间就完成了」。
+     * 原因很直接：按住右键那一刻锤头还在**环绕**（离主手 1.5 格半径），
+     * 距离本来就小于 1.6 ⇒ 第一个 tick 就判到家 ⇒ 立刻 {@code finishReturn}。
+     * 改成 0.7，必须真的被拉到手上才算。</p>
+     */
+    private static final double ARRIVE_DISTANCE = 0.7D;
     /** 到线长上限时给的回弹速度 */
     private static final double SNAP_BACK_SPEED = 0.35D;
 

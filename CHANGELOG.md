@@ -1,3 +1,32 @@
+## 1.2.1.3 — 修回收三连 bug（作者 2026-10-19）
+
+三条现象，三个独立根因：
+
+### ① 一按右键就瞬间回收完成
+
+`ARRIVE_DISTANCE = 1.6`。按住右键那一刻锤头还在**环绕**（半径 1.5），
+离主手本来就不到 1.6 格 ⇒ 第一个 tick 就判「到家」⇒ 立刻 `finishReturn`。
+
+改成 **0.7** —— 必须真的被拉到手上才算。
+
+### ② 锤头消失、只剩一根绳
+
+回收完成那一瞬服务端 `discard()` 已下发，但客户端这一帧还留着实体壳；
+此时 `getItem()` 为空 ⇒ 锤头本体不渲染、拴绳照画。
+
+`FlailHeadRenderer.submit` 开头加闸：`flailState.item.isEmpty()` 就直接 return。
+
+> 注意字段名是 **`item`**（类型 `ItemStackRenderState`），不是 `itemStack` ——
+> `ThrownItemRenderState` 只有一个 `public final ItemStackRenderState item`。
+
+### ③ 回收完立刻自动蓄力并扔出
+
+`use()` 里有 `isRecovered` 守卫，但**蓄力期间每 tick 走的是 `onUseTick`**，那里没判。
+所以锤头一 `discard()`，下一 tick 就新建了一个 —— 表现为「自动蓄力」。
+
+`onUseTick` 开头补同一条守卫。
+
+---
 ## 1.2.1.2 — 收回速度减半 + 耐久条修复 + 耐久耗尽即毁（作者 2026-10-19）
 
 ### ① 收回速度减半

@@ -450,6 +450,13 @@ public class FlailItem extends Item {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
+        // ⚠️ 作者 2026-10-19 报「回收完立刻自动蓄力并扔出」——
+        //    `use()` 有 isRecovered 守卫，但**后续每 tick 走的是这里**，原先没判。
+        //    所以锤头一 discard，下一 tick 就新建了一个，看起来像自动蓄力。
+        if (isRecovered(stack) && player.isUsingItem()) {
+            return;
+        }
+
         var existing = findHead(level, player);
         if (existing != null && existing.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
             return;   // 蓄力中，锤头已存在，由实体自己维持环绕
