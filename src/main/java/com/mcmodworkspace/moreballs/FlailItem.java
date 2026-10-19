@@ -59,7 +59,7 @@ public class FlailItem extends Item {
     /**
      * 回收速度公式的分子：{@code 60 / 重量} 格每秒。
      */
-    public static final double RECOVER_SPEED_NUMERATOR = 30.0D;   // 作者 2026-10-19：收回速度减半
+    public static final double RECOVER_SPEED_NUMERATOR = 60.0D;   // ⚠️ 60 —— 不要擅自改（作者 2026-10-19）
 
     /**
      * 回收速度的<b>下限保护</b> —— 重量装进这个数的下限。

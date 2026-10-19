@@ -446,8 +446,6 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         this.setStage(Stage.RETURNING);
         this.setNoGravity(false);   // 回收时**受重力影响**（作者指定）
         this.getEntityData().set(TRAITS_DISABLED, true);
-        // 回收全程不吃方块碰撞（作者 2026-10-19 第三版：完全不受地形限制）
-        this.noPhysics = true;
         this.setDeltaMovement(Vec3.ZERO);
         this.consumeOneToughness("开始回收");
     }
@@ -470,7 +468,6 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
      * <p>原先是每 tick 射线检测 + 沿法线弹开。问题在于锤头一旦掉进沟里或低于主手，
      * 它朝上的路径**必被地面挡住**，于是永远在弹、永远回不来，还白扣耐久。</p>
      *
-     * <p>现在回收全程 `noPhysics = true` + `setNoGravity(true)`，位置直接由
      * `setPos(当前位置 + 朝主手的单位向量 × 每刻距离)` 算出 ——
      * 像一根绳子把它拽回来，地形不参与。这是作者要的「保持不动来收回锤头」：
      * 玩家自己不动，锤头直线回来。</p>
@@ -522,7 +519,6 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         // 后来改成沿面滑动），但锤头低于玩家时朝主手的路径**必被地面挡住**，
         // 只要检测还在，它就一定上不来。
         //
-        // 所以现在：回收期间 `noPhysics = true` + 直接按位移落位，地形完全不参与。
         // 碰撞体积本身还在（`isPickable` / `canBeCollidedWith` 仍是 false，生物碰不到），
         // 只是这条「绳子拉回」的路径不再受方块阻挡。
         double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
