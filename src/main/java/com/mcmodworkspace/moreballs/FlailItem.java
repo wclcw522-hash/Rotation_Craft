@@ -192,6 +192,8 @@ public class FlailItem extends Item {
         out.remove(ModComponents.FLAIL_CASTING.get());
         out.remove(ModComponents.FLAIL_RETRIEVING.get());
         out.remove(ModComponents.FLAIL_RECOVERED.get());
+        // 世界形态用「只有球、没有绳」的图 —— 否则物品图上的绳 + 渲染器画的拴绳 = 两根
+        out.set(ModComponents.FLAIL_BARE.get(), Boolean.TRUE);
         return out;
     }
 

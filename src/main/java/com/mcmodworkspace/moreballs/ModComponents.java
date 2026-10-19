@@ -220,6 +220,19 @@ public final class ModComponents {
      * <p>它是 {@link #FLAIL_BALL} 的<b>派生字段</b>，永远由 {@code FlailItem.of()} 同时写入，
      * 不允许单独改。</p>
      */
+    /**
+     * <b>世界里的锤头形态标记</b>（作者 2026-10-19 指定）。
+     *
+     * <p>为 true 时物品模型选「**只有球、没有绳**」的那套图 —— 用在锤头实体上。</p>
+     *
+     * <p>为什么需要：`flail_<key>.png` 那套图本身就画了绳子（物品栏里要有绳）。
+     * 而锤头在世界里会额外由渲染器画一条拴绳，用带绳的图就变成两根。
+     * 所以世界形态用单独的 bare 图。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_BARE =
+            COMPONENTS.registerComponentType("flail_bare", builder -> builder
+                    .persistent(Codec.BOOL)
+                    .networkSynchronized(ByteBufCodecs.BOOL));
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<String>> FLAIL_KEY =
             COMPONENTS.registerComponentType("flail_key", builder -> builder
                     .persistent(com.mojang.serialization.Codec.STRING)

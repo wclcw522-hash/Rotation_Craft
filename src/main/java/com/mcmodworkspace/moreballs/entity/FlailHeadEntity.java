@@ -812,6 +812,14 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         // 流星锤是**完整球**做的 ⇒ 词条按 100% 生效，不走 `FIRED_TRAITS` 掷骰。
         // 每一条都对照 `BallProjectile.onHitEntity` 的写法，方法签名逐个核对过。
         LivingEntity traitOwner = owner instanceof LivingEntity le2 ? le2 : null;
+        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info("[flail][词条] stage={} target={} molten={} magic={} money={} bees={} seal={} spike={}",
+                this.stage(), target.getName().getString(),
+                profile.hasMolten(),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY),
+                profile.hasBees(),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL),
+                profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE));
         boolean truePhysical = false;   // 锤头不是「真实物理伤害」，与球默认一致
 
         // 【熔融】：目标身上有金属装备才挂灼伤
