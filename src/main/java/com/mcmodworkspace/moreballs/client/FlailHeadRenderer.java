@@ -104,13 +104,20 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
      * {@code lines()} 不带光照，所以颜色直接就是最终颜色，不会被环境压暗。</p>
      */
     private static void vertex(VertexConsumer buffer, PoseStack.Pose pose, float x, float y, float z) {
-        // ⚠️⚠️ **setUv 不能少**（作者 2026-10-19 报「按住右键立马崩溃」）。
-        //    漏了它，顶点就是「缺元素」的 —— 运行期直接抛
-        //    `IllegalStateException: Missing elements in vertex`，而且是在渲染线程里，
-        //    表现为「一按右键就崩」。原版 GuardianRenderer.vertex 是有 .setUv(u, v) 的。
+        // ⚠️⚠️ **必须严格按 `RenderTypes.lines()` 的顶点格式来**（作者 2026-10-19 报「进游戏就崩」）。
+        //
+        //    `RenderPipelines.LINES_SNIPPET` 的 `withVertexBinding(0, ...)` 是
+        //    **`DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH`** ——
+        //    四个元素：position / color / normal / **lineWidth**。
+        //
+        //    我第一版漏了 lineWidth、第二版又画蛇添足加了 setUv（这个格式**没有 UV**），
+        //    两次都是同一个错：`IllegalStateException: Missing elements in vertex`，
+        //    而且是在渲染线程里抛 ⇒ 直接崩游戏。
+        //
+        //    ⇒ 只写这四个，一个不多一个不少。
         buffer.addVertex(pose, x, y, z)
                 .setColor(255, 255, 255, 255)
-                .setUv(0.0F, 0.0F)
-                .setNormal(pose, 0.0F, 1.0F, 0.0F);
+                .setNormal(pose, 0.0F, 1.0F, 0.0F)
+                .setLineWidth(1.0F);
     }
 }

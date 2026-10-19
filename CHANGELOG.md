@@ -23,6 +23,49 @@ select(flail_casting) → true  → flail_string_only            ← 扔出中�
 绳子层（`flail_rope_layer`）**单独叠在最上、不参与象限切分** —— 否则拼合时会被切成四段。
 
 ---
+## 1.2.0.4 — 修「进游戏就崩」：`lines()` 的顶点格式缺 `lineWidth`（作者 2026-10-19 实测）
+
+### 现象
+进世界即崩（渲染线程）。
+
+### 日志原文
+```
+java.lang.IllegalStateException: Missing elements in vertex
+  at FlailHeadRenderer.vertex(FlailHeadRenderer.java:111)
+  at FlailHeadRenderer.lambda$submit$0(FlailHeadRenderer.java:96)
+  at CustomFeatureRenderer.buildGroup
+  at LevelRenderer.render
+  at GameRenderer.render
+```
+
+### 真因
+`RenderPipelines.LINES_SNIPPET` 的顶点绑定是：
+
+```java
+.withVertexBinding(0, DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH)
+```
+
+四个元素：**position / color / normal / lineWidth** —— **没有 UV**。
+
+我犯了两轮错，都是同一个根：
+1. `1.2.0.0` 只写了 `setColor` + `setNormal` ⇒ **缺 lineWidth**
+2. `1.2.0.3` 补了个 `setUv` ⇒ **这个格式没有 UV**，仍然缺 lineWidth
+
+⇒ 两次都在渲染线程抛 `Missing elements in vertex`，直接崩游戏。
+
+### 修法
+`.setColor(...)` + `.setNormal(...)` + **`.setLineWidth(1.0F)`**，去掉 `setUv`。
+四个元素一个不多一个不少。
+
+### 为什么前两轮没抓到
+`runClient` 到主菜单**不会渲染这条线**（要进世界、且玩家手里有流星锤），
+所以启动自测**验不出来**。这条只能靠作者实测。
+
+> 教训：用 `submitCustomGeometry` 之前，**先查该 RenderType 的 `withVertexBinding` 用哪个
+> `DefaultVertexFormat`**，然后严格按那个格式的字段逐个写。凭「大概要 UV / 大概要 normal」猜，
+> 猜错一个就崩在渲染线程 —— 而且报错信息只说「Missing elements」，不说是哪个元素缺。
+
+---
 ## 1.2.0.3 — 修流星锤三处（作者 2026-10-19 实测）
 
 ### ① 所有流星锤贴图错误
