@@ -353,21 +353,52 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         return pos;
     }
     /** 松手：以球的物理飞出（作者：与球逻辑相同的运动方式） */
-    public void launch(LivingEntity shooter, float powerRatio) {
+    /**
+     * 松手：<b>无论锤头此刻在圆周的哪个位置，先瞬移到「最高点」，再按准心方向飞出</b>
+     * （作者 2026-10-19 指定）。
+     *
+     * <p>「最高点」= 圆心 + UP × 半径，也就是圆周的正上方 —— 出手位置固定，
+     * 玩家不用赌松手时机。</p>
+     *
+     * @param velocityMultiplier 蓄力倍率（来自 {@code BallCharge.velocityMultiplier}）
+     */
+    public void launch(net.minecraft.world.entity.LivingEntity shooter, float velocityMultiplier) {
         this.setStage(Stage.FLYING);
         this.setNoGravity(false);
 
+        // ① 瞬移到蓄力旋转的最高点
+        Vec3 top = spinTop(shooter);
+        this.setPos(top.x, top.y, top.z);
+
+        // ② 按球的物理飞出：物理速度 × 蓄力倍率
         BallBehavior.BallProfile profile = this.profile();
-        float speed = (float) (profile.physicalVelocity() * Math.max(0.1F, powerRatio));
+        float speed = (float) (profile.physicalVelocity() * Math.max(0.1F, velocityMultiplier));
         this.launchSpeed = speed;
 
-        // 松手瞬间的朝向：从当前环绕位置指向「玩家前方」，保证往看得见的方向飞
         Vec3 dir = shooter.getLookAngle();
-        if (dir.lengthSqr() < 1.0E-6) {
+        if (dir.lengthSqr() < 1.0E-6D) {
             dir = new Vec3(0.0D, 0.0D, 1.0D);
         }
         this.setDeltaMovement(dir.normalize().scale(speed));
         this.hurtMarked = true;
+    }
+
+    /**
+     * 蓄力圆周的最高点 = 圆心 + UP × 半径。
+     *
+     * <p>圆心与 {@link #spinPosition} 同一套：碰撞箱右侧平面、离地 {@code SPIN_HEIGHT}。</p>
+     */
+    public Vec3 spinTop(net.minecraft.world.entity.LivingEntity owner) {
+        Vec3 look = owner.getLookAngle();
+        Vec3 flatLook = new Vec3(look.x, 0.0D, look.z);
+        if (flatLook.lengthSqr() < 1.0E-6D) {
+            flatLook = new Vec3(0.0D, 0.0D, 1.0D);
+        }
+        flatLook = flatLook.normalize();
+        Vec3 right = new Vec3(-flatLook.z, 0.0D, flatLook.x);
+        return owner.position()
+                .add(right.scale(owner.getBbWidth() * 0.5D))
+                .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
     }
 
     private void tickFlying() {

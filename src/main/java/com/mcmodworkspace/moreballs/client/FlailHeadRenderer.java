@@ -25,7 +25,7 @@ import net.minecraft.world.phys.Vec3;
  * <h2>线的画法（26.2 的渲染管线）</h2>
  * <p>26.2 换成了「状态抽取 → 提交」三分段，老的 {@code VertexConsumer} 直连没了。画自定义几何要用</p>
  * <pre>
- * collector.submitCustomGeometry(poseStack, RenderTypes.lines(), (pose, buffer) -&gt; { ... });
+ * collector.submitLeash(poseStack, leashState);   // 走原版拴绳，不再手画直线
  * </pre>
  * <p>这是原版 {@code GuardianRenderer}（守卫者光束）的写法，不是我自己拼的。</p>
  *
