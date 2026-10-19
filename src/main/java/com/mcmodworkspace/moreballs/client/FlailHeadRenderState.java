@@ -17,7 +17,7 @@ public class FlailHeadRenderState extends ThrownItemRenderState {
     public boolean hasLine;
 
     /** 线另一端（掷出者主手）相对锤头的偏移 */
-    public float lineX;
-    public float lineY;
-    public float lineZ;
+    public float anchorX;
+    public float anchorY;
+    public float anchorZ;
 }

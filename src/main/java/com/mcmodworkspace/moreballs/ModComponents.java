@@ -182,6 +182,17 @@ public final class ModComponents {
      * <p>⚠️ 它同时是「禁止切换物品栏」的判据 —— 两个效果必须绑定在同一个状态上，
      * 否则会出现「手里显示纯线但能切栏」或「切不了栏但显示带球图标」的错位。</p>
      */
+    /**
+     * <b>刚回收完，必须松开右键才能再蓄力</b>（作者 2026-10-19 指定）。
+     *
+     * <p>锤头飞回手里那一 tick 置 true；玩家松开右键（{@code !isUsingItem()}）时清 false。
+     * 期间 {@code FlailItem.use()} 直接返回、不 {@code startUsingItem} ——
+     * 否则玩家还按着右键，原版会立刻接着蓄力，看起来像「自动扔出」。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_RECOVERED =
+            COMPONENTS.registerComponentType("flail_recovered", builder -> builder
+                    .persistent(Codec.BOOL)
+                    .networkSynchronized(ByteBufCodecs.BOOL));
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_CASTING =
             COMPONENTS.registerComponentType("flail_casting", builder -> builder
                     .persistent(com.mojang.serialization.Codec.BOOL)

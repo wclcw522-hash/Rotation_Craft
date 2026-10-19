@@ -1,3 +1,75 @@
+## 1.2.1.0 — 流星锤蓄力系统重做（作者 2026-10-19 七条规格）
+
+### ① 按住右键蓄力、显示蓄力层数、绝不自动扔出
+
+三处根因，逐个修掉：
+
+| 现象 | 根因 |
+|---|---|
+| 不蓄力、直接飞出去 | `getUseDuration` 返回 **50 刻**，到点原版自动 `releaseUsing` |
+| 没有「蓄力 x / y」 | `MoreBallsClient.onRenderGui` 用 `BallBehavior.handles(probe)` 判据，**流星锤不是球** ⇒ 每次直接 return |
+| 回收完又自动蓄力 | 缺「刚回收完」标记 |
+
+- `getUseDuration` 改成 `BallCharge.USE_DURATION`（**72000 刻**，与球完全一致）
+- `getUseAnimation` 返回 `ItemUseAnimation.BOW`（原版据此画拉弓进度条）
+- `MoreBallsClient` 的 `probe` 计算加流星锤分支 ⇒ `FlailItem.ballOf(stack)`，
+  于是既有的 `hud.rotation_craft.charge` 那段显示**直接通用**
+- 新增组件 `FLAIL_RECOVERED`：锤头飞回时置位，玩家松开右键时由 `FlailCastHandler` 清除；
+  期间 `use()` 直接返回、不 `startUsingItem`
+
+### ② 旋转方向反过来
+
+`spinAngle += SPIN_STEP` → **`spinAngle -= SPIN_STEP`**，角度回绕判断同步改成负向。
+
+### ③ 旋转速度翻倍
+
+`SPIN_PERIOD_TICKS` **20 → 10**（2π/秒 → 4π/秒）。
+
+### ④ 旋转中心在玩家碰撞箱右侧平面
+
+`center = player.pos + right × (bbWidth / 2) + up × 1.75` —— 圆心落在右侧平面上，
+圆周与矢状面平行（法线 = 右向量）。
+
+### ⑤ 松手时瞬移到「蓄力旋转的最高点」再飞出
+
+新增 `spinTop(owner)` = 圆心 + UP × 半径。`launch()` 第一步就 `setPos` 到该点，
+然后按 `BallCharge.velocityMultiplier(level)` 倍率朝**准心方向**飞出 ——
+玩家不用赌松手时机。
+
+### ⑥ 回收后必须松开再按
+
+同 ① 的 `FLAIL_RECOVERED` 机制。
+
+### ⑦ 线改用原版拴绳渲染
+
+`FlailHeadRenderer` 从 `submitCustomGeometry(RenderTypes.lines())` 改成
+**`collector.submitLeash(poseStack, LeashState)`** —— 自带松弛下垂、纹理、光照。
+`LeashState` 的 `start`/`end` 用**相对锤头渲染原点**的坐标，
+`slack = true` 让它自然垂。
+
+### ⑧ 补齐词条结算
+
+`onHitEntity` 里注入六条，逐条对照 `BallProjectile.onHitEntity`、签名逐个核对：
+
+| 词条 | 调用 |
+|---|---|
+| 【熔融】 | `MoltenBurnEffect.applyMoltenBurn(level, target, source, ticks)` |
+| 【魔法】 | `BallMagic.applyToVictim(level, target)` |
+| 【敛财】 | `BallExtraTraits.applyMoney(target, source)` |
+| 【招蜂引蝶】 | `BallExtraTraits.summonBees(level, target, count, owner, false)` |
+| 【封印】 | `BallExtraTraits.seal(level, target, owner)` |
+| 【尖刺】 | `BallExtraTraits.shootSpikes(level, pos, vel, owner, false)` |
+
+流星锤是**完整球**做的 ⇒ 词条按 100% 生效，不走 `FIRED_TRAITS` 掷骰。
+`MobBallSpecials.onBallHitCreature` **调不了** —— 它的第一个参数是 `BallProjectile`，锤头不是。
+
+### ⑨ 回收状态机（上一版遗留，本版一起验过）
+
+按住 `setRetrieving(true)` 才朝玩家移动、松开即停；速度**完全覆盖**（不再保留竖直分量，
+那是「回收飞上天」的根因）；遇阻沿法线弹开并扣 1 耐久；SPIN 与 FLYING 都做
+`liftOutOfBlocks`（修「锤头卡进地里」）。
+
+---
 ### 顺带：蜜饯球贴图多两团果子（作者 2026-10-16）
 
 蜜饯球上原来只露出 **2 团**红果，作者要 **4 团半**。做法是**拿球贴图里现有的果子团当模板原样复制**

@@ -46,6 +46,15 @@ public final class FlailCastHandler {
             return;
         }
 
+        // ===== 「刚回收完，必须松开再按」的标记维护 =====
+        //
+        // 作者 2026-10-19：回收完成后不能立刻又蓄力/扔出，要松开右键重新按。
+        // 锤头飞回时 `FlailHeadEntity.finishReturn` 会置这个标记；
+        // 这里在玩家**松开右键**（不再 isUsingItem）时清掉。
+        if (FlailItem.isRecovered(held) && !player.isUsingItem()) {
+            FlailItem.markRecovered(held, false);
+        }
+
         FlailHeadEntity head = FlailItem.findHead(player.level(), player);
         boolean casting = head != null;
         if (FlailItem.isCasting(held) != casting) {

@@ -50,9 +50,11 @@ public class FlailItem extends Item {
     public static final double SPIN_HEIGHT = 1.75D;
 
     /**
-     * 锤头绕玩家转一圈所需 tick（20 tick = 1 秒 ⇒ 2π/秒）。
+     * 锤头绕玩家转一圈所需 tick。
+     *
+     * <p>作者 2026-10-19：「速度变成现在的两倍」⇒ 20 刻（2π/秒）改成 <b>10 刻（4π/秒）</b>。</p>
      */
-    public static final int SPIN_PERIOD_TICKS = 20;
+    public static final int SPIN_PERIOD_TICKS = 10;
 
     /**
      * 回收速度公式的分子：{@code 60 / 重量} 格每秒。
@@ -75,8 +77,14 @@ public class FlailItem extends Item {
      */
     public static final double MAX_RECOVER_SPEED = 120.0D;
 
-    /** 蓄力上限（刻）—— 与球的最长蓄力 50 刻对齐 */
-    public static final int MAX_USE_TICKS = 50;
+    /**
+     * 蓄力时长 —— **和球一样用 {@link BallCharge#USE_DURATION}（72000 刻）**。
+     *
+     * <p>⚠️ 作者 2026-10-19 报「右键无法蓄力，会直接飞出去」：
+     * 我原先写的是 50 刻，到点原版就自动 {@code releaseUsing} ⇒ 表现为「自动扔出」。
+     * 球那边用 72000（约 1 小时），按住多久都不会自己松手。</p>
+     */
+    public static final int MAX_USE_TICKS = BallCharge.USE_DURATION;
 
     public FlailItem(Properties properties) {
         super(properties);
@@ -131,6 +139,21 @@ public class FlailItem extends Item {
     }
 
     /** 这把流星锤此刻是不是「已扔出」状态（图标只显示线、且禁止切栏） */
+    /** 标记「刚回收完」—— 玩家松开右键才能再蓄力 */
+    public static void markRecovered(ItemStack stack, boolean value) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        if (value) {
+            stack.set(ModComponents.FLAIL_RECOVERED.get(), Boolean.TRUE);
+        } else {
+            stack.remove(ModComponents.FLAIL_RECOVERED.get());
+        }
+    }
+
+    public static boolean isRecovered(ItemStack stack) {
+        return !stack.isEmpty() && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_RECOVERED.get()));
+    }
     public static boolean isCasting(ItemStack stack) {
         return isFlail(stack) && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_CASTING.get()));
     }
@@ -306,22 +329,49 @@ public class FlailItem extends Item {
         if (!isFlail(stack)) {
             return InteractionResult.PASS;
         }
-        var flying = findHead(level, player);
-        if (flying != null) {
-            if (!level.isClientSide()
-                    && flying.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.RETURNING) {
-                flying.beginReturning(player);
-            }
+        // 作者 2026-10-19：回收完之后必须**松开再按**才算下一次蓄力。
+        // 玩家还按着右键时（isUsingItem 为真）不响应，松手后 FlailCastHandler 会清标记。
+        if (isRecovered(stack) && player.isUsingItem()) {
             return InteractionResult.CONSUME;
         }
+
+        var head = findHead(level, player);
+
+        // ===== 情况 A：手里这把锤已经扔出去了 ⇒ 这一下是「按住回收」 =====
+        if (head != null
+                && head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
+            if (!level.isClientSide()) {
+                if (head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING) {
+                    head.beginReturning(player);    // 首次按住 ⇒ 进入回收并扣 1 耐久
+                }
+                head.setRetrieving(true);           // 按住才拉
+            }
+            player.startUsingItem(hand);            // 借用「使用中」状态来检测松开
+            return InteractionResult.CONSUME;
+        }
+
+        // ===== 情况 B：还没扔 ⇒ 开始蓄力 =====
+        // ⚠️ 作者 2026-10-19：回收完之后必须**松开再按**才算下一次蓄力。
+        //    这里用 head == null 作为「上一把已经收回来了」的判据：
+        //    回收完成时实体会 discard，所以下一 tick findHead 就是 null。
         player.startUsingItem(hand);
         return InteractionResult.CONSUME;
     }
 
-    /** 蓄力上限：50 刻（与球的最长蓄力一致） */
     @Override
     public int getUseDuration(ItemStack stack, LivingEntity entity) {
         return MAX_USE_TICKS;
+    }
+
+    /**
+     * <b>蓄力动画 = 弓箭</b> —— 原版据此画那条蓄力进度条（作者要求「像球一样显示蓄力层数」）。
+     *
+     * <p>依据：{@code BallClusterItem} 也是返回 {@code BOW}，注释写明
+     * 「不覆写的话原版用 {@code NONE}，画不出条」。</p>
+     */
+    @Override
+    public net.minecraft.world.item.ItemUseAnimation getUseAnimation(ItemStack stack) {
+        return net.minecraft.world.item.ItemUseAnimation.BOW;
     }
 
     /**
@@ -338,8 +388,13 @@ public class FlailItem extends Item {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (findHead(level, player) != null) {
-            return;   // 已经有锤头了
+        var existing = findHead(level, player);
+        if (existing != null && existing.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
+            return;   // 蓄力中，锤头已存在，由实体自己维持环绕
+        }
+        if (existing != null) {
+            existing.setRetrieving(true);   // 回收中：保持「按住」标志
+            return;
         }
         var head = com.mcmodworkspace.moreballs.ModEntities.FLAIL_HEAD.get().create(serverLevel,
                 net.minecraft.world.entity.EntitySpawnReason.MOB_SUMMONED);
@@ -362,6 +417,14 @@ public class FlailItem extends Item {
      * <p>⚠️ 26.2 的 {@code Item.releaseUsing} 返回 <b>{@code boolean}</b>（不是 void —— 老版本是 void）。
      * 返回 true 表示「这次使用被取消/已消费」。</p>
      */
+    /**
+     * 松开右键。
+     *
+     * <ul>
+     *   <li><b>蓄力中（SPIN）</b> ⇒ 锤头瞬移到「蓄力旋转的最高点」，再按球那套蓄力等级向准心方向飞出</li>
+     *   <li><b>回收中</b> ⇒ 只是停止拉回（{@code setRetrieving(false)}），锤头留在原地</li>
+     * </ul>
+     */
     @Override
     public boolean releaseUsing(ItemStack stack, Level level, LivingEntity living, int remainingUseDuration) {
         if (level.isClientSide() || !(living instanceof Player player)) {
@@ -371,9 +434,14 @@ public class FlailItem extends Item {
         if (head == null) {
             return false;
         }
-        int used = MAX_USE_TICKS - remainingUseDuration;
-        float powerRatio = Math.max(0.25F, (float) used / MAX_USE_TICKS);
-        head.launch(player, powerRatio);
+        if (head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
+            head.setRetrieving(false);   // 松开 ⇒ 停止回收
+            return true;
+        }
+        // 蓄力等级：和球完全同一套算法
+        int usedTicks = BallCharge.usedTicks(player);
+        int chargeLevel = BallCharge.levelAt(usedTicks, profileOf(stack).chargeLevels());
+        head.launch(player, BallCharge.velocityMultiplier(chargeLevel));
         return true;
     }
 

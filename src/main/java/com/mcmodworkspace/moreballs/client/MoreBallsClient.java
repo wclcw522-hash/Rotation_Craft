@@ -138,9 +138,20 @@ public final class MoreBallsClient {
         //
         //    `asBall` 把壳摊成里面**耐久最低**的那颗球（散球原样返回），
         //    后面的 profile / 等级计算就都跟着正确了。
-        ItemStack probe = com.mcmodworkspace.moreballs.BallClusterItem.isCluster(stack)
-                ? com.mcmodworkspace.moreballs.BallClusterItem.asBall(stack)
-                : stack;
+        // ===== ★ 流星锤：手上是**锤**，蓄力等级要问**内嵌的那颗球**（作者 2026-10-19）=====
+        //
+        // ⚠️⚠️ 漏了这一条的后果：`BallBehavior.handles(flail)` 恒为 false ⇒
+        //     下面 `if (!BallBehavior.handles(probe)) return;` 每次都命中 ⇒
+        //     手持流星锤蓄力时那条「蓄力 x / y」**永远不显示**。
+        //     作者原话：「显示蓄力层数，模组里做了！！！」—— 就是这里没接上。
+        ItemStack probe;
+        if (com.mcmodworkspace.moreballs.FlailItem.isFlail(stack)) {
+            probe = com.mcmodworkspace.moreballs.FlailItem.ballOf(stack);
+        } else if (com.mcmodworkspace.moreballs.BallClusterItem.isCluster(stack)) {
+            probe = com.mcmodworkspace.moreballs.BallClusterItem.asBall(stack);
+        } else {
+            probe = stack;
+        }
         if (!BallBehavior.handles(probe)) {
             return;
         }

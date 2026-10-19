@@ -71,10 +71,11 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
                 + owner.getBbHeight() * 0.6D;              // 抬到胸口高度，别从脚下冒出来
         double oz = owner.zo + (owner.getZ() - owner.zo) * partialTick;
 
+        // 拴绳的两端都用**相对锤头渲染原点**的坐标（submit 阶段 poseStack 已以锤头为原点）
         Vec3 fromHead = new Vec3(ox, oy, oz).subtract(entity.position());
-        flailState.lineX = (float) fromHead.x;
-        flailState.lineY = (float) fromHead.y;
-        flailState.lineZ = (float) fromHead.z;
+        flailState.anchorX = (float) fromHead.x;
+        flailState.anchorY = (float) fromHead.y;
+        flailState.anchorZ = (float) fromHead.z;
     }
 
     /**
@@ -89,35 +90,22 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
             return;
         }
 
-        // RenderTypes.lines() 是原版给「线段」准备的 RenderType（LINES）。
-        // 每个线段要成对提交顶点：addVertex(起点) → addVertex(终点)。
-        collector.submitCustomGeometry(poseStack, RenderTypes.lines(), (pose, buffer) -> {
-            vertex(buffer, pose, 0.0F, 0.0F, 0.0F);                                  // 锤头这一点
-            vertex(buffer, pose, flailState.lineX, flailState.lineY, flailState.lineZ); // 主手那一点
-        });
+        // ===== 用**原版拴绳**渲染，而不是自己画直线 =====
+        //
+        // 作者 2026-10-19：「线太奇怪了，应该调用拴绳的代码连接掷出者和锤头」。
+        // 拴绳自带松弛下垂、纹理、光照，比自己手画的 1px 线自然得多。
+        //
+        // `OrderedSubmitNodeCollector.submitLeash(PoseStack, EntityRenderState.LeashState)`
+        // 的 LeashState 有两个关键点：
+        //   start / end —— **相对实体渲染原点**的坐标（poseStack 已在此原点）
+        //   slack       —— 是否允许下垂（拴绳的松弛效果）
+        var leash = new net.minecraft.client.renderer.entity.state.EntityRenderState.LeashState();
+        leash.start = Vec3.ZERO;                                  // 锤头这端
+        leash.end = new Vec3(flailState.anchorX, flailState.anchorY, flailState.anchorZ);
+        leash.offset = Vec3.ZERO;
+        leash.slack = true;
+        collector.submitLeash(poseStack, leash);
     }
 
-    /**
-     * 提交一个顶点 —— 照抄原版 {@code GuardianRenderer.vertex} 的字段顺序。
-     *
-     * <p>白色：作者规格「一根时刻连接锤头与主手的<b>白色</b>线」。
-     * {@code lines()} 不带光照，所以颜色直接就是最终颜色，不会被环境压暗。</p>
-     */
-    private static void vertex(VertexConsumer buffer, PoseStack.Pose pose, float x, float y, float z) {
-        // ⚠️⚠️ **必须严格按 `RenderTypes.lines()` 的顶点格式来**（作者 2026-10-19 报「进游戏就崩」）。
-        //
-        //    `RenderPipelines.LINES_SNIPPET` 的 `withVertexBinding(0, ...)` 是
-        //    **`DefaultVertexFormat.POSITION_COLOR_NORMAL_LINE_WIDTH`** ——
-        //    四个元素：position / color / normal / **lineWidth**。
-        //
-        //    我第一版漏了 lineWidth、第二版又画蛇添足加了 setUv（这个格式**没有 UV**），
-        //    两次都是同一个错：`IllegalStateException: Missing elements in vertex`，
-        //    而且是在渲染线程里抛 ⇒ 直接崩游戏。
-        //
-        //    ⇒ 只写这四个，一个不多一个不少。
-        buffer.addVertex(pose, x, y, z)
-                .setColor(255, 255, 255, 255)
-                .setNormal(pose, 0.0F, 1.0F, 0.0F)
-                .setLineWidth(1.0F);
-    }
+
 }

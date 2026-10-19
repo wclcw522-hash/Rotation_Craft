@@ -2,6 +2,7 @@ package com.mcmodworkspace.moreballs.entity;
 
 import com.mcmodworkspace.moreballs.BallBehavior;
 import com.mcmodworkspace.moreballs.BallClusterTier;
+import com.mcmodworkspace.moreballs.BallExtraTraits;
 import com.mcmodworkspace.moreballs.FlailItem;
 import com.mcmodworkspace.moreballs.ModComponents;
 import com.mcmodworkspace.moreballs.ModItems;
@@ -65,6 +66,16 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
     /** 首次回收后置 true —— 除弹性与重量外所有词条停效、且不再造成伤害 */
     private static final EntityDataAccessor<Boolean> TRAITS_DISABLED =
             SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.BOOLEAN);
+    /** 回收时玩家是否按着右键 —— 松开就停（作者 2026-10-19 指定） */
+    private static final EntityDataAccessor<Boolean> RETRIEVING =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.BOOLEAN);
+    /** 线另一端（掷出者主手）的世界坐标 —— 渲染拴绳用 */
+    private static final EntityDataAccessor<Float> ANCHOR_X =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> ANCHOR_Y =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> ANCHOR_Z =
+            SynchedEntityData.defineId(FlailHeadEntity.class, EntityDataSerializers.FLOAT);
 
     /** 线长上限（格），作者指定 30 */
     public static final double MAX_LINE = FlailItem.MAX_LINE_LENGTH;
@@ -84,6 +95,12 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
     /** 原版默认击退强度 —— 作者要的 0.5 倍 / 2 倍都基于它 */
     private static final double BASE_KNOCKBACK = 0.4D;
+    /** 回收遇阻时的反弹衰减 */
+    private static final double RECOVER_BOUNCE = 0.55D;
+    /** 离玩家多近算到家 */
+    private static final double ARRIVE_DISTANCE = 1.6D;
+    /** 到线长上限时给的回弹速度 */
+    private static final double SNAP_BACK_SPEED = 0.35D;
 
     /** 环绕角度（弧度） */
     private float spinAngle;
@@ -93,6 +110,8 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
     /** 记下的出手速度，供「按速度缩放伤害」用（照搬 BallProjectile.launchSpeed） */
     private double launchSpeed;
+    /** 本次 FLYING 是否已为「到线长上限」扣过耐久（避免每 tick 反复扣） */
+    private boolean lineCapConsumed;
 
     public FlailHeadEntity(EntityType<? extends FlailHeadEntity> type, Level level) {
         super(type, level);
@@ -107,6 +126,10 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         builder.define(STAGE, (byte) Stage.SPIN.ordinal());
         builder.define(LINE_LENGTH, 0);
         builder.define(TRAITS_DISABLED, false);
+        builder.define(RETRIEVING, false);
+        builder.define(ANCHOR_X, 0.0F);
+        builder.define(ANCHOR_Y, 0.0F);
+        builder.define(ANCHOR_Z, 0.0F);
     }
 
     @Override
@@ -147,6 +170,38 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
     public boolean traitsDisabled() {
         return this.getEntityData().get(TRAITS_DISABLED);
+    }
+
+    /** 回收开关 —— 玩家按住右键 true、松开 false（作者 2026-10-19：按住才回收） */
+    public void setRetrieving(boolean value) {
+        this.getEntityData().set(RETRIEVING, value);
+    }
+
+    public boolean isRetrieving() {
+        return this.getEntityData().get(RETRIEVING);
+    }
+
+    /** 线另一端坐标（渲染拴绳用） */
+    public Vec3 anchor() {
+        return new Vec3(this.getEntityData().get(ANCHOR_X),
+                this.getEntityData().get(ANCHOR_Y),
+                this.getEntityData().get(ANCHOR_Z));
+    }
+
+    private void storeAnchor(Vec3 v) {
+        this.getEntityData().set(ANCHOR_X, (float) v.x);
+        this.getEntityData().set(ANCHOR_Y, (float) v.y);
+        this.getEntityData().set(ANCHOR_Z, (float) v.z);
+    }
+
+    /** 掷出者主手坐标 —— 拴绳起点 */
+    public static Vec3 handAnchor(net.minecraft.world.entity.LivingEntity owner) {
+        Vec3 look = owner.getLookAngle();
+        Vec3 flat = new Vec3(look.x, 0.0D, look.z);
+        if (flat.lengthSqr() < 1.0E-6D) { flat = new Vec3(0.0D, 0.0D, 1.0D); }
+        flat = flat.normalize();
+        Vec3 right = new Vec3(-flat.z, 0.0D, flat.x);
+        return owner.position().add(right.scale(0.35D)).add(0.0D, owner.getBbHeight() * 0.75D, 0.0D);
     }
 
     public void setOriginSlot(int slot) {
@@ -210,6 +265,10 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
             return;
         }
 
+        if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity livingA) {
+            this.storeAnchor(handAnchor(livingA));
+        }
+
         switch (this.stage()) {
             case SPIN -> tickSpin();
             case FLYING -> tickFlying();
@@ -228,9 +287,10 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         if (!(owner instanceof LivingEntity living)) {
             return;
         }
-        this.spinAngle += SPIN_STEP;
-        if (this.spinAngle > (float) (Math.PI * 2.0D)) {
-            this.spinAngle -= (float) (Math.PI * 2.0D);
+        // 作者 2026-10-19：「旋转方向反过来」⇒ 从 +（逆时针）改成 -（顺时针）
+        this.spinAngle -= SPIN_STEP;
+        if (this.spinAngle < -(float) (Math.PI * 2.0D)) {
+            this.spinAngle += (float) (Math.PI * 2.0D);
         }
 
         Vec3 pos = spinPosition(living, this.spinAngle);
@@ -271,6 +331,27 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
                 .add(up.scale(SPIN_RADIUS * Math.sin(angle)));
     }
 
+    /**
+     * 把一个点从方块内部抬出来 —— 修「锤头卡进地里无法回收」（作者 2026-10-19 报）。
+     *
+     * <p>只在服务端做（客户端靠同步）。命中方块就往上找最多 4 格，找到空位为止。</p>
+     */
+    private Vec3 liftOutOfBlocks(Vec3 pos) {
+        if (this.level().isClientSide()) {
+            return pos;
+        }
+        net.minecraft.core.BlockPos base = net.minecraft.core.BlockPos.containing(pos);
+        if (this.level().getBlockState(base).getCollisionShape(this.level(), base).isEmpty()) {
+            return pos;
+        }
+        for (int dy = 1; dy <= 4; dy++) {
+            net.minecraft.core.BlockPos up = base.above(dy);
+            if (this.level().getBlockState(up).getCollisionShape(this.level(), up).isEmpty()) {
+                return new Vec3(pos.x, up.getY() + 0.05D, pos.z);
+            }
+        }
+        return pos;
+    }
     /** 松手：以球的物理飞出（作者：与球逻辑相同的运动方式） */
     public void launch(LivingEntity shooter, float powerRatio) {
         this.setStage(Stage.FLYING);
@@ -314,40 +395,70 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
         this.consumeOneToughness("开始回收");
     }
 
+    /**
+     * 回收：<b>只有 {@code isRetrieving()} 为 true 时才朝玩家移动</b>。
+     *
+     * <p>作者 2026-10-19：「按住右键时回收，松开会停止，直接照着掷出者移动」。</p>
+     *
+     * <p>⚠️ 速度<b>完全覆盖</b>，不保留原有竖直分量 —— 上一版写的是
+     * {@code current.y + pull.y * 0.35}，锤头带着上冲速度一路飞上天。</p>
+     */
     private void tickReturning() {
-        Entity owner = this.getOwner();
-        if (!(owner instanceof LivingEntity living)) {
+        if (!(this.getOwner() instanceof net.minecraft.world.entity.LivingEntity living)) {
             return;
         }
-        Vec3 target = ownerEye();
-        Vec3 toOwner = target.subtract(this.position());
-        double distance = toOwner.length();
-
-        if (distance < 1.5D) {
-            finishReturn(living);
+        Vec3 target = handAnchor(living);
+        double distance = target.distanceTo(this.position());
+        if (distance < ARRIVE_DISTANCE) {
+            this.finishReturn(living);
             return;
         }
-
-        // 速度 = 60 / 重量（格每秒），受重力影响
-        double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
-        Vec3 pull = toOwner.normalize().scale(perTick);
-
-        // ⚠️ 保留原有的竖直速度（重力会把它往下拽），只覆盖水平分量 —— 这样「被线拉着回来」
-        //    看起来是弧线而不是直线，也符合作者「受重力影响」的描述。
-        Vec3 current = this.getDeltaMovement();
-        this.setDeltaMovement(pull.x, current.y + pull.y * 0.35D, pull.z);
-        this.hurtMarked = true;
-
         this.setLineLength(distance);
-    }
 
-    /** 到家：把流星锤还回原本那一格 */
+        if (!this.isRetrieving()) {
+            // 松开右键：原地停住（只剩重力），不再被拉
+            this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
+            return;
+        }
+
+        double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+        Vec3 dir = target.subtract(this.position()).normalize();
+
+        // 遇阻检测：这一 tick 要走的路径上有没有方块（作者：撞到要弹开并扣 1 耐久）
+        Vec3 from = this.position();
+        Vec3 to = from.add(dir.scale(perTick));
+        var blockHit = this.level().clip(new net.minecraft.world.level.ClipContext(from, to,
+                net.minecraft.world.level.ClipContext.Block.COLLIDER,
+                net.minecraft.world.level.ClipContext.Fluid.NONE,
+                net.minecraft.world.phys.shapes.CollisionContext.empty()));
+        if (blockHit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+            net.minecraft.core.Direction face = blockHit.getDirection();
+            Vec3 normal = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
+            double along = dir.dot(normal);
+            Vec3 reflected = dir.subtract(normal.scale(2.0D * along)).normalize();
+            this.setDeltaMovement(reflected.scale(perTick * RECOVER_BOUNCE).add(normal.scale(0.08D)));
+            this.consumeOneToughness("回收时撞到方块");
+            this.hurtMarked = true;
+            return;
+        }
+
+        // 正常拉回：完全覆盖速度（含竖直分量）
+        this.setDeltaMovement(dir.scale(perTick).add(0.0D, -0.03D, 0.0D));
+        this.hurtMarked = true;
+    }
     private void finishReturn(LivingEntity owner) {
         if (this.level().isClientSide()) {
             this.discard();
             return;
         }
         returnFlailToOwner(owner);
+        // 标记「刚回收完」—— 玩家必须松开右键才能再蓄力（作者 2026-10-19）
+        if (owner instanceof Player p) {
+            ItemStack h = p.getMainHandItem();
+            if (FlailItem.isFlail(h)) {
+                FlailItem.markRecovered(h, true);
+            }
+        }
         this.discard();
     }
 
@@ -514,6 +625,45 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
             double horizontal = Math.max(1.0E-4D, Math.sqrt(away.x * away.x + away.z * away.z));
             target.knockback(BASE_KNOCKBACK * mult,
                     -away.x / horizontal, -away.z / horizontal, source, dealt);
+        }
+
+        // ===== 词条结算（作者 2026-10-19：流星锤必须继承球的全部词条）=====
+        //
+        // 流星锤是**完整球**做的 ⇒ 词条按 100% 生效，不走 `FIRED_TRAITS` 掷骰。
+        // 每一条都对照 `BallProjectile.onHitEntity` 的写法，方法签名逐个核对过。
+        LivingEntity traitOwner = owner instanceof LivingEntity le2 ? le2 : null;
+        boolean truePhysical = false;   // 锤头不是「真实物理伤害」，与球默认一致
+
+        // 【熔融】：目标身上有金属装备才挂灼伤
+        if (profile.hasMolten()) {
+            com.mcmodworkspace.moreballs.MoltenBurnEffect.applyMoltenBurn(
+                    level, target, traitOwner, BallBehavior.MOLTEN_BURN_TICKS);
+        }
+
+        // 【魔法】：随机给目标一个负面效果
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC)) {
+            com.mcmodworkspace.moreballs.BallMagic.applyToVictim(level, target);
+        }
+
+        // 【敛财】：往目标身上掉钱/物品
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY)) {
+            BallExtraTraits.applyMoney(target, traitOwner);
+        }
+
+        // 【招蜂引蝶】：召唤蜜蜂
+        if (profile.hasBees()) {
+            BallExtraTraits.summonBees(level, target, profile.beeCount(), owner, truePhysical);
+        }
+
+        // 【封印】
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL)) {
+            BallExtraTraits.seal(level, target, owner);
+        }
+
+        // 【尖刺】：从命中点朝四周射出骨刺
+        if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
+            BallExtraTraits.shootSpikes(level, this.position(), this.getDeltaMovement(),
+                    owner, truePhysical);
         }
     }
 
