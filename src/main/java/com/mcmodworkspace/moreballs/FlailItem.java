@@ -173,7 +173,23 @@ public class FlailItem extends Item {
         if (ball.isEmpty() || !BallAmmo.isBall(ball)) {
             return false;
         }
-        var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(ball.getItem());
+        // ⚠️ 作者 2026-10-19 明确：**只有实心球和空心球**能做流星锤。
+        //    所以判据是那两个子标签，不是总标签 `#rotation_craft:balls` ——
+        //    雪球系（snowball 子标签）不在其中，自动排除。
+        var item = ball.getItem();
+        net.minecraft.tags.TagKey<net.minecraft.world.item.Item> solid =
+                net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM,
+                        net.minecraft.resources.Identifier.fromNamespaceAndPath(
+                                MoreBalls.MOD_ID, "balls/solid"));
+        net.minecraft.tags.TagKey<net.minecraft.world.item.Item> hollow =
+                net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM,
+                        net.minecraft.resources.Identifier.fromNamespaceAndPath(
+                                MoreBalls.MOD_ID, "balls/hollow"));
+        if (!item.builtInRegistryHolder().is(solid) && !item.builtInRegistryHolder().is(hollow)) {
+            return false;   // 雪球系等都在这条被挡掉
+        }
+        // 另外排掉两个原版物品：它们在 solid 标签里，但作者要求不做流星锤
+        var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
         if ("minecraft".equals(id.getNamespace())
                 && ("ender_pearl".equals(id.getPath()) || "slime_ball".equals(id.getPath()))) {
             return false;
