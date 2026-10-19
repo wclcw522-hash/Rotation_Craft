@@ -130,8 +130,8 @@ public final class FlailRecipe extends CustomRecipe {
         if (stack.isEmpty() || stack.getCount() != 1) {
             return null;
         }
-        if (!BallAmmo.isBall(stack)) {
-            return null;
+        if (!FlailItem.canBecomeFlail(stack)) {
+            return null;   // 非球，或被排除的末影珍珠 / 史莱姆球
         }
         if (BallClusterTier.of(stack).isClustered()) {
             return null;   // 不是满耐久 ⇒ 不允许合成

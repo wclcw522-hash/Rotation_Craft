@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "rotation_craft:item/flail/flail_slime"
+    "layer0": "rotation_craft:item/flail_rope_layer"
   }
 }

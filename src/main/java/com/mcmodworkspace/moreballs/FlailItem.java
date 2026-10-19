@@ -94,8 +94,8 @@ public class FlailItem extends Item {
      * @return 造好的流星锤；球不合格时返回 {@link ItemStack#EMPTY}
      */
     public static ItemStack of(ItemStack ball) {
-        if (!BallAmmo.isBall(ball) || ball.isEmpty()) {
-            return ItemStack.EMPTY;
+        if (!canBecomeFlail(ball)) {
+            return ItemStack.EMPTY;   // 不是球，或是被排除的那两颗
         }
         if (BallClusterTier.of(ball).isClustered()) {
             return ItemStack.EMPTY;   // 不是满耐久 ⇒ 不允许合成
@@ -158,6 +158,27 @@ public class FlailItem extends Item {
             return "";
         }
         return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(ball.getItem()).getPath();
+    }
+
+    /**
+     * 这颗球**能不能做成流星锤**（作者 2026-10-19：末影珍珠与史莱姆球不做）。
+     *
+     * <p>⚠️ 这是唯一判据 —— 配方校验（{@code FlailRecipe}）与创造栏（{@code BATTLE} tab）
+     * 都必须走它。两处各写一遍的话，必然出现「创造里能看到但合不出来」这种不一致。</p>
+     *
+     * <p>为什么排除这两颗：它们都在 {@code #rotation_craft:balls} 标签里（所以能扔、能当弩弹药），
+     * 但作为流星锤的锤头不合适 —— 一个是原版投掷物、一个本身就是软的。</p>
+     */
+    public static boolean canBecomeFlail(ItemStack ball) {
+        if (ball.isEmpty() || !BallAmmo.isBall(ball)) {
+            return false;
+        }
+        var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(ball.getItem());
+        if ("minecraft".equals(id.getNamespace())
+                && ("ender_pearl".equals(id.getPath()) || "slime_ball".equals(id.getPath()))) {
+            return false;
+        }
+        return true;
     }
 
     public static boolean isFlail(ItemStack stack) {

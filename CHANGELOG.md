@@ -23,6 +23,47 @@ select(flail_casting) → true  → flail_string_only            ← 扔出中�
 绳子层（`flail_rope_layer`）**单独叠在最上、不参与象限切分** —— 否则拼合时会被切成四段。
 
 ---
+## 1.2.0.3 — 修流星锤三处（作者 2026-10-19 实测）
+
+### ① 所有流星锤贴图错误
+
+`items/flail.json` 的 `select.when` 写的是短 id（`"wooden"`），
+而 `FlailKey` 组件实际存的是**注册名**（`"wooden_ball"`，来自 `getKey(item).getPath()`）——
+两边口径不一致 ⇒ **全部落到 fallback** ⇒ 显示成组合球的象限拼合。
+
+修：`when` 全部补成 `<key>_ball`（17 个）。
+
+### ② 末影珍珠 / 史莱姆球不该能做流星锤
+
+新增唯一判据 `FlailItem.canBecomeFlail(ball)`：排除
+`minecraft:ender_pearl` 与 `minecraft:slime_ball`。
+`FlailItem.of()`、`FlailRecipe.matches()`、创造栏 `BATTLE` tab **三处共用它** ——
+各写一遍必然出现「创造里看得到但合不出来」那种不一致。
+它们对应的贴图与模型也一并删除。
+
+### ③ 按住右键立马崩溃
+
+日志：`java.lang.IllegalStateException: Missing elements in vertex`
+
+`FeilHeadRenderer.vertex()` 只写了 `setColor` + `setNormal`，**漏了 `setUv`** ——
+`RenderTypes.lines()` 的顶点缺 UV 会被丢弃并在渲染线程抛异常，表现就是「一按右键就崩」。
+原版 `GuardianRenderer.vertex` 是有 `.setUv(u, v)` 的，我照抄时漏了。
+
+### ④ 绳子长度
+
+按要求做到 **30 像素**（要求 ≥25），且**不覆盖锤头**。
+
+16×16 里球占 `(0..12,0..12)`，空区只剩 L 形 **87 像素**（右列 3×16 + 下行 3×16 − 重叠 9），
+所以绳子只能沿这两条边走 —— 这是同时满足「≥25 像素」与「不覆盖锤头」的唯一解。
+走线用**每 4 像素拐一次的连续蛇形**（第一版做成隔像素横跳，看图退化成点阵，已改掉）。
+
+### ⑤ 顺带补的漏项
+
+`models/item/flail_rope_layer.json` 之前**漏了**（贴图有、模型没有），
+自测日志报 `Missing block model: rotation_craft:item/flail_rope_layer`，已补。
+`items/flail.json` 里 95 个模型引用现已全部能解析。
+
+---
 ## 1.2.0.2 — 修「生成世界卡死」：三个附魔的 `supported_items` 写成了非法形式（作者 2026-10-19 实测）
 
 ### 现象

@@ -104,8 +104,13 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
      * {@code lines()} 不带光照，所以颜色直接就是最终颜色，不会被环境压暗。</p>
      */
     private static void vertex(VertexConsumer buffer, PoseStack.Pose pose, float x, float y, float z) {
+        // ⚠️⚠️ **setUv 不能少**（作者 2026-10-19 报「按住右键立马崩溃」）。
+        //    漏了它，顶点就是「缺元素」的 —— 运行期直接抛
+        //    `IllegalStateException: Missing elements in vertex`，而且是在渲染线程里，
+        //    表现为「一按右键就崩」。原版 GuardianRenderer.vertex 是有 .setUv(u, v) 的。
         buffer.addVertex(pose, x, y, z)
                 .setColor(255, 255, 255, 255)
+                .setUv(0.0F, 0.0F)
                 .setNormal(pose, 0.0F, 1.0F, 0.0F);
     }
 }
