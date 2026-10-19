@@ -19,6 +19,7 @@ import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrowableIt
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -864,7 +865,45 @@ public class FlailHeadEntity extends ThrowableItemProjectile {
 
     @Override
     protected void onHit(HitResult hitResult) {
+        // ===== 方块命中类词条（作者 2026-10-19：打在地上也要有反应）=====
+        //
+        // ⚠️⚠️ 上一版这里**只有弹射衰减、零词条** —— 而球的词条里有一大批是
+        //       「撞到方块」触发的（脉冲 / 点金 / 尖刺 / 金光闪闪），
+        //       所以打地上什么都看不到。这批逻辑照搬 `BallProjectile.onHit`：
+        //         · 【脉冲】L2882  · 【点金】L2962  · 【尖刺】L2945  · 【金光闪闪】L2837
+        //
+        // 位置放在 `super.onHit` 之前 —— 与球的顺序一致（球也是在 bounceOff 之前结算）。
+        if (this.level() instanceof ServerLevel level) {
+            BallBehavior.BallProfile profile = this.profile();
+            boolean truePhysical = false;
+
+            // 【金光闪闪】：金球第一次碰撞后 5 秒内的猪灵诱饵窗口
+            if (BallBehavior.isGoldShiny(this.flailStack())) {
+                // 锤头没有 PiglinLure 那套窗口字段，这里只做「砸猪灵不结仇」已在 onHitEntity 覆盖；
+                // 诱饵窗口属于「球掉在地上被猪灵捡」的行为，锤头不落地拾取，故跳过。
+            }
+
+            // 【脉冲】：以命中点为球心半径 7 格，给穿金属护甲 / 高护甲生物挂震荡
+            if (profile.hasFlag(BallBehavior.BallProfile.FLAG_PULSE)) {
+                com.mcmodworkspace.moreballs.RedstonePulse.detonate(level, hitResult.getLocation());
+            }
+
+            if (hitResult instanceof BlockHitResult blockHit) {
+                // 【尖刺】：撞到方块这一下也射一圈锥子（与「有没有砸掉方块」无关）
+                if (profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE)) {
+                    BallExtraTraits.shootSpikes(level, this.position(),
+                            this.getDeltaMovement(), this.getOwner(), truePhysical);
+                }
+
+                // 【点金】：把命中点附近的石头点成矿物
+                if (profile.transmuteChance() > BallBehavior.NOT_TRANSMUTE) {
+                    com.mcmodworkspace.moreballs.BallTransmute.transmute(level, blockHit);
+                }
+            }
+        }
+
         super.onHit(hitResult);
+
         // 撞方块：FLYING 状态按球的弹射衰减一次；SPIN 与 RETURNING 不结算
         if (!(this.level() instanceof ServerLevel)) {
             return;
