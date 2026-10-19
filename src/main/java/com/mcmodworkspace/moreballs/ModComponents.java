@@ -2,6 +2,7 @@ package com.mcmodworkspace.moreballs;
 
 import com.mojang.serialization.Codec;
 import net.minecraft.core.component.DataComponentType;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.neoforged.bus.api.IEventBus;
@@ -160,6 +161,45 @@ public final class ModComponents {
                     .persistent(BallClusterContents.CODEC)
                     .networkSynchronized(BallClusterContents.STREAM_CODEC));
 
+    /**
+     * 流星锤里内嵌的那颗球（作者 2026-10-19）。
+     *
+     * <p>用 {@code ItemStack.CODEC} 而不是「存 id 字符串再查注册表」——
+     * 原版 {@code minecraft:charged_projectiles} 就是这么存一组 ItemStack 的，
+     * codec 自带注册表上下文，读出来直接就是完整的栈（含耐久组件），
+     * 不用自己拼 id + 耐久两段、也不会漏字段。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<ItemStack>> FLAIL_BALL =
+            COMPONENTS.registerComponentType("flail_ball", builder -> builder
+                    .persistent(ItemStack.CODEC)
+                    .networkSynchronized(ItemStack.STREAM_CODEC));
+    /**
+     * 流星锤是否处于「已扔出」状态（作者 2026-10-19）。
+     *
+     * <p>为 true 时物品图标变成<b>只有线、没有球</b>的形态 —— 因为锤头已经飞出去了，
+     * 手里只剩那根绳子。用组件而不是另开一个物品：耐久、附魔、内嵌球全都不用复制。</p>
+     *
+     * <p>⚠️ 它同时是「禁止切换物品栏」的判据 —— 两个效果必须绑定在同一个状态上，
+     * 否则会出现「手里显示纯线但能切栏」或「切不了栏但显示带球图标」的错位。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Boolean>> FLAIL_CASTING =
+            COMPONENTS.registerComponentType("flail_casting", builder -> builder
+                    .persistent(com.mojang.serialization.Codec.BOOL)
+                    .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.BOOL));
+    /**
+     * 流星锤内嵌球的<b>短 id</b>（如 {@code iron_ball}），作者 2026-10-19。
+     *
+     * <p><b>为什么要单独存一个字符串</b>：物品模型的 {@code minecraft:select} 用
+     * {@code minecraft:component} 属性时，{@code when} 只能比基础类型（字符串/数字/布尔）。
+     * 直接比 {@link #FLAIL_BALL}（一个 ItemStack）是做不到的 —— 这就是这层冗余的意义。</p>
+     *
+     * <p>它是 {@link #FLAIL_BALL} 的<b>派生字段</b>，永远由 {@code FlailItem.of()} 同时写入，
+     * 不允许单独改。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<String>> FLAIL_KEY =
+            COMPONENTS.registerComponentType("flail_key", builder -> builder
+                    .persistent(com.mojang.serialization.Codec.STRING)
+                    .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.STRING_UTF8));
     public static void register(IEventBus modEventBus) {
         COMPONENTS.register(modEventBus);
     }

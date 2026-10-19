@@ -49,6 +49,9 @@ public final class ModRecipes {
     public static final DeferredHolder<RecipeSerializer<?>, RecipeSerializer<StonecutterRecipe>>
             BALL_CUTTING_SERIALIZER = SERIALIZERS.register(
                     "ball_cutting", () -> BallCuttingRecipe.SERIALIZER);
+    /** 流星锤：满耐久球 + 线，相邻对角（作者 2026-10-19） */
+    public static final DeferredHolder<RecipeSerializer<?>, RecipeSerializer<FlailRecipe>>
+            FLAIL = SERIALIZERS.register("flail", () -> FlailRecipe.SERIALIZER);
     public static void register(IEventBus modEventBus) {
         SERIALIZERS.register(modEventBus);
     }

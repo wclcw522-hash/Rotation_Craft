@@ -6,6 +6,74 @@
 
 ---
 
+## 1.2.0 — 新增大类物品「流星锤」（作者 2026-10-19 规格）
+
+### 一、物品
+
+`rotation_craft:flail` —— **一个物品类承载全部球种**，内嵌球存在 `FLAIL_BALL` 组件里。
+创造栏新增「战斗用品」页（`itemGroup.rotation_craft.battle`），**为每种球各摆一个实例**，
+组合球按规格用通用占位。物品 `stacksTo(1).enchantable(14)`。
+
+名字由内嵌球推导：普通球「铁球流星锤」、组合球「铁-铜-木-石流星锤」。
+tooltip 直接委托内嵌球（不复述词条），末尾补「线长 30 格 / 回收速度 / 破碎掉线」三行。
+耐久条也委托内嵌球。
+
+### 二、图标
+
+球贴图**缩到 13×13、左上偏移 3px**，右下 L 形空区画一根**深灰 `#404040` 的折线绳**
+（`(12,12)→(13,13)→(13,14)→(14,14)→(15,15)`）。19 种球各一张，
+其中 `ender_pearl` / `slime` 的贴图**从原版 jar 提取**（它们是 `minecraft:` 命名空间的来源球）。
+
+另有 `flail_string_only.png`（扔出后的纯线形态）与 `flail_rope_layer.png`
+（组合流星锤拼合时叠在最上的绳子层——**不参与象限切分**，否则会被切成四段）。
+
+`items/flail.json` 是两层 `select`：外层按 `flail_casting` 切纯线/带球，
+内层按 `flail_key`（新增的派生字符串组件）选 19 张图标之一。
+**加 `FLAIL_KEY` 的原因**：`minecraft:component` 属性的 `when` 只能比基础类型，比 `ItemStack` 做不到。
+
+### 三、实体 `rotation_craft:flail_head`
+
+**独立实体类，不继承 `BallProjectile`** —— 这是作者反复强调的。三态机：
+
+```
+SPIN（手持蓄力，绕玩家转）→ FLYING（松手飞出）→ RETURNING（回收）→ 收回
+```
+
+- **环绕**：紧贴碰撞箱右侧、平行于玩家**矢状面**（法线 = 右向量），
+  半径 1.5、离地 1.75、2π/秒。位置由公式算出，不走物理。
+- **击退**：SPIN 状态 0.5 倍、FLYING 状态 2 倍。**原版击退藏在 `hurtServer` 里**，
+  所以用自定义来源结算伤害后**手动 `knockback(power, xd, zd, source, damage)`**（26.2 是 5 参）。
+- **耐久**：写回 `TOUGHNESS_LEFT` 组件（不是实体字段）。到线长上限扣 1 + 速度归零 +
+  给一个朝掷出者的小速度；开始回收扣 1。
+- **词条失效**：首次回收时清 `FIRED_TRAITS` 并置 `traitsDisabled`，
+  此后除弹性与重量外全部停效、且不再造成伤害。
+- **破碎**：在掷出者脚下掉一根线。**刻意不吃【变形】**——`burst()` 对【变形】是「变方块并 return」，
+  照搬会导致「变形了但没掉线」，与作者给的破碎产物冲突。
+- **不能被捡／被怪接**：`isPickable()` 与 `canBeCollidedWith()` 都返回 false，
+  且它**不是** `ItemEntity`、**不是** `BallProjectile` ——
+  `BallMobAI.tryCatchBall(mob, BallProjectile)` 与 `BallPickupHandler` 天然碰不到它。
+- **不能单独存在**：`tick()` 开头判 `ownerAlive()`，主人没了立刻带回物品并消失。
+
+### 四、渲染
+
+锤头本体零代码（复用 `ThrownItemRenderer`，它按实体携带的物品栈渲染）。
+**白色线**用 26.2 的 `submitCustomGeometry(poseStack, RenderTypes.lines(), (pose, buffer) -> …)` ——
+照抄原版 `GuardianRenderer` 的守卫者光束写法。线端点（主手位置）在 `extractRenderState` 里
+预计算成相对锤头的偏移存进状态类（26.2 的 `submit` 阶段拿不到实体）。
+
+### 五、配方
+
+`rotation_craft:flail`（`CustomRecipe`）—— 满耐久球 + 线，**相邻对角**两格。
+必须自定义：`crafting_shaped` 的 `result` 只能写物品 id，带不了组件；
+顺带这个类型才能做**满耐久校验**（对普通球与组合球一视同仁）。
+
+### 六、附魔
+
+`enchantable(14)` + 三个标签（`enchantable/durability`、`vanishing`、`melee_weapon`）
+⇒ 耐久、经验修补、力量可用。三个自建附魔
+（`lightness` / `swiftness` / `aerodynamic_ball`）的 `supported_items` 加上 `rotation_craft:flail`。
+
+---
 ## 1.1.4.0 — 改名为「旋转工艺」/ Rotation_Craft（作者 2026-10-19）
 
 **破坏性变更：`mod_id` 从 `more_balls` 改成 `rotation_craft`，旧存档里的球会全部失效。**

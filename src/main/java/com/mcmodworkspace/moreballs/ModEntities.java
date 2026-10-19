@@ -49,6 +49,25 @@ public final class ModEntities {
                             Identifier.fromNamespaceAndPath(MoreBalls.MOD_ID, "ball_ender_pearl"))));
 
     /** {@code rotation_craft:ball} —— 所有球类弹药的通用投射物 */
+    /**
+     * 流星锤的锤头（作者 2026-10-19）。
+     *
+     * <p>判定盒 0.3 见方 —— 比球（0.25）略大，因为它是个带绳子的实心锤头，
+     * 太小的盒子在环绕时容易「看着擦到却不判定」。</p>
+     *
+     * <p>⚠️ 它是<b>独立实体类</b>，不是 {@link BallProjectile} 的子类 ——
+     * 这样 {@code BallMobAI.tryCatchBall(mob, BallProjectile)}、{@code BallPickupHandler}
+     * 这些「只认球」的路径天然碰不到它，满足作者「锤头不能被捡、不能被怪接」的硬要求。</p>
+     */
+    public static final DeferredHolder<EntityType<?>, EntityType<com.mcmodworkspace.moreballs.entity.FlailHeadEntity>> FLAIL_HEAD =
+            ENTITIES.register("flail_head", () -> EntityType.Builder
+                    .<com.mcmodworkspace.moreballs.entity.FlailHeadEntity>of(
+                            com.mcmodworkspace.moreballs.entity.FlailHeadEntity::new, MobCategory.MISC)
+                    .sized(0.3F, 0.3F)
+                    .clientTrackingRange(6)
+                    .updateInterval(5)
+                    .build(ResourceKey.create(Registries.ENTITY_TYPE,
+                            Identifier.fromNamespaceAndPath(MoreBalls.MOD_ID, "flail_head"))));
     public static final DeferredHolder<EntityType<?>, EntityType<BallProjectile>> BALL =
             ENTITIES.register("ball", () -> EntityType.Builder
                     .<BallProjectile>of(BallProjectile::new, MobCategory.MISC)

@@ -1,0 +1,97 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:component",
+    "component": "rotation_craft:flail_casting",
+    "cases": [
+      {
+        "when": true,
+        "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_string_only" }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:select",
+      "property": "minecraft:component",
+      "component": "rotation_craft:flail_key",
+      "cases": [
+            {
+              "when": "wooden",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_wooden" }
+            },
+            {
+              "when": "cobblestone",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_cobblestone" }
+            },
+            {
+              "when": "iron",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_iron" }
+            },
+            {
+              "when": "gold",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_gold" }
+            },
+            {
+              "when": "hollow_iron",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_hollow_iron" }
+            },
+            {
+              "when": "amethyst",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_amethyst" }
+            },
+            {
+              "when": "copper",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_copper" }
+            },
+            {
+              "when": "hollow_copper",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_hollow_copper" }
+            },
+            {
+              "when": "redstone",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_redstone" }
+            },
+            {
+              "when": "diamond",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_diamond" }
+            },
+            {
+              "when": "lapis",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_lapis" }
+            },
+            {
+              "when": "ender_pearl",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_ender_pearl" }
+            },
+            {
+              "when": "tidal",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_tidal" }
+            },
+            {
+              "when": "slime",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_slime" }
+            },
+            {
+              "when": "emerald",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_emerald" }
+            },
+            {
+              "when": "dripstone",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_dripstone" }
+            },
+            {
+              "when": "preserve",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_preserve" }
+            },
+            {
+              "when": "talisman",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_talisman" }
+            },
+            {
+              "when": "echo",
+              "model": { "type": "minecraft:model", "model": "rotation_craft:item/flail_echo" }
+            }
+      ],
+      "fallback": { "type": "minecraft:model", "model": "rotation_craft:item/flail_iron" }
+    }
+  }
+}

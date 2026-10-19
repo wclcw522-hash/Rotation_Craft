@@ -34,6 +34,34 @@ public final class ModCreativeTabs {
     public static final DeferredRegister<CreativeModeTab> TABS =
             DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MoreBalls.MOD_ID);
 
+    /**
+     * 「战斗用品」分类（作者 2026-10-19）—— 目前只有流星锤一档，
+     * 页内标题走 {@code itemGroup.rotation_craft.battle.flail}。
+     *
+     * <p>展示方式与组合球一致：**为每种球各摆一个实例**。
+     * 底层是同一个物品（`rotation_craft:flail`），靠 {@code FLAIL_BALL} 组件区分 ——
+     * 这样 19 种「独立展示」不需要 19 个物品注册。</p>
+     */
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> BATTLE =
+            TABS.register("battle", () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.rotation_craft.battle"))
+                    .icon(() -> new ItemStack(ModItems.FLAIL.get()))
+                    .displayItems((parameters, output) -> {
+                        // ① 每种球各一个流星锤 —— 遍历球的注册表，满耐久的才算
+                        parameters.holders()
+                                .lookupOrThrow(Registries.ITEM)
+                                .listElements()
+                                .filter(holder -> holder.is(ModTags.Items.BALLS))
+                                .forEach(holder -> {
+                                    ItemStack flail = FlailItem.of(new ItemStack(holder.value()));
+                                    if (!flail.isEmpty()) {
+                                        output.accept(flail);
+                                    }
+                                });
+                        // ② 组合球用**通用占位**（作者：组合流星锤采用通用占位展示）
+                        output.accept(ModItems.FLAIL.get());
+                    })
+                    .build());
     /** 「球」分类 —— 只收带 {@code #rotation_craft:balls} 标签的东西 */
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> BALLS =
             TABS.register("balls", () -> CreativeModeTab.builder()

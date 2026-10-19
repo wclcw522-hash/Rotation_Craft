@@ -66,6 +66,14 @@ public final class ModItems {
      * <p>它是**真正的球**（{@link BallItem}），能投掷、能当弩弹药；
      * 具体行为由组件里的来源列表实时算出的 {@link BallBehavior.BallProfile} 决定。</p>
      */
+    /**
+     * 流星锤（作者 2026-10-19）—— 一个大类物品，内嵌球存在
+     * {@code ModComponents.FLAIL_BALL} 里。创造栏里每种球一个实例，见 {@link ModCreativeTabs}。
+     *
+     * <p>堆叠数固定 1：它带耐久，而且扔出去之后要能定位到「原本那一格」。</p>
+     */
+    public static final DeferredItem<Item> FLAIL = ITEMS.registerItem(
+            "flail", props -> new FlailItem(props.stacksTo(1).enchantable(14)));
     public static final DeferredItem<Item> COMBO_BALL = ITEMS.registerItem(
             "combo_ball", props -> new ComboBallItem(props.stacksTo(BALL_STACK_SIZE)));
 

@@ -89,6 +89,10 @@ public final class MoreBallsClient {
     public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.BALL.get(), BallRenderer::new);
         event.registerEntityRenderer(ModEntities.BALL_ENDER_PEARL.get(), ThrownItemRenderer::new);
+        // 流星锤锤头（作者 2026-10-19）：复用原版 ThrownItemRenderer ——
+        // 它按实体携带的物品栈（= 那把流星锤）渲染，而流星锤的物品模型会按内嵌球选图标，
+        // 所以锤头在世界里看起来就是「那颗球的缩小版 + 绳子」，不需要自定义渲染代码。
+        event.registerEntityRenderer(ModEntities.FLAIL_HEAD.get(), FlailHeadRenderer::new);
         // 滴水石锥（【尖刺】射出去的锥子）—— 外观就是 minecraft:pointed_dripstone 那件物品，
         // 缩小到 0.6 倍，因为作者要的是「**最小的**滴水石锥」。
         event.registerEntityRenderer(ModEntities.DRIPSTONE_SHARD.get(),
