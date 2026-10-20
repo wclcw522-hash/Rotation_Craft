@@ -1276,6 +1276,13 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         return (this.isRolling() || this.isSettled()) ? 1.0F : super.getAirDrag();
     }
 
+    /** 球间弹性碰撞 —— 只有球才做（球覆写；锤头不是球，不参与） */
+    protected void collideBallsTick() {
+    }
+
+    /** 球数上限清理 —— 只有球才做（球覆写） */
+    protected void enforceCapTick() {
+    }
     // ===== 球特有的回归逻辑 —— 钩子（作者 2026-10-20 方案 A 第②步）=====
     //
     // 这些是**只有球才有**的行为（空气动力球 / 忠诚 / 魔法回收让球自己飞回主人）。
@@ -1397,7 +1404,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * <p>注：gameTime 是全服务器共享的，所以多维度同刻只会让先到的那个维度跑检查，
      * 另一个维度下一轮再查 —— 对「防堆积」这种兜底机制来说，晚几秒完全无所谓。</p>
      */
-    private static long ballCapLastCheckTick = Long.MIN_VALUE;
+    protected static long ballCapLastCheckTick = Long.MIN_VALUE;
 
     /**
      * 执行一次上限检查：本维度的球多于 {@link #BALL_CAP} 时，
@@ -1412,7 +1419,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * 对投射物来说会触发掉落/碎裂之类的收尾逻辑；{@code discard()} 是直接移除，
      * <b>不产生任何掉落物</b> —— 这正是作者要的「无掉落消失」。</p>
      */
-    private static void enforceBallCap(net.minecraft.server.level.ServerLevel server) {
+    protected static void enforceBallCap(net.minecraft.server.level.ServerLevel server) {
         java.util.List<BallProjectile> all =
                 server.getEntitiesOfClass(BallProjectile.class, WHOLE_LEVEL_BOX);
         int overflow = all.size() - BALL_CAP;
@@ -1688,7 +1695,8 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         // ⚠️ **同一个刻只让一个球跑**（`ballCapLastCheckTick` 是全局静态的）。
         //    原来只判 `gameTime % 20 == 0`，那是**每个球各自成立**的 ——
         //    25 个球在同一刻各做一次全维度扫描，等于同一件事重复 25 遍。
-        if (this.level() instanceof ServerLevel capLevel) {
+        this.enforceCapTick();
+        if (false && this.level() instanceof ServerLevel capLevel) {
             long capNow = capLevel.getGameTime();
             if (capNow % BALL_CAP_CHECK_INTERVAL == 0L && capNow != ballCapLastCheckTick) {
                 ballCapLastCheckTick = capNow;
@@ -1901,7 +1909,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         //    被别的球撞动的那个 —— 曾经试过「静止就跳过」，结果是
         //    「停着的球怎么撞都不动」。这条不能按静止裁剪，只能靠间隔限流。
         if (this.level().getGameTime() % BALL_COLLIDE_INTERVAL == 0L) {
-            this.collideWithNearbyBalls();
+            this.collideBallsTick();   // 球特有的钩子（锤头不是球，不参与）
         }
         // 「磁吸」：飞行中把身边的金属拽向自己（空心铁球）
         // 磁吸扫描会遍历附近实体 —— 每 5 刻一次足够（它只是「把附近的金属拽过来」）
@@ -2265,7 +2273,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * 记账的话不到一秒就把耐久耗光当场炸掉；动能传递照旧，耐久只由撞墙 / 撞生物消耗。
      * 已经在分离的两球不重复处理，所以同一次接触只会处理一次。</p>
      */
-    private void collideWithNearbyBalls() {
+    protected void collideWithNearbyBalls() {
         // ===== 连续碰撞检测 =====
         // 球速能到 1.5+ 格/刻，而球的碰撞箱只有 0.25 宽 —— 只查「包围盒是否重叠」的话，
         // 飞行球会<b>一整个 tick 直接跨过</b>停在地上的球，两边从未重叠、碰撞被整个跳过。

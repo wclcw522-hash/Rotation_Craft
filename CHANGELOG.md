@@ -1,3 +1,43 @@
+## 1.2.0.25 — 方案 A 第②步续：球间碰撞与上限清理也抽成钩子
+
+`BallPhysicsCore` 里再抽两个钩子，`BallProjectile` 覆写：
+
+| 钩子 | Core 调用点 | 球的实现 |
+|---|---|---|
+| `collideBallsTick()` | L1912（每 `BALL_COLLIDE_INTERVAL` 刻一次） | `collideWithNearbyBalls()` |
+| `enforceCapTick()` | L1698（`ballTickPost` 开头附近） | `enforceBallCap(capLevel)` |
+
+### 这轮抓到并修掉的两个自伤
+
+**① `if (false && ...)` 让球的上限清理失效**
+第一版为了把旧块短路，直接写了 `if (false && this.level() instanceof ServerLevel capLevel)` ——
+编译过了、启动也 0 ERROR，但**球数上限从此不再生效**（世界里的球会无限堆积）。
+靠回读 `Select-String enforceBallCap` 才发现旧块还在、且被短路。
+现在改成 `this.enforceCapTick();`，球通过覆写恢复功能。
+
+**② `collideBallsTick` 只有定义没有调用点**
+`this.collideWithNearbyBalls()` 那一行的替换锚点当时没匹配上，
+于是 Core 里根本没调新钩子 —— **球间碰撞完全停跑**（球怎么撞都不动）。
+同样是回读调用点列表时才发现的（定义有 5 个、调用只有 4 个）。
+
+### 现在的钩子全景
+
+| 钩子 | 定义 | 调用 | 球的实现 |
+|---|---|---|---|
+| `collideBallsTick` | L1280 | L1912 | `collideWithNearbyBalls` |
+| `enforceCapTick` | L1284 | L1698 | `enforceBallCap` |
+| `homingPhysicsPre` | L1293 | L1714 | 回归三件套前压 |
+| `homingPhysicsPost` | L1297 | L1938 | 回归三件套后压 |
+| `tickHomingReturn` | L1305 | L1942 | 回归推进 + 超时兜底 |
+
+**锤头对这五个全是空实现** —— 它不是球，不参与球间碰撞、不参与球数上限、不会飞回主人（它对应的是收线）。
+
+### 还没搬的
+
+`multishotSide`（多重射击）与来源判定 —— 它们和 `ballTickPost` 的落定分支交织更深。
+但**功能上已经隔离**：`multishotSide` 在锤头上恒为 false，来源判定只在 `BallMobAI` 侧用。
+
+---
 ## 1.2.0.24 — 方案 A 第②步：球特有的回归逻辑挪回 BallProjectile（钩子）
 
 ### 为什么不能硬搬

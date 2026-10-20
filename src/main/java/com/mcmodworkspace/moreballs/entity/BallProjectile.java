@@ -35,6 +35,23 @@ public class BallProjectile extends BallPhysicsCore {
         super(type, level);
     }
 
+    /** 球间弹性碰撞 —— 只有球才做 */
+    @Override
+    protected void collideBallsTick() {
+        this.collideWithNearbyBalls();
+    }
+
+    /** 球数上限清理 —— 只有球才做 */
+    @Override
+    protected void enforceCapTick() {
+        if (this.level() instanceof net.minecraft.server.level.ServerLevel capLevel) {
+            long now = capLevel.getGameTime();
+            if (now % BALL_CAP_CHECK_INTERVAL == 0L && now != ballCapLastCheckTick) {
+                ballCapLastCheckTick = now;
+                enforceBallCap(capLevel);
+            }
+        }
+    }
     // ===== 球特有的回归逻辑（作者 2026-10-20 方案 A 第②步：从 Core 挪回来）=====
     //
     // 这三段原本在 `BallPhysicsCore.ballTickPost()` 里，现在抽成钩子：
