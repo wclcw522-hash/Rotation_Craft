@@ -1,3 +1,45 @@
+## 1.2.0.24 — 方案 A 第②步：球特有的回归逻辑挪回 BallProjectile（钩子）
+
+### 为什么不能硬搬
+
+球特有的成员和共享逻辑**深交织**：`homingBack` 17 处、`homingToOwner` 23 处、`multishotSide` 18 处，
+散在 `tick` / `ballTickPost` / `onHit` 里。整段搬走会把方法劈成两半，球本体会坏。
+
+### 用模板方法（钩子）拆
+
+`BallPhysicsCore` 里留三个 `protected` 空实现，`BallProjectile` 覆写：
+
+| 钩子 | 位置（Core 的 `ballTickPost` 里） |
+|---|---|
+| `homingPhysicsPre()` | L1684，父类 tick 之前的「恼鬼三件套」压设 |
+| `homingPhysicsPost()` | L1930，父类 tick 之后的压设 |
+| `tickHomingReturn()` | L1934，回归推进 + 超时兜底；返回 true 表示「这一 tick 到此为止」 |
+
+**逐行对比确认等价**（原实现 vs 覆写后）：
+
+- 前压：`if (homingBack) { noPhysics=true; if(!isNoGravity()) setNoGravity(true); }`
+  ⇔ `if (!homingBack) return;` + 同样三行 —— 等价
+- 后压：同样结构 —— 等价
+- 推进：`if (!giveUp && homingToOwner()) return;` 之后还原三件套
+  ⇔ 同逻辑，用 `return true` 让调用方 return —— 等价
+
+### 效果
+
+**锤头不再带球特有的回归逻辑** —— `homingBack` 恒为 false，三个钩子对它是空实现。
+锤头自己的「收线」由 `FlailHeadEntity.tickFlying` 里那套 `beginReturning` 负责，两者互不干扰。
+
+### 顺带放宽的可见性
+
+`homingBack` / `homingTicks` / `wasInsideBlock` / `RETURN_GIVE_UP_TICKS` /
+`homingToOwner()` / `homingToOwner0()` 从 `private` 改 `protected`。
+
+### 仍未搬的（功能无影响）
+
+`multishotSide`、`enforceBallCap`、球间碰撞、来源判定 —— 这些和 `ballTickPost` 的落定分支
+交织更深，继续用同样方式拆需要再分几轮。目前锤头不会被它们影响
+（`multishotSide` 恒 false、球上限扫的是 `BallProjectile`、球间碰撞同理）。
+
+---
 ## 1.2.0.23 — 方案 A：抽出 BallPhysicsCore，球与锤头做兄弟
 
 ### 架构

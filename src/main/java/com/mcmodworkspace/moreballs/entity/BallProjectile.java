@@ -35,6 +35,67 @@ public class BallProjectile extends BallPhysicsCore {
         super(type, level);
     }
 
+    // ===== 球特有的回归逻辑（作者 2026-10-20 方案 A 第②步：从 Core 挪回来）=====
+    //
+    // 这三段原本在 `BallPhysicsCore.ballTickPost()` 里，现在抽成钩子：
+    // Core 留空实现，球在这里覆写。锤头没有「飞回主人」这回事（它对应的是**收线**），
+    // 所以基类那份空实现对它正好是「什么都不做」。
+
+    /** 回归途中、父类 tick 之前的「恼鬼三件套」压设 */
+    @Override
+    protected void homingPhysicsPre() {
+        if (!this.homingBack) {
+            return;
+        }
+        this.noPhysics = true;
+        // ⚠️ 只在值真的变化时调用 —— setNoGravity 是同步数据，
+        //    值没变也会触发实体同步，每 tick 调就是「卡一下闪现一下」。
+        if (!this.isNoGravity()) {
+            this.setNoGravity(true);
+        }
+    }
+
+    /** 回归途中、父类 tick 之后的「恼鬼三件套」压设 */
+    @Override
+    protected void homingPhysicsPost() {
+        if (!this.homingBack) {
+            return;
+        }
+        if (!this.noPhysics) {
+            this.noPhysics = true;
+        }
+        if (!this.isNoGravity()) {
+            this.setNoGravity(true);
+        }
+    }
+
+    /**
+     * 回归推进 + 超时兜底。
+     *
+     * <p>⚠️⚠️ <b>超时兜底</b>（作者 2026-10-16 报的「偶尔出现悬在空中的球」）：
+     * 回归期间球带着「恼鬼三件套」，而 `setSettled()` 在 `isNoGravity()` 时会拒绝进入静止态 ——
+     * 只要回归一直不结束，球就永远悬空飞、永不落定、也不消失。
+     * 所以这里补一条时间上限：飞够了就放弃回归、还原三件套，球自然掉下来。</p>
+     *
+     * @return true 表示「这一 tick 到此为止」
+     */
+    @Override
+    protected boolean tickHomingReturn() {
+        if (!this.homingBack) {
+            return false;
+        }
+        boolean giveUp = this.homingTicks > RETURN_GIVE_UP_TICKS;
+        if (!giveUp && this.homingToOwner()) {
+            return true;
+        }
+        // 主人已不在（下线 / 换维度 / 已死），或回归超时 ——
+        // 必须把「恼鬼三件套」和记账状态一起还原，否则球会一直穿墙飘着
+        this.homingBack = false;
+        this.noPhysics = false;
+        this.setNoGravity(false);
+        this.wasInsideBlock = false;
+        return false;
+    }
     public BallProjectile(Level level, LivingEntity shooter, ItemStack stack) {
         super(level, shooter, stack);
         // 弩在装填/发射时会往被消耗的弹药上打「intangible_projectile」（不可回收）标记，

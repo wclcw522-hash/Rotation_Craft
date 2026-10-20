@@ -620,7 +620,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * <p>取 <b>600 刻（30 秒）</b>：正常回归几秒内就该到主人手里，30 秒还没到必然是卡住了 ——
      * 这时宁可让它掉下来落地，也不要留一颗飘着的球。</p>
      */
-    private static final int RETURN_GIVE_UP_TICKS = 600;
+    protected static final int RETURN_GIVE_UP_TICKS = 600;
 
     /**
      * 球在水里泡这么多刻，就当它「落定」了。
@@ -655,13 +655,13 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     private boolean returnToOwner;
 
     /** 正在回家的路上（回归期间免重力，免得飞一半掉下去） */
-    private boolean homingBack;
+    protected boolean homingBack;
 
     /** 回归已经飞了几刻 —— 用来做「越飞越快」的加速 */
-    private int homingTicks;
+    protected int homingTicks;
 
     /** 上一刻是否在实心里 —— 用来把「连续实心段」和「被空气隔开的另一段」区分开 */
-    private boolean wasInsideBlock;
+    protected boolean wasInsideBlock;
 
     /** 当前这一段回归用的方向（隔几刻才重算一次，见 RETURN_RETARGET_INTERVAL） */
     private Vec3 returnDirection;
@@ -1276,6 +1276,28 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         return (this.isRolling() || this.isSettled()) ? 1.0F : super.getAirDrag();
     }
 
+    // ===== 球特有的回归逻辑 —— 钩子（作者 2026-10-20 方案 A 第②步）=====
+    //
+    // 这些是**只有球才有**的行为（空气动力球 / 忠诚 / 魔法回收让球自己飞回主人）。
+    // 锤头没有「飞回主人」这回事 —— 它对应的是**收线**，由 FlailHeadEntity 自己实现。
+    // 所以 Core 只留空实现，BallProjectile 覆写它们做真正的事。
+
+    /** 回归途中、父类 tick 之前的「恼鬼三件套」压设（球覆写） */
+    protected void homingPhysicsPre() {
+    }
+
+    /** 回归途中、父类 tick 之后的「恼鬼三件套」压设（球覆写） */
+    protected void homingPhysicsPost() {
+    }
+
+    /**
+     * 回归推进 + 超时兜底（球覆写）。
+     *
+     * @return true 表示「这一 tick 到此为止」
+     */
+    protected boolean tickHomingReturn() {
+        return false;
+    }
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
@@ -1680,14 +1702,8 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         // noPhysics、并且每刻重设 noGravity —— 说明这些开关在父类 tick 过程里会被动到。
         // 我之前的写法全在事后设，于是「这一 tick 里跑的物理」用的还是旧值，
         // 球照样被方块卡住。前后都压住才算真的一样。
-        if (this.homingBack) {
-            this.noPhysics = true;
-            // ⚠️ 只在值真的变化时调用 —— setNoGravity 是同步数据，
-            //    值没变也会触发实体同步，每 tick 调就是「卡一下闪现一下」。
-            if (!this.isNoGravity()) {
-                this.setNoGravity(true);
-            }
-        }
+        // 回归途中的「恼鬼三件套」压设 —— 球特有的，已挪回 BallProjectile（钩子）
+        this.homingPhysicsPre();
 
 
         // 【区块加载】带空气动力球的球<b>从落地那刻就得挂上</b>，不能等回归启动再挂。
@@ -1911,37 +1927,12 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         // 只在起飞那一刻设一次是不够的 —— 中途任何一步把它还原、或者别的逻辑碰了这些开关，
         // 球就会重新被方块卡住（这正是「还是会卡方块」的原因）。
         // 第三件 isAffectedByBlocks() 是跟随 homingBack 的覆盖，不用在这里管。
-        if (this.homingBack) {
-            if (!this.noPhysics) {
-                this.noPhysics = true;
-            }
-            if (!this.isNoGravity()) {
-                this.setNoGravity(true);
-            }
-        }
+        this.homingPhysicsPost();
 
-        if (this.homingBack) {
-            // ⚠️⚠️ **超时兜底**（作者 2026-10-16 报的「偶尔出现悬在空中的球」）。
-            //
-            //    回归期间球带着「恼鬼三件套」：noPhysics（穿墙）+ setNoGravity(true)（不吃重力），
-            //    而且 setSettled() 在 isNoGravity() 时会**拒绝进入静止态**。
-            //    这三条合起来的后果是：**只要回归一直不结束，球就永远悬在空中飞、永不落定、也不消失。**
-            //
-            //    而回归的出口原本只有两个 —— 到达主人（deliverToOwner）/ 主人已不在。
-            //    球如果在障碍里打转、或者方向一直选不出通的路，homingToOwner() 就会**恒为真**，
-            //    于是下面这三行还原永远执行不到，球就一直飘着（玩家看到的就是「悬在空中的球」）。
-            //
-            //    这里补一条时间上限：飞够了就放弃回归、把三件套还原，球自然会掉下来落地。
-            boolean giveUp = this.homingTicks > RETURN_GIVE_UP_TICKS;
-            if (!giveUp && this.homingToOwner()) {
-                return;
-            }
-            // 主人已不在（下线 / 换维度 / 已死），或回归超时 ——
-            // 必须把「恼鬼三件套」和记账状态一起还原，否则球会一直穿墙飘着
-            this.homingBack = false;
-            this.noPhysics = false;
-            this.setNoGravity(false);
-            this.wasInsideBlock = false;
+        // 回归推进 + 超时兜底 —— 球特有的，已挪回 BallProjectile（钩子）
+        // 返回 true 表示「这一 tick 到此为止」。
+        if (this.tickHomingReturn()) {
+            return;
         }
 
         if (!this.isSettled()) {
@@ -3953,7 +3944,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      *
      * @return true 表示这一 tick 已经由回归逻辑接管，常规的静止处理应当让路
      */
-    private boolean homingToOwner() {
+    protected boolean homingToOwner() {
         // 同一 tick 内复用上次结果
         if (this.homingCachedTick == this.tickCount) {
             return this.homingCachedResult;
@@ -3963,7 +3954,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         return this.homingCachedResult;
     }
 
-    private boolean homingToOwner0() {
+    protected boolean homingToOwner0() {
         // 【多重射击的附属弹】—— **永远不真的回家**。
         //
         // returnToOwner 对它是 true（见 ballTickPre），但那只是为了拿到回收体系的兜底：
