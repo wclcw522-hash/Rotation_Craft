@@ -663,6 +663,18 @@ public final class BallMobAI {
             return false;
         }
 
+        // ⚠️⚠️ **流星锤的锤头不能被任何生物接住**（作者 2026-10-20 问的就是这条）。
+        //
+        //   FlailHeadEntity 继承 BallProjectile 之后，这个方法的参数类型就能收下它 ——
+        //   而 L697 那句 ball.getItem().copy() 现在返回的是**内嵌球**
+        //   （锤头覆写了 getItem() 让父类逻辑看到球），于是怪接住锤头后手里会拿一颗球。
+        //
+        //   必须在入口挡住，不能靠 isPickable() —— 那个只影响「玩家/准星能不能选中」，
+        //   管不到这条主动接球的路。
+        if (ball instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity) {
+            return false;
+        }
+
         // 只对「会主动战斗的怪物」生效，牛羊之类不参与
         if (!(mob instanceof Enemy)) {
             return false;
@@ -806,6 +818,10 @@ public final class BallMobAI {
         }
         for (Entity e : mob.level().getEntitiesOfClass(Entity.class, pickupBox)) {
             if (e instanceof BallProjectile ball && ball.isAlive()) {
+                // ⚠️ 流星锤的锤头**不能被顺手捡走**（作者 2026-10-20）
+                if (ball instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity) {
+                    continue;
+                }
                 // ⚠️ **别捡自己刚扔出去的那颗**（作者 2026-10-11 报的烈焰人 bug）。
                 //    烈焰人的拾取范围是 15×15×5，它扔出去的球正好就在这个范围内 ——
                 //    不拦的话下一轮扫描立刻又捡回来：球数永远掉不下去、
@@ -1986,6 +2002,11 @@ public final class BallMobAI {
      * <b>球实体与掉落物形态都算</b>，与 {@link #tryPickUpBall} 的口径保持一致。
      */
     private static boolean isPickableBall(Entity e) {
+        // ⚠️ 流星锤的锤头不算「可抓的球」（作者 2026-10-20）——
+        //    幻翼俯冲、怪物收集都会走这个判据，不排除的话锤头会被抓走。
+        if (e instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity) {
+            return false;
+        }
         if (e instanceof BallProjectile ball) {
             return ball.isAlive();
         }
