@@ -2,7 +2,7 @@ package com.mcmodworkspace.moreballs;
 
 import org.jetbrains.annotations.Nullable;
 
-import com.mcmodworkspace.moreballs.entity.BallProjectile;
+import com.mcmodworkspace.moreballs.entity.BallPhysicsCore;
 import com.mcmodworkspace.moreballs.entity.DripstoneShard;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
@@ -294,7 +294,7 @@ public final class BallExtraTraits {
      *
      * @return 落点扩散动画还需要走几帧（0 表示不播）
      */
-    public static int shriek(BallProjectile ball, ServerLevel level, boolean armorPiercing) {
+    public static int shriek(BallPhysicsCore ball, ServerLevel level, boolean armorPiercing) {
         Vec3 velocity = ball.getDeltaMovement();
         if (velocity.lengthSqr() < 1.0E-6D) {
             return 0;   // 没速度就不知道该往哪飞
@@ -438,7 +438,7 @@ public final class BallExtraTraits {
          * @param dir   当前方向（单位向量，可能已被前一位修正器改过）
          * @return 新方向（单位向量），或 {@code null} 表示不干预
          */
-        @Nullable Vec3 steer(BallProjectile ball, Vec3 point, Vec3 dir);
+        @Nullable Vec3 steer(BallPhysicsCore ball, Vec3 point, Vec3 dir);
     }
 
     /**
@@ -472,7 +472,7 @@ public final class BallExtraTraits {
      *
      * @return 修正后的单位方向；没有修正器接手时原样返回 {@code dir}
      */
-    public static Vec3 steerPath(BallProjectile ball, Vec3 point, Vec3 dir) {
+    public static Vec3 steerPath(BallPhysicsCore ball, Vec3 point, Vec3 dir) {
         Vec3 current = dir;
         for (ShriekPathModifier modifier : PATH_MODIFIERS) {
             Vec3 next = modifier.steer(ball, point, current);
@@ -489,7 +489,7 @@ public final class BallExtraTraits {
      * <p>这就是作者要的「直线飞出一段 → 空中索敌转向 → 延伸一段后拐回」。</p>
      */
     @Nullable
-    private static Vec3 steerWisdom(BallProjectile ball, Vec3 point, Vec3 dir) {
+    private static Vec3 steerWisdom(BallPhysicsCore ball, Vec3 point, Vec3 dir) {
         Vec3 steered = ball.wisdomSteerToward(point);
         return steered;   // null = 没锁到目标，不干预
     }
@@ -502,7 +502,7 @@ public final class BallExtraTraits {
      * 终点半径 10 的范围伤害与那一套效果、以及音效 + 音爆范围，
      * 于是<b>每个碰撞点都像正常发射一样</b>（作者 2026-10-16 的要求）。</p>
      */
-    public static void shriekFlightTick(BallProjectile ball, ServerLevel level, boolean armorPiercing,
+    public static void shriekFlightTick(BallPhysicsCore ball, ServerLevel level, boolean armorPiercing,
                                         Vec3 from, Vec3 end) {
         // ⚠️⚠️ **只做「路径音波 + 路径伤害判定」，绝不做落点音爆**（作者 2026-10-17 报的回归）。
         //
@@ -544,7 +544,7 @@ public final class BallExtraTraits {
      * <p>弹射不为 0 时会被逐段调用，所以「音效 + 音爆」在每个碰撞点都会出现
      * —— 这正是作者 2026-10-16 要求的「像正常发射一样有音波和落点产生音爆范围」。</p>
      */
-    private static void shriekSegment(BallProjectile ball, ServerLevel level, Vec3 from, Vec3 end,
+    private static void shriekSegment(BallPhysicsCore ball, ServerLevel level, Vec3 from, Vec3 end,
                                       boolean armorPiercing, Entity owner, boolean miss) {
         // ===== ① 这一段路径上的监守者音波（纯特效）=====
         //
@@ -858,7 +858,7 @@ public final class BallExtraTraits {
         living.hurtServer(level, source, amount);
         living.invulnerableTime = 0;
     }
-    private static DamageSource shriekDamage(BallProjectile ball, ServerLevel level, boolean armorPiercing) {
+    private static DamageSource shriekDamage(BallPhysicsCore ball, ServerLevel level, boolean armorPiercing) {
         if (armorPiercing) {
             return BallDamageTypes.truePhysical(level, ball, ball.getOwner());
         }
@@ -874,7 +874,7 @@ public final class BallExtraTraits {
      * <p>⚠️ 路径上的生物<b>不再吃这一套</b> —— 那一侧只剩伤害与击飞
      * （作者 2026-10-16：「对路径上的生物不再造成 debuff」）。</p>
      */
-    private static void applyShriekEffects(LivingEntity living, BallProjectile ball) {
+    private static void applyShriekEffects(LivingEntity living, BallPhysicsCore ball) {
         Entity source = ball.getOwner() != null ? ball.getOwner() : ball;
         living.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 20 * 20, 0), source);
         living.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 20 * 20, 1), source);
@@ -904,7 +904,7 @@ public final class BallExtraTraits {
      * 每层只有 <b>8</b> 个点（三层共 24 个/帧）；半径随帧数从 <b>6 涨到 8</b>，
      * 三层之间再错开一点，看起来就是三片向外扩的球壳。</p>
      */
-    public static void shriekWaves(BallProjectile ball, ServerLevel level, int frame) {
+    public static void shriekWaves(BallPhysicsCore ball, ServerLevel level, int frame) {
         Vec3 center = ball.position().add(0.0D, 0.5D, 0.0D);
         // 半径区间 6..8（作者指定）：随帧数从 6 扩到约 7.6，三层再各自错开
         double progress = (double) (SHRIEK_WAVE_FRAMES - frame) / SHRIEK_WAVE_FRAMES;

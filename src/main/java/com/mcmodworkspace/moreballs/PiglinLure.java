@@ -1,5 +1,6 @@
 package com.mcmodworkspace.moreballs;
 
+import com.mcmodworkspace.moreballs.entity.BallPhysicsCore;
 import com.mcmodworkspace.moreballs.entity.BallProjectile;
 import net.minecraft.world.entity.ai.Brain;
 import net.minecraft.advancements.AdvancementHolder;
@@ -209,7 +210,7 @@ public final class PiglinLure {
      * 一旦它生效，FIGHT 与「重新选目标」整段都不跑，寻路也交给我们的 {@code moveTo}。
      * 这正是原版「猪灵被金锭吸引」用的机制，不新增 Goal、不碰 Mixin。</p>
      */
-    public static void lure(ServerLevel level, BallProjectile ball) {
+    public static void lure(ServerLevel level, BallPhysicsCore ball) {
         Vec3 pos = ball.position();
 
         // 先把「饵」摆好 —— 这是让 activity 稳定停在 ADMIRE_ITEM 的前提，见 ensureBait
@@ -332,7 +333,7 @@ public final class PiglinLure {
      *   <li>不设无限寿命 —— 让原版 5 分钟的过期逻辑当兜底，球没了也不会留下永久实体</li>
      * </ul>
      */
-    private static void ensureBait(ServerLevel level, BallProjectile ball) {
+    private static void ensureBait(ServerLevel level, BallPhysicsCore ball) {
         Vec3 pos = ball.position();
         Integer id = BAIT_IDS.get(ball.getUUID());
         if (id != null) {
@@ -490,7 +491,7 @@ public final class PiglinLure {
      *
      * @param ball 被捡起的那颗金球实体
      */
-    public static void onPiglinPickedUpGoldBall(Piglin piglin, @Nullable BallProjectile ball) {
+    public static void onPiglinPickedUpGoldBall(Piglin piglin, @Nullable BallPhysicsCore ball) {
         // 【金光闪闪】触发概率（当前 100% 必触发；以后调这个常量即可）
         if (ball != null && ball.traitFired(BallProjectile.TRAIT_GOLD_SHINY)) {
             if (piglin.isBaby()) {
@@ -540,7 +541,7 @@ public final class PiglinLure {
      * @param ball 被捡起的那颗金球实体；<b>掉落物形态的球没有实体</b>，此时传 {@code null}，
      *             成就就不发 —— 那颗球上没留投掷者信息，本来就无从归属。
      */
-    private static void awardGoldShiny(@Nullable BallProjectile ball) {
+    private static void awardGoldShiny(@Nullable BallPhysicsCore ball) {
         if (ball == null) {
             return;
         }

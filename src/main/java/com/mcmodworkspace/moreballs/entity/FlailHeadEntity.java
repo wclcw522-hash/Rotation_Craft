@@ -327,47 +327,6 @@ public class FlailHeadEntity extends BallProjectile {
         }
     }
 
-    /**
-     * 【磁吸】—— 照搬 BallProjectile.magnetTick。
-     *
-     * 把半径 profile.magnetRadius() 内的金属掉落物 / 生物朝锤头拽。
-     * 生物那一路按金属装备数加权（(件数+1)/2，浮点除法），并排除掷出者本人。
-     */
-    private void flailMagnetTick(ServerLevel level, BallBehavior.BallProfile profile) {
-        if (!profile.hasMagnet()) {
-            return;
-        }
-        double speed = this.getDeltaMovement().length();
-        if (speed < 1.0E-3D) {
-            return;
-        }
-        Vec3 self = this.position();
-        double pull = speed * com.mcmodworkspace.moreballs.BallProspecting.MAGNET_SPEED_RATIO;
-        double radius = profile.magnetRadius();
-
-        for (net.minecraft.world.entity.item.ItemEntity item : level.getEntitiesOfClass(
-                net.minecraft.world.entity.item.ItemEntity.class,
-                this.getBoundingBox().inflate(radius),
-                it -> it.isAlive()
-                        && com.mcmodworkspace.moreballs.BallProspecting.isMetalEquipment(it.getItem()))) {
-            Vec3 toSelf = self.subtract(item.position());
-            if (toSelf.lengthSqr() < 1.0E-6D) {
-                continue;
-            }
-            item.setDeltaMovement(toSelf.normalize().scale(pull));
-        }
-
-        for (LivingEntity living : level.getEntitiesOfClass(LivingEntity.class,
-                this.getBoundingBox().inflate(radius),
-                le -> le.isAlive() && le != this.getOwner())) {
-            Vec3 toSelf = self.subtract(living.position());
-            if (toSelf.lengthSqr() < 1.0E-6D) {
-                continue;
-            }
-            double factor = (com.mcmodworkspace.moreballs.BallProspecting.countMetalEquipment(living) + 1) / 2.0D;
-            living.setDeltaMovement(toSelf.normalize().scale(pull * factor));
-        }
-    }
 
     private boolean ownerAlive() {
         Entity owner = this.getOwner();
@@ -494,18 +453,80 @@ public class FlailHeadEntity extends BallProjectile {
                 .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
     }
 
+    /**
+     * FLYING 阶段。
+     *
+     * <p>球的物理与词条由 {@link BallPhysicsCore#tick()} 跑（父类 tick 已经覆盖：
+     * 尖啸路径判定 / 弹射 / 音波 / 感应积热 / 磁吸 / 磁性 / 照明 / 透镜 / 融化 / 引雷 / 导电 …），
+     * 这里只加**锤头独有的两条**（作者 2026-10-20 补充）：</p>
+     *
+     * <ol>
+     *   <li><b>线长上限 = 完成一次弹射</b> —— 到 30 格时调一次 {@code shriekLand}，
+     *       让【尖啸】把这一次当成「撞到东西」，按 {@code bounce} 档位结算一次弹射，
+     *       然后扣 1 耐久 + 给一个朝掷出者的小速度。</li>
+     *   <li><b>自动回收类词条 = 自动收线</b> —— 【空气动力球】/【忠诚】/【魔法·回收】
+     *       原本的语义是「球自己飞回主人」，在锤头身上就是<b>自动收线</b>：
+     *       直接把 {@code RETRIEVING} 置 true，走已有的回收流程。</li>
+     * </ol>
+     */
     private void tickFlying() {
         this.setLineLength(distanceToOwner());
 
-        // 到线长上限：扣 1 点耐久 + 速度归零 + 给一个朝掷出者的小速度（作者指定）
-        if (this.lineLength() >= MAX_LINE) {
-            this.setDeltaMovement(Vec3.ZERO);
-            Vec3 toOwner = ownerEye().subtract(this.position());
-            if (toOwner.lengthSqr() > 1.0E-6) {
-                this.setDeltaMovement(toOwner.normalize().scale(0.3D));
+        // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
+        if (this.lineLength() >= MAX_LINE && !this.lineCapConsumed) {
+            this.lineCapConsumed = true;
+
+            // 【尖啸】的「弹射」：到线长上限等同于撞到东西，交给 shriekLand 结算一次。
+            // 它内部会按 bounce 档位决定「反弹还是停住」，并补落点音爆与范围伤害。
+            if (this.shriekFired) {
+                this.shriekLand(this.position(), null);
             }
-            consumeOneToughness("到达线长上限");
+
+            Vec3 toOwner = ownerEye().subtract(this.position());
+            this.setDeltaMovement(toOwner.lengthSqr() > 1.0E-6D
+                    ? toOwner.normalize().scale(SNAP_BACK_SPEED)
+                    : Vec3.ZERO);
+            this.consumeOneToughness("到达线长上限");
         }
+
+        // ===== ② 自动回收类词条 ⇒ 自动收线 =====
+        //
+        // 【空气动力球】（aerodynamic_ball）/【忠诚】（loyalty）/【魔法·回收】
+        // 在球身上的语义都是「自己飞回主人」。锤头没有「飞回主人」这回事 ——
+        // 它对应的是**收线**，所以这里直接开始回收。
+        //
+        // ⚠️ 只在「还没在回收」时触发一次；`beginReturning` 自己会判重入。
+        if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
+            this.beginReturning((net.minecraft.world.entity.LivingEntity) this.getOwner());
+            this.setRetrieving(true);
+        }
+    }
+
+    /**
+     * 这颗球有没有「自动回收类」词条 —— 有就让锤头自动收线。
+     *
+     * <p>三条都走同一个出口：
+     * <ul>
+     *   <li>【空气动力球】{@code aerodynamic_ball} —— 球静止后自动飞回</li>
+     *   <li>【忠诚】{@code loyalty} —— 唯一特性，完整球才有</li>
+     *   <li>【魔法·回收】{@code TRAIT_MAGIC_RECOVER} —— 魔法球的一档</li>
+     * </ul>
+     */
+    private boolean autoRetrieveWanted() {
+        BallBehavior.BallProfile profile = this.profile();
+        if (profile.loyalty()) {
+            return true;
+        }
+        if (this.traitFired(TRAIT_MAGIC_RECOVER)) {
+            return true;
+        }
+        return net.neoforged.fml.ModList.get().isLoaded("minecraft")
+                && net.minecraft.world.item.enchantment.EnchantmentHelper
+                        .getItemEnchantmentLevel(
+                                this.level().registryAccess()
+                                        .lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                                        .getOrThrow(com.mcmodworkspace.moreballs.ModEnchantments.AERODYNAMIC_BALL),
+                                this.flailStack()) > 0;
     }
 
     /** 开始回收：扣 1 点耐久，并让词条从此失效（作者指定） */

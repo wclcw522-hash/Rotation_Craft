@@ -1,0 +1,4441 @@
+package com.mcmodworkspace.moreballs.entity;
+
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.entity.monster.Enemy;
+import com.mcmodworkspace.moreballs.BallBehavior;
+import com.mcmodworkspace.moreballs.BallDamageTypes;
+import com.mcmodworkspace.moreballs.BallExtraTraits;
+import com.mcmodworkspace.moreballs.BallIlluminate;
+import com.mcmodworkspace.moreballs.BallMagic;
+import com.mcmodworkspace.moreballs.DiamondBallDrops;
+import com.mcmodworkspace.moreballs.BallLens;
+import com.mcmodworkspace.moreballs.RedstonePulse;
+import com.mcmodworkspace.moreballs.BallFragments;
+import com.mcmodworkspace.moreballs.BallPouchHelper;
+import com.mcmodworkspace.moreballs.MoltenBurnEffect;
+import com.mcmodworkspace.moreballs.BallItem;
+import com.mcmodworkspace.moreballs.BallProspecting;
+import com.mcmodworkspace.moreballs.BallRoll;
+import com.mcmodworkspace.moreballs.BallWeight;
+import com.mcmodworkspace.moreballs.BallMobAI;
+import com.mcmodworkspace.moreballs.BallMorph;
+import com.mcmodworkspace.moreballs.MobBallSpecials;
+import com.mcmodworkspace.moreballs.BallThunder;
+import com.mcmodworkspace.moreballs.BallTransmute;
+import com.mcmodworkspace.moreballs.PiglinLure;
+import com.mcmodworkspace.moreballs.ModAttachments;
+import com.mcmodworkspace.moreballs.ModComponents;
+import com.mcmodworkspace.moreballs.ModAdvancements;
+import com.mcmodworkspace.moreballs.ModEnchantments;
+import com.mcmodworkspace.moreballs.ModTags;
+import com.mcmodworkspace.moreballs.ModEntities;
+import com.mcmodworkspace.moreballs.ModItems;
+import com.mcmodworkspace.moreballs.ProspectingHeatData;
+import com.mcmodworkspace.moreballs.MoreBalls;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.particles.ItemParticleOption;
+import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.piglin.AbstractPiglin;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.ProjectileDeflection;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrowableItemProjectile;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
+
+/**
+ * 「球」的通用投射物 —— 右键投掷与弩发射共用同一个实体。
+ *
+ * <p>在物理链路继承原版雪球的基础上，叠加本模组的概念：
+ * 伤害 / 重量 / 穿透 / 坚固 / 弹射 / 滚动 / 静止拾取 / 球间弹性碰撞。</p>
+ */
+public class BallProjectile extends ThrowableItemProjectile {
+
+    private static final EntityDataAccessor<Byte> PIERCE_LEVEL =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.BYTE);
+    private static final EntityDataAccessor<Integer> WEIGHT =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Boolean> FROM_CROSSBOW =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Integer> TOUGHNESS =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> BOUNCE =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Boolean> SETTLED =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> ROLLING =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.BOOLEAN);
+    /** 【潮涌】状态 —— 球在水里时由服务端置位；客户端据此决定要不要画激流的环绕纹理 */
+    private static final EntityDataAccessor<Boolean> TIDAL_SURGE =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.BOOLEAN);
+    /**
+     * 本趟投掷**生效的特性位**（服务端掷定、自动同步到客户端 —— 客户端只负责按它放粒子）。
+     */
+    private static final EntityDataAccessor<Integer> FIRED_TRAITS =
+            SynchedEntityData.defineId(BallProjectile.class, EntityDataSerializers.INT);
+
+    /** 判定为静止的速度平方阈值（约 0.03 格/刻） */
+    private static final double SETTLE_SPEED_SQR = 0.0009D;
+
+    // ===== 特性类词条的「触发概率闸门」（作者 2026-10-13 统一口径）=====
+    //
+    // 每个常量只控制「它自己那一个词条的那一次触发」，口径全文件统一：
+    //   随机源   —— 一律 this.level().getRandom()
+    //   比较方向 —— 一律 nextFloat() < 常量
+    //   闸门位置 —— 一律包在原触发逻辑的最外层，原逻辑一字不动
+    // 当前全部为 1.0F = 100% 必触发，与加闸门之前的行为完全一致。
+    // 以后要削弱某个词条，只调它自己那一个常量（调小即按概率触发），
+    // 不要动其它常量，也不要把比较方向改反 —— 改反会变成「概率不触发」。
+    //
+    // 注：照明 / 透镜 / 魔法 / 点金 / 脉冲 / 导电 / 金光闪闪 这几个词条的闸门
+    //     落在各自的 helper 类里（BallIlluminate / BallLens / BallMagic /
+    //     BallTransmute / RedstonePulse / BallConduction / PiglinLure），
+    //     本文件只是调用方，故不在此重复加闸门（否则同一效果会被乘两次概率）。
+
+    // ===== 特性类词条的「本次投掷/发射是否生效」判定（作者 2026-10-13 规格）=====
+    //
+    // 语义：每个特性各有一个**独立的**判定 —— 这一趟投掷/发射里它到底生不生效。
+    //   · 判定时机：球被掷出后**第一个 tick** 判一次，整趟飞行沿用结果（不是每刻掷）。
+    //   · 判定概率：由 BallFragments.traitChanceFor(item) 现算 ——
+    //       完整球 1.0、半球 0.5、四分之一球 0.25；组合时按份数累加（封顶 1.0）。
+    //   · 特性各判各的：同一趟里【魔法】中了、【变形】没中，是完全正常的。
+    //
+    // 数值类（坚固/感应/智慧N/穿透N/破坏王N）与阈值类（融化/熔融/引雷）**不受本机制影响**。
+
+    /** 【善良】命中同阵营时弹开、不结算伤害 */
+    public static final int TRAIT_KINDNESS = 1 << 0;
+
+    /** 【电击】直接伤害按「闪电类型」结算 */
+    public static final int TRAIT_SHOCK = 1 << 1;
+
+    /** 【变形】耐久耗尽时不变碎、改成原地变方块 */
+    public static final int TRAIT_MORPH = 1 << 2;
+
+    /** 【导电】像避雷针一样吸引自然闪电 */
+    public static final int TRAIT_CONDUCTION = 1 << 3;
+
+    /** 【照明】下方锥形范围内的生物被染色发光 */
+    public static final int TRAIT_ILLUMINATE = 1 << 4;
+
+    /** 【透镜】白天晴天时给下方持续积热 */
+    public static final int TRAIT_LENS = 1 << 5;
+
+    /** 【魔法】命中给目标随机 debuff */
+    public static final int TRAIT_MAGIC = 1 << 6;
+
+    /** 【魔法】回收到主人手里时给随机 buff */
+    public static final int TRAIT_MAGIC_RECOVER = 1 << 7;
+
+    /** 【魔法】那 0.1% 的大奖（在【魔法】判定之上再叠一层） */
+    public static final int TRAIT_MAGIC_JACKPOT = 1 << 8;
+
+    /** 【金光闪闪】猪灵全套行为 */
+    public static final int TRAIT_GOLD_SHINY = 1 << 9;
+
+    /** 【点金】命中方块时把石头类点成矿物 */
+    public static final int TRAIT_TRANSMUTE = 1 << 10;
+
+    /** 【脉冲】命中时让周围金属目标晕头转向 */
+    public static final int TRAIT_PULSE = 1 << 11;
+
+    /** 【磁吸】飞行时把身边的金属拽向自己 */
+    public static final int TRAIT_MAGNET = 1 << 12;
+
+    /** 【磁性】飞行途中朝铁磁性目标偏航 */
+    public static final int TRAIT_MAGNETIC = 1 << 13;
+
+    /** 【移形换位】珍珠（含带它的组合球）击中其它生物时与它换位 */
+    public static final int TRAIT_TRANSPOSE = 1 << 14;
+
+    // ===== 2026-10-16 补：这六条「其它类」词条此前**没进概率系统** =====
+    //
+    // ⚠️ 作者 2026-10-16 指出：**其它类特性词条切开要均分概率、组合时再相加**。
+    //    这条规格本来就实现好了（`traitChance` 按份数现算、`rollTraitsOnce` 发射时判一次），
+    //    但上面那 15 位只覆盖了一部分词条 —— 下面这六条当时是**直接用 `hasFlag` / 字段判**的，
+    //    于是它们**恒为 100%**，切开后不按份数分红。
+    //    （【忠诚】不在此列：它是「唯一特性」，不参与切球。）
+
+    /** 【敛财】绿宝石球 —— 击中时给被击中者挂【腰缠万贯】 */
+    public static final int TRAIT_MONEY = 1 << 15;
+
+    /** 【封印】符箓球 —— 封玩家快捷栏 / 封怪物攻击并打掉它手里的球 */
+    public static final int TRAIT_SEAL = 1 << 16;
+
+    /** 【尖刺】滴水石球 —— 击中 / 碰撞 / 破碎时射出 8 枚滴水石锥 */
+    public static final int TRAIT_SPIKE = 1 << 17;
+
+    /** 【尖啸】回响球 —— 投出后无飞行过程，直接到终点并在路径上炸出监守者音波 */
+    public static final int TRAIT_SHRIEK = 1 << 18;
+
+    /** 【穿甲】回响球 —— 造成的伤害改为「真实物理伤害」（无视护甲、仍吃减伤） */
+    public static final int TRAIT_PIERCE = 1 << 19;
+
+    /** 【潮涌】潮汐球 —— 入水后不受重力、速度 ×3，并环绕激流纹理 */
+    public static final int TRAIT_TIDAL = 1 << 20;
+
+    /**
+     * 这一颗球允不允许触发「<b>主球专属</b>」的效果。
+     *
+     * <p>多重射击（原版弩附魔）会一次复制出好几颗球，而<b>有些效果是对掷出者本人生效的</b> ——
+     * 目前唯一一个是 {@link #TRAIT_TRANSPOSE 【移形换位】}：它把**掷出者和被击中的目标对调位置**。
+     * 那种效果连发三次就是灾难（人被连着丢到三个不同的地方），所以它们<b>只认主球</b>。</p>
+     *
+     * <p><b>其余一切效果照常在附属弹上生效</b> —— 伤害、穿透、潮涌、忠诚、熔融、引雷……
+     * 附属弹只是「落定即碎、不回家、不触发主球专属效果」，它不是半成品。</p>
+     *
+     * <p>将来若再有「对掷出者产生较大变化」的效果，把它的判据挂到这一处即可，
+     * 不用再去 BallAmmo 那边逐个清 profile。</p>
+     */
+    private boolean primaryOnlyEffectAllowed() {
+        return !this.multishotSide;
+    }
+
+
+
+    /** 是否已经为本趟投掷掷过 —— 保证「一次投掷只判一次」。 */
+    private boolean traitsRolled;
+
+    /** 某个 profile 是否带着这个特性位。 */
+    private static boolean hasTrait(BallBehavior.BallProfile profile, int traitBit) {
+        switch (traitBit) {
+            case TRAIT_KINDNESS:
+                return profile.kindness();
+            case TRAIT_SHOCK:
+                return profile.shockDamage();
+            case TRAIT_MORPH:
+                return profile.morphBlock() != null;
+            case TRAIT_CONDUCTION:
+                return profile.conduction();
+            case TRAIT_ILLUMINATE:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE);
+            case TRAIT_LENS:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_LENS);
+            case TRAIT_MAGIC:
+            case TRAIT_MAGIC_RECOVER:
+            case TRAIT_MAGIC_JACKPOT:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_MAGIC);
+            case TRAIT_GOLD_SHINY:
+                return profile.glint();
+            case TRAIT_TRANSMUTE:
+                return profile.transmuteChance() > 0.0F;
+            case TRAIT_PULSE:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_PULSE);
+            case TRAIT_MAGNET:
+                return profile.hasMagnet();
+            case TRAIT_MAGNETIC:
+                return profile.hasMagnetic();
+            case TRAIT_TRANSPOSE:
+                return profile.transpose();
+            // ===== 2026-10-16 补的六条（见位定义处的说明）=====
+            case TRAIT_MONEY:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_MONEY);
+            case TRAIT_SEAL:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_SEAL);
+            case TRAIT_SPIKE:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_SPIKE);
+            case TRAIT_SHRIEK:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_SHRIEK);
+            case TRAIT_PIERCE:
+                return profile.hasFlag(BallBehavior.BallProfile.FLAG_PIERCE);
+            case TRAIT_TIDAL:
+                return profile.tidalSurge();
+            default:
+                return false;
+        }
+    }
+
+    /** 这颗球实际带着哪些特性（还没掷概率）。 */
+    private int ownedTraits() {
+        int bits = 0;
+        // ⚠️ 扫描范围必须覆盖**所有已定义的 TRAIT_* 位**（现在最高是 1 << 20）——
+        //    只扫 16 位的话，晚加的词条位永远扫不到，表现就是「携带了但从不触发」。
+        for (int bit = 0; bit < 32; bit++) {
+            if (hasTrait(this.profile(), 1 << bit)) {
+                bits |= 1 << bit;
+            }
+        }
+        return bits;
+    }
+
+    /**
+     * 某个特性在本趟投掷里的触发概率（作者 2026-10-13 规格）。
+     *
+     * <p>与数值类词条一样，概率随份数携带：完整球 1.0 / 半球 0.5 / 四分之一球 0.25；
+     * 组合球只统计**真正带着这个词条的那些份**，各自 + 本份大小，封顶 1.0。</p>
+     *
+     * <p>例：1 个红石四分之一球 + 3 个没有【脉冲】的 → 【脉冲】25%；
+     * 2 个四分之一球都带 → 50%；4 个都带 → 100%。</p>
+     */
+    private float traitChance(int traitBit) {
+        ItemStack stack = this.getItem();
+        Item item = stack.getItem();
+        if (item == ModItems.COMBO_BALL.get()) {
+            List<Integer> indexes = BallFragments.parseIndexes(
+                    stack.getOrDefault(ModComponents.COMBO_SOURCES.get(), ""));
+            float per = indexes.size() <= 2 ? 0.5F : 0.25F;
+            float sum = 0.0F;
+            for (int index : indexes) {
+                if (index < 0 || index >= BallFragments.sources().size()) {
+                    continue;
+                }
+                BallBehavior.BallProfile part =
+                        BallBehavior.profileFor(new ItemStack(BallFragments.sources().get(index)));
+                if (hasTrait(part, traitBit)) {
+                    sum += per;
+                }
+            }
+            return Math.min(1.0F, sum);
+        }
+        if (!hasTrait(this.profile(), traitBit)) {
+            return 0.0F;
+        }
+        if (item == ModItems.BALL_HALF.get()) {
+            return 0.5F;
+        }
+        if (item == ModItems.BALL_QUARTER.get()) {
+            return 0.25F;
+        }
+        return 1.0F;
+    }
+
+    /**
+     * **伪随机保底**：按「球的来源 + 词条」记账的连续未触发次数（作者 2026-10-13 规格）。
+     *
+     * <p>键是**扔出这颗球的那个实体**的 UUID（玩家与怪物一视同仁），值是 16 个计数 ——
+     * <b>每个特性位各自一个计数器</b>，互不影响。</p>
+     *
+     * <p>触发后该位清零；全部为 0 时整个条目会被移除，避免长跑后越攒越多。</p>
+     */
+    private static final java.util.Map<java.util.UUID, int[]> TRAIT_MISS_STREAKS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * **保底次数**：{@code round(1 / p × 1.5)}，最小 1。
+     *
+     * <p>例：25% → 1/0.25 = 4，×1.5 = 6 → 连续 5 次没中就第 6 次必中；
+     * 50% → 3；75% → 2。</p>
+     */
+    private static int pityLimit(float chance) {
+        return Math.max(1, Math.round(1.0F / chance * 1.5F));
+    }
+
+    /**
+     * 每趟投掷**只判一次**：把球带着的每个特性各掷一次，
+     * 每个特性用它**自己的概率**、并享受**它自己的保底计数**。
+     */
+    private void rollTraitsOnce() {
+        if (this.traitsRolled) {
+            return;
+        }
+        // ⚠️ 只在服务端掷！客户端球实体也会 tick，但它不是权威 ——
+        //    而且 TRAIT_MISS_STREAKS 是 static，两端各掷会把同一个计数器互相冲掉
+        //    （2026-10-13 实测日志：判定全在 Render thread、保底却永远攒不满，就是这个）。
+        if (this.level().isClientSide()) {
+            return;
+        }
+        this.traitsRolled = true;
+        int owned = this.ownedTraits();
+        if (owned == 0) {
+            return;
+        }
+        RandomSource random = this.getRandom();
+        Entity owner = this.getOwner();
+        int[] misses = owner == null
+                ? null
+                : TRAIT_MISS_STREAKS.computeIfAbsent(owner.getUUID(), key -> new int[32]);
+        int fired = 0;
+        // ⚠️ 同 ownedTraits：必须扫全部已定义的位（最高 1 << 20），只扫 16 位会漏掉后加的词条
+        for (int bit = 0; bit < 32; bit++) {
+            int unit = 1 << bit;
+            if ((owned & unit) == 0) {
+                continue;
+            }
+            float chance = this.traitChance(unit);
+            if (chance <= 0.0F) {
+                continue;
+            }
+            boolean hit;
+            if (chance >= 1.0F) {
+                hit = true;                                  // 100%：本来必中，不参与保底
+            } else if (misses != null && misses[bit] + 1 >= pityLimit(chance)) {
+                hit = true;                                  // 保底：连续没够次数 → 这次必中
+            } else {
+                hit = random.nextFloat() < chance;
+            }
+            if (misses != null) {
+                MoreBalls.LOGGER.debug("[ball][保底] 词条位{} 概率{} 保底{} 连未中{} 本次{}", bit, chance, pityLimit(chance), misses[bit], hit ? "触发" : "未中");
+                misses[bit] = hit ? 0 : misses[bit] + 1;
+            }
+            if (hit) {
+                fired |= unit;
+            }
+        }
+        this.getEntityData().set(FIRED_TRAITS, fired);
+        // 全清零就整条移除，别让 Map 无限长
+        if (misses != null) {
+            boolean anyLeft = false;
+            for (int value : misses) {
+                if (value != 0) {
+                    anyLeft = true;
+                    break;
+                }
+            }
+            if (!anyLeft) {
+                TRAIT_MISS_STREAKS.remove(owner.getUUID());
+            }
+        }
+    }
+
+    /** 本趟投掷里，这个特性生不生效（{@code TRAIT_*} 之一）。 */
+    public boolean traitFired(int traitBit) {
+        return (this.getEntityData().get(FIRED_TRAITS) & traitBit) != 0;
+    }
+    /**
+     * 【破坏王】砸掉方块后保留的速度比例。
+     *
+     * <p>作者 2026-10-10 明确：<b>减速保留</b>（0.85，砸一块掉 15%）。
+     *    上一版我误听成「完全不减速」改成了 1.0，已改回。</p>
+     *
+     * <p>作者真正要的是「<b>别因为反弹让球老是往下掉</b>」—— 那是砸完之后又走了
+     * {@code bounceOff()} 导致的，见 {@code onHit} 的方块分支。</p>
+     */
+    private static final double BREAKER_SPEED_RETAIN = 0.85D;
+
+    /**
+     * 【破坏王】已经砸掉的方块数。
+     *
+     * <p>作者 2026-10-10 指定：【破坏王10】—— 额度取自 profile 的 breaker 字段
+     * 次破坏方块的机会，用完就再也砸不动（不再破坏、也不再扣耐久）。</p>
+     *
+     * <p>另外，速度衰减到静止阈值以下时也会提前收手 —— 免得下一 tick 速度
+     * 刚好微微回升时又来砸一块。</p>
+     */
+    private int breakerUsed;
+
+    /** 静止后存活时长：2 分钟 = 2400 刻 */
+    private static final int SETTLED_LIFETIME_TICKS = 2400;
+
+    /**
+     * 反弹时把球沿碰撞面法线推离的距离。
+     *
+     * <p>投射物命中后会被摆到方块<b>表面</b>上，而球的判定盒有 0.25 高 ——
+     * 球心贴面意味着下半截嵌在方块里，下一 tick 一动就再次命中地面，
+     * 于是每 tick 扣一次耐久。</p>
+     */
+    private static final double SURFACE_PUSH = 0.02D;
+
+    /** 滚动时球底与方块顶面之间留的间隙，避免每 tick 都判定到地面碰撞（那就是抽搐的来源） */
+    private static final double GROUND_CLEARANCE = 0.01D;
+
+    /** 静止后允许被右键选中的半径 —— 球本身很小，给宽一点才点得中 */
+    private static final float PICK_RADIUS = 1.0F;
+
+    /** 飞行中的拾取半径（用于接球）：比静止时小，既能接住又不会太挡准星 */
+    private static final float FLYING_PICK_RADIUS = 0.5F;
+
+    /** 接球时承受的伤害比例 —— 作者指定：原本的一半 */
+    private static final float CATCH_DAMAGE_RATIO = 0.5F;
+
+    // （这里原本有个 SPEED_DAMAGE_CAP = 3.0 的伤害上限，作者 2026-10-07 要求去掉，
+    //   所以常量本身也一并删了 —— 免得留个名字让人以为还有上限。）
+
+    /**
+     * 投掷者要等多少刻之后才能接回自己扔出的球（0.5 秒）。
+     *
+     * <p>只挡「出手瞬间立刻收回」—— 再往后就是正常的接球，该接得到。</p>
+     */
+    private static final int OWNER_SELF_PICKUP_DELAY_TICKS = 10;
+
+    /**
+     * 出手后的「无害期」：0.1 秒 = 2 刻（作者指定）。
+     *
+     * <p>贴脸投掷（对着脚边的墙、或往下砸）时球会立刻反弹回来，而那一下速度还满着，
+     * 容易把投掷者自己打伤。前 2 刻不结算命中伤害即可避开这一下；
+     * 反弹、滚动等物理行为不受影响，只是这段时间内不扣血。</p>
+     */
+    private static final int SPAWN_GRACE_TICKS = 2;
+
+    /**
+     * 被外力撞开后，「禁止判定静止」的窗口（刻）。
+     *
+     * <p>已经停在地上的球被别的球撞、或者被玩家蹭到之后，本该滚出去一段。
+     * 但静止判定只看「速度是否低于 {@link #SETTLE_SPEED_SQR}」——
+     * 碰撞刚传过来的速度往往就在阈值附近，下一 tick 立刻又被判回静止，
+     * 表现就是「已经静止的球怎么撞都不动」。给一个免疫窗口，让它先滚出去再说。</p>
+     */
+    private static final int IMPULSE_GRACE_TICKS = 12;
+
+    /**
+     * 低于这个竖直速度的向上分量直接抹平（格/刻）。
+     *
+     * <p>球的重力本来就小，一丁点向上的残余速度够它飘很久 ——
+     * 看着就像球自己无端飞起来。这个阈值远低于正常反弹速度
+     * （3 格高度落下约反弹 0.24 格/刻），所以不会误伤真正的弹跳。</p>
+     */
+    private static final double MIN_BOUNCE_UP_SPEED = 0.08D;
+
+    /**
+     * 球与球判定为「撞上」的中心距离（格）。
+     *
+     * <p>球的碰撞箱宽 0.25，取 0.35 留一点余量 —— 连续碰撞检测就靠这个半径去判
+     * 「这一 tick 的路径有没有擦到对方」。</p>
+     */
+    private static final double CONTACT_DISTANCE = 0.35D;
+
+    /**
+     * 落定之后的「坐实」刻数（作者指定 5 刻）。
+     *
+     * <p>球判定静止的瞬间往往还悬在地面之上一点点，这 5 刻里只做一个纯粹的向下动作：
+     * <b>不反弹、不滑动、不上飘</b>，把球踏踏实实按到地面上，之后才转入真正的静止。
+     * 期间的水平与向上分量全部为零。</p>
+     */
+    private static final int SETTLE_DROP_TICKS = 5;
+
+    /** 坐实阶段的下落速度（格/刻）—— 慢一点才看得出是「落定」而不是「又弹了一下」 */
+    private static final double SETTLE_DROP_SPEED = 0.08D;
+
+    /** 【空气动力球】回归的起始速度（格/刻）—— 参考忠诚附魔：起步不快，然后加速 */
+    private static final double RETURN_BASE_SPEED = 0.6D;
+
+    /** 【空气动力球】回归每刻的加速度 */
+    private static final double RETURN_ACCEL = 0.09D;
+
+    /** 【空气动力球】回归速度上限 */
+    private static final double RETURN_MAX_SPEED = 4.0D;
+
+    /** 【空气动力球】离主人多近算「到家」（格） */
+    private static final double RETURN_ARRIVE_DISTANCE = 1.8D;
+
+    /** 找绕行路线时，最多往主人上方试探几格 */
+    private static final int RETURN_CLIMB_STEPS = 8;
+
+    /** 检测「这条路通不通」时的采样步长（格） */
+    private static final double PATH_SAMPLE_STEP = 0.5D;
+
+    /** 回归时每隔几刻重算一次路线 —— 逐刻重算会让球在障碍边缘左右横跳 */
+    private static final int RETURN_RETARGET_INTERVAL = 5;
+
+    /**
+     * 「悬空」总兜底的计时上限（刻）。
+     *
+     * <p>见 {@link #tickNoGravityStall()}。取 <b>100 刻 = 5 秒</b>。</p>
+     */
+    private static final int NO_GRAVITY_STALL_LIMIT = 100;
+
+    /** 「无重力 + 完全静止」已经持续了多少刻（见 {@link #tickNoGravityStall()}） */
+    private int noGravityStallTicks;
+
+    /**
+     * <b>悬空总兜底</b> —— 无重力 + 完全静止持续 {@value #NO_GRAVITY_STALL_LIMIT} 刻就强制放开重力。
+     *
+     * <h2>为什么要一条「与具体路径无关」的兜底</h2>
+     * <p>球一共有 <b>5 条</b>会 {@code setNoGravity(true)} 的路径：
+     * 【潮涌】（{@code tickTidalSurge}）、【智慧】（追踪中 + 初始化）、回归（起飞 + 每刻维持）。
+     * 它们各自都配了「还原重力」，但只要<b>任何一条因为某个没预料到的条件没走到还原</b>，
+     * 球就会永久悬停在半空 —— 更麻烦的是 {@code setSettled()} 在 {@code isNoGravity()} 时
+     * <b>拒绝进入静止态</b>，于是它既不落地、也不静止、也走不到 2400 刻的自动消失。</p>
+     *
+     * <p>作者 2026-10-17 报「还是有悬空的球」，而那颗球是<b>空心铜球</b>（没有【智慧】词条）——
+     * 说明智慧那段的还原压根不会执行。逐条去堵已经被证明会漏，所以这里改成
+     * <b>与路径无关的总兜底</b>：只要球「无重力 + 完全静止」撑够 5 秒，一律强制放开重力。</p>
+     *
+     * <h2>为什么不会误伤</h2>
+     * <ul>
+     *   <li><b>尖啸飞行中</b>（{@link #isShriekFlying()}）—— 速度是 32，不静止，排除；</li>
+     *   <li><b>回归途中</b>（{@code homingBack}）—— 每刻都在加速，且它自己有超时兜底，排除；</li>
+     *   <li><b>【潮涌】入水</b> —— 水里球会被水流推、且在浮沉，另外下面还单独用
+     *       {@code isInWater()} 挡了一层。</li>
+     * </ul>
+     * <p>真正会命中这条的，是<b>那些「既无重力又不动」的球</b> —— 也就是玩家看到的悬空球。</p>
+     */
+    private void tickNoGravityStall() {
+        if (!(this.level() instanceof ServerLevel)) {
+            return;   // 客户端不参与判定
+        }
+        boolean hovering = this.isNoGravity()
+                && !this.isShriekFlying()
+                && !this.homingBack
+                && !this.isInWater()
+                && this.getDeltaMovement().lengthSqr() < 0.0025D;   // 速度 < 0.05 格/刻
+        if (!hovering) {
+            this.noGravityStallTicks = 0;
+            return;
+        }
+        if (++this.noGravityStallTicks < NO_GRAVITY_STALL_LIMIT) {
+            return;
+        }
+        this.noGravityStallTicks = 0;
+        this.setNoGravity(false);
+        // 放开重力后**必须放掉落定**：正常物理接管，球下一 tick 就会开始下落。
+        this.setSettled(false);
+        MoreBalls.LOGGER.info("[ball] 悬空兜底：无重力且静止已满 {} 刻，强制放开重力（位置 {}）",
+                NO_GRAVITY_STALL_LIMIT, this.position());
+    }
+
+    /**
+     * 回归的<b>时间上限</b>（刻）—— 超过就放弃回归、还原「恼鬼三件套」。
+     *
+     * <p>作者 2026-10-16 报的「偶尔出现悬在空中的球」：回归期间球是 noPhysics + 无重力的，
+     * 而且拒绝进入静止态；一旦回归卡住不结束（在障碍里打转、方向一直选不通），
+     * 它就会<b>永远悬空飞、永不落定也不消失</b>。</p>
+     *
+     * <p>取 <b>600 刻（30 秒）</b>：正常回归几秒内就该到主人手里，30 秒还没到必然是卡住了 ——
+     * 这时宁可让它掉下来落地，也不要留一颗飘着的球。</p>
+     */
+    private static final int RETURN_GIVE_UP_TICKS = 600;
+
+    /**
+     * 球在水里泡这么多刻，就当它「落定」了。
+     *
+     * <p>水里的球被浮力托着，速度永远压不到静止阈值以下，正常那套落定判定根本走不到 ——
+     * 于是掉进水里就永远不会启动回归（作者反馈的 bug）。这里给个替代条件：
+     * 泡够 1 秒，该回家就回家。离开水面会清零。</p>
+     */
+    private static final int WATER_SETTLE_TICKS = 20;
+
+    /**
+     * 兜底落定的速度阈值（平方）—— 比严格静止阈值（0.03）宽松得多。
+     *
+     * <p>球卡在方块边缘打转时，速度常常在 0.05~0.08 之间晃，永远压不到 0.03 以下。</p>
+     */
+    private static final double STUCK_SPEED_SQR = 0.01D;
+
+    /** 低速持续多少刻就当球停下了（1 秒） */
+    private static final int STUCK_SETTLE_TICKS = 20;
+
+    private @Nullable IntOpenHashSet piercingIgnoreEntityIds;
+
+    private int settledTicks;
+
+    /** 剩余多少刻内禁止判定静止（被撞飞 / 被推开之后的一小段） */
+    private int impulseTicks;
+
+    /** 落定后还剩多少刻的「向下坐实」动作 */
+    private int settleDropTicks;
+
+    /** 【空气动力球】：这颗球静止后要自己飞回主人 */
+    private boolean returnToOwner;
+
+    /** 正在回家的路上（回归期间免重力，免得飞一半掉下去） */
+    private boolean homingBack;
+
+    /** 回归已经飞了几刻 —— 用来做「越飞越快」的加速 */
+    private int homingTicks;
+
+    /** 上一刻是否在实心里 —— 用来把「连续实心段」和「被空气隔开的另一段」区分开 */
+    private boolean wasInsideBlock;
+
+    /** 当前这一段回归用的方向（隔几刻才重算一次，见 RETURN_RETARGET_INTERVAL） */
+    private Vec3 returnDirection;
+
+    /** 连着泡在水里的刻数 —— 够了就当作「落定」，见 WATER_SETTLE_TICKS */
+    private int inWaterTicks;
+    /** 【潮涌】是否已激活（服务端权威；客户端读同步位） */
+    private boolean tidalSurgeActive;
+    /** 【潮涌】激活前的重力状态 —— 出水时要还原成它，而不是硬写 false */
+    private boolean tidalGravityBefore = true;
+
+    /**
+     * 潮涌期间的速度上限 —— 进入潮涌那一刻的速度。
+     *
+     * <p>用来兜住「不受阻力」那段预乘的副作用：预乘是为了抵消水里的 0.8 衰减，
+     * 但 {@code super.tick()} 里到底用哪个衰减系数取决于<b>那一刻</b>球在不在水里 ——
+     * 球正好卡在水面时会出现「预乘生效、衰减却按空气算」的情况，速度凭空涨 25%。
+     * 涨过这个上限就压回去；它<b>不限制</b>「重新入水再 ×3」——上限在每次进入时按当时的速度重设。</p>
+     */
+    private double tidalSpeedCap;
+
+    /** 低速持续的刻数 —— 够了就当作「落定」（只给带空气动力球的球用） */
+    private int stuckTicks;
+
+    /** 回归期间挂着区块票据的那一格区块；球换区块时要跟着换票据 */
+    private ChunkPos ticketChunk;
+
+    /**
+     * 这是多重射击复制出来的<b>附属弹</b>。作者指定：附属弹停下来就碎，
+     * 不留在地上、也不触发【空气动力球】之类的效果 —— 只有主弹药享受完整待遇。
+     */
+    private boolean multishotSide;
+
+    /**
+     * 球自身的热量 —— 感应累积的热量；攒到配置的「融化」阈值（雪球类默认 200）就化掉。
+     *
+     * <p><b>是 float 而不是 int</b>（2.8.0 改）：热量按「当前速度 / 初速度」折算效率，
+     * 慢速飞行时每刻的增量可能远小于 1，用 int 会被直接截成 0 —— 表现就是
+     * 「球慢下来之后完全不再积热」。整数化只在显示档位时才做。</p>
+     */
+    private float heat;
+
+    /**
+     * 上一次打过诊断日志的热量档位（每跨过一个 {@link #HEAT_DIAG_STEP} 就打一条）。
+     *
+     * <p>热量是<b>实体内部字段</b>：没进 NBT、也没同步给客户端，所以游戏外只能靠日志看。
+     * 作者要求「看攒到多少了」时，翻 latest.log 里 {@code [ball] … 热量} 那几行即可。</p>
+     */
+    private int heatDiagMilestone = Integer.MIN_VALUE;
+
+    /** 热量诊断日志的档位宽度：每跨过这么多点记一条 */
+    private static final int HEAT_DIAG_STEP = 100;
+
+    /** 距离下次重新扫描还有几刻（扫描很贵，不必每刻做） */
+    private int scanCooldown;
+
+    /** 上次扫描到的金属矿物格数 */
+    private int nearbyMetalBlocks;
+
+    /** 上次扫描到的范围内生物（含玩家；每 SCAN_INTERVAL 刻刷新一次） */
+    private List<LivingEntity> nearbyEntities = List.of();
+
+    /** 上次扫描到的金属矿物位置（每刻给它们升温） */
+    private List<BlockPos> nearbyOres = List.of();
+
+    /** 磁吸目标：矿物与生物按「热量积累速度」竞争后的胜者 */
+    private BallProspecting.MagnetTarget magnetTarget;
+
+    /** 上一次扣耐久的刻，用于挡住同一瞬间的重复结算 */
+    private int lastDamageTick = Integer.MIN_VALUE;
+
+    /**
+     * 命中伤害 —— <b>按「击中速度 ÷ 出手速度」的比例缩放</b>（作者 2026-10-07 指定）。
+     *
+     * <h2>为什么要这一层</h2>
+     * <p>原本伤害是「出手那一刻」定死的，之后球被怎么加速、怎么减速都不影响。
+     * 而持球苦力怕那套是<b>拿爆炸当发射药</b> —— 球会被炸到远超正常投掷的速度，
+     * 伤害却还是原来那个数，所以「超快的球不疼」。</p>
+     *
+     * <h2>比例可缩可放、不设上限</h2>
+     * <p>作者明确：**两边都要**（比出手快就加成、比出手慢就缩水），而且
+     * **不要上限**（参考原版箭矢的直算思路）。所以这里就是最朴素的
+     * {@code damage × (击中速度 / 出手速度)}，没有 clamp。</p>
+     *
+     * <p>基准必须用「**实际出手速度**」（{@link #launchSpeed}，在 {@link #shoot} 里记的），
+     * 不能用 {@code profile.physicalVelocity()} —— 后者不含蓄力与附魔，
+     * 拿它当除数会让蓄力被算两次。</p>
+     */
+    private float impactDamage() {
+        // 基准 = 实际出手速度。理论上不会缺；万一是没走 shoot 的路径就退回这颗球的正常出手速度。
+        double base = this.launchSpeed > 1.0E-4D
+                ? this.launchSpeed
+                : this.profile().physicalVelocity();
+        if (base <= 1.0E-4D) {
+            return this.damage;
+        }
+        double hitSpeed = this.getDeltaMovement().length();
+        float ratio = (float) (hitSpeed / base);
+        float result = this.damage * ratio;
+
+        // 诊断日志：这条链上有好几个量（基础伤害、出手速度、击中速度），
+        // 光看画面分不清是哪一环不对 —— 打出来一看就知道。
+        // 降级为 debug —— 这条每次命中都打，实测一局刷了 24 条 INFO（作者反馈刷屏）
+        // ⚠️ 已改回 debug —— 每命中一次打一条，会刷屏。
+        //    而这条正好能把「基础伤害 / 出手速度 / 击中速度」三个量一次摊开。
+        //    查清后改回 debug（原来就是 debug —— 每命中一次打一条，会刷屏）。
+        MoreBalls.LOGGER.debug("[ball] 命中伤害 {} = 基础 {} × 速度比 {}（击中速度 {} / 出手速度 {}）",
+                result, this.damage, ratio, hitSpeed, base);
+        return result;
+    }
+
+    /**
+     * 出手速度 —— 由 {@link #shoot} 自动记下，命中时当除数用。
+     *
+     * <p>默认 0 表示「还没记录过」，{@link #impactDamage()} 会退回按
+     * {@code profile.physicalVelocity()} 算。</p>
+     */
+    private double launchSpeed;
+
+    private float damage = 3.0F;
+
+    /** 发射力度倍率（强弩附魔加成），在 shoot 时乘到初速度上 */
+    private float launchMultiplier = 1.0F;
+
+    /**
+     * 【金光闪闪】的<b>吸引窗口</b>截止时刻（游戏刻）。
+     *
+     * <h2>规则（作者 2026-10-08 指定）</h2>
+     * <p>金球<b>第一次碰撞</b>之后的 5 秒（100 刻）内：</p>
+     * <ul>
+     *   <li>猪灵与猪灵蛮兵<b>不会被它捡起</b></li>
+     *   <li>它们被<b>强制禁用仇恨</b>（清掉记恨与当前攻击目标）</li>
+     *   <li>并被这颗金球<b>吸引</b>过去</li>
+     * </ul>
+     * <p>每次碰撞都会把这个截止时刻往后推 5 秒，所以「撞一下 → 猪灵围过来」可以反复触发。</p>
+     */
+    private long goldLureUntilTick = 0L;
+
+    /** 【金光闪闪】的窗口时长：5 秒 */
+    public static final int GOLD_LURE_WINDOW_TICKS = 100;
+
+    /** 这颗金球此刻是否处于吸引窗口内 */
+    public boolean isGoldLuring(long now) {
+        return this.getGoldLureUntil() > now;
+    }
+
+    public long getGoldLureUntil() {
+        return this.goldLureUntilTick;
+    }
+
+    /** 刷新吸引窗口 —— 由碰撞触发 */
+    public void refreshGoldLureWindow() {
+        this.goldLureUntilTick = this.level().getGameTime() + GOLD_LURE_WINDOW_TICKS;
+    }
+    public BallProjectile(EntityType<? extends BallProjectile> type, Level level) {
+        super(type, level);
+    }
+
+    public BallProjectile(Level level, LivingEntity shooter, ItemStack stack) {
+        super(ModEntities.BALL.get(), shooter, level, stack);
+        // 弩在装填/发射时会往被消耗的弹药上打「intangible_projectile」（不可回收）标记，
+        // 原版箭在 AbstractArrow 构造里主动移除了它 —— 我们的球是可以被捡回来的，
+        // 不清掉的话捡回来的球会显示「不可回收」，而且因为多了一个数据组件而叠不进普通堆。
+        ItemStack held = this.getItem();
+        BallItem.stripIntangible(held);
+        this.setItem(held);
+    }
+
+    /**
+     * 实体的名字 —— 跟着物品走：木球扔出去就叫「木球」，铁球就叫「铁球」。
+     *
+     * <h2>为什么不走原版 custom name</h2>
+     * 原版的 {@code setCustomName} 自带「把名字渲染到世界里」这条绑定，
+     * 一堆球飞起来就满天是字，怎么压都压不干净。
+     * 这里改成<b>直接覆写取名字的方法</b> —— 名字只存在于「查询接口」这一层：
+     * Jade 之类的信息面板读的就是它，而渲染器拿不到任何可显示的名字。
+     *
+     * <p>构造阶段可能还没拿到物品，取不到就退回超类的行为，不会抛异常。</p>
+     */
+    @Override
+    public Component getName() {
+        ItemStack stack = this.getItem();
+        if (stack.isEmpty()) {
+            return super.getName();
+        }
+        return stack.getHoverName();
+    }
+
+    public void setDamage(float damage) {
+        this.damage = damage;
+    }
+
+    public float getDamage() {
+        return this.damage;
+    }
+
+    public void setLaunchMultiplier(float launchMultiplier) {
+        this.launchMultiplier = Math.max(0.0F, launchMultiplier);
+    }
+
+    /** 出手时把力度倍率乘进初速度（射程与初速平方成正比，故用开方换算） */
+    @Override
+    public void shoot(double x, double y, double z, float velocity, float inaccuracy) {
+        super.shoot(x, y, z, velocity * this.launchMultiplier, inaccuracy);
+        // 记下「出手速度」—— 命中伤害要按「击中速度 / 出手速度」算（作者 2026-10-07 指定）。
+        //
+        // 放在 shoot() 里而不是各个投掷点，是因为**玩家手扔、怪物投掷、弩发射全部走这里**：
+        // 一处记录就全覆盖，也不会漏掉附魔倍率（launchMultiplier 刚刚才乘进去）。
+        // 基准必须用「实际出手速度」而不是 profile.physicalVelocity()——
+        // 后者不含蓄力/附魔，拿它当除数会让蓄力被算两次。
+        this.launchSpeed = this.getDeltaMovement().length();
+    }
+
+    public byte getPierceLevel() {
+        byte fromLaunch = this.entityData.get(PIERCE_LEVEL);
+        if (fromLaunch > 0) {
+            return fromLaunch;
+        }
+        // ⚠️ 回退到**球自带的【穿透N】**（作者 2026-10-13 报「潮汐球的【穿透5】未生效」）。
+        //
+        //    PIERCE_LEVEL 这个同步位**只有** BallAmmo.createProjectile() 写过一处
+        //    （BallAmmo.java:322），而那个方法**只被弩的发射路径调用**
+        //    （CrossbowItemMixin.java:81）。也就是说：**手扔的球根本走不到那里**，
+        //    这个位从头到尾是 0 → onHitEntity 里的 `getPierceLevel() > 0` 不成立
+        //    → 穿透分支根本不进，表现就是「手扔一颗带穿透的球，永远不穿透」。
+        //    钻石球自带的【穿透3】其实也一直受这个影响（那边只修过「弩没附魔」那半边）。
+        //    球自带的穿透是**球自己的性质**，不该因为发射方式不同就失效。
+        //
+        //    弩射时仍然优先用发射时算好的值（那里已把「弩的穿透附魔」和球自带的取过 max）。
+        if (this.profile().hasPenetration()) {
+            return (byte) Math.max(0, Math.min(127, this.profile().penetration()));
+        }
+        return 0;
+    }
+
+    public void setPierceLevel(byte pierceLevel) {
+        this.entityData.set(PIERCE_LEVEL, pierceLevel);
+    }
+
+    public int getWeight() {
+        return this.entityData.get(WEIGHT);
+    }
+
+    public void setWeight(int weight) {
+        this.entityData.set(WEIGHT, Mth.clamp(weight, BallWeight.MIN, BallWeight.MAX));
+    }
+
+    public boolean isFromCrossbow() {
+        return this.entityData.get(FROM_CROSSBOW);
+    }
+
+    public void setFromCrossbow(boolean fromCrossbow) {
+        this.entityData.set(FROM_CROSSBOW, fromCrossbow);
+    }
+
+    public int getToughness() {
+        return this.entityData.get(TOUGHNESS);
+    }
+
+    public void setToughness(int toughness) {
+        this.entityData.set(TOUGHNESS, toughness);
+    }
+
+    public boolean isTough() {
+        return this.getToughness() != BallBehavior.NOT_TOUGH;
+    }
+
+    public int getBounce() {
+        return this.entityData.get(BOUNCE);
+    }
+
+    public void setBounce(int bounce) {
+        this.entityData.set(BOUNCE, Mth.clamp(bounce, 0, 10));
+    }
+
+    public boolean isSettled() {
+        return this.entityData.get(SETTLED);
+    }
+
+    private void setSettled(boolean settled) {
+        // 【智慧x】**正在无视重力飞行**时不进入静止态（作者 2026-10-09 指定）。
+        // 静止态的球会被「按在地上」（贴地、可被捡、触发静止特效），
+        // 而此时它还在空中追目标 —— 必须拦住。
+        //
+        // ⚠️ 判据是 **isNoGravity()**，不是 wisdomStillTracking()。
+        //    后者在「第一次命中之前」也为真，会让球一扔出去就拒绝静止；
+        //    而作者要的是「无视重力的时候才不静止」—— 命中前照常能落地静止。
+        if (settled && this.isNoGravity()) {
+            this.entityData.set(SETTLED, false);
+            return;
+        }
+        this.entityData.set(SETTLED, settled);
+    }
+
+    public boolean isRolling() {
+        return this.entityData.get(ROLLING);
+    }
+
+    private void setRolling(boolean rolling) {
+        this.entityData.set(ROLLING, rolling);
+    }
+
+    /**
+     * 一律不显示名字标签 —— 任何情况都不显示（作者指定）。
+     *
+     * <p>名字只存在于 {@link #getName()} 这一层（给信息面板读），
+     * 世界里飘着的名字标签归这个开关管，直接关死。</p>
+     */
+    @Override
+    public boolean shouldShowName() {
+        return false;
+    }
+
+    /**
+     * 能否被玩家的准星选中做交互。
+     *
+     * <p><b>必须覆写</b>：原版 {@code Projectile} 把它写死成
+     * {@code this.is(EntityTypeTags.REDIRECTABLE_PROJECTILE)}，普通投射物一律返回 false，
+     * 于是球根本不在射线候选里、右键完全没反应。</p>
+     *
+     * <p>这里对所有存活的球都返回 true —— 地上的球要能捡，飞在空中的球要能接。</p>
+     */
+    @Override
+    public boolean isPickable() {
+        return this.isAlive();
+    }
+
+    /**
+     * 拾取半径：地上的球给得宽裕、好点中；飞行中的球给一个小半径，
+     * 既接得住，又不至于把玩家的准星挡死。
+     */
+    @Override
+    public float getPickRadius() {
+        return this.isSettled() ? PICK_RADIUS : FLYING_PICK_RADIUS;
+    }
+
+    /**
+     * 允许被其它实体推动 —— 玩家或生物蹭一下，球就会滚起来。
+     *
+     * <h2>为什么【金光闪闪】的吸引窗口内不给推</h2>
+     * <p>被吸引的猪灵会一拥而上，而它们会把球<b>顶着一路走</b>。球每滚一下就会撞到方块，
+     * 走 {@code consumeDurability("反弹")} 扣耐久 —— 金球耐久本来就低，推一会儿耐久就空了，
+     * 于是 {@code burst()} 里走 morph 直接变成金块（作者 2026-10-09 报的
+     * 「猪灵推动金球导致金球提前变成金块」）。</p>
+     *
+     * <p>那 5 秒窗口本来就是要让玩家看清楚「猪灵被吸引过来」，球在这段时间里
+     * 原地不动才符合设计意图 —— 而且窗口一过就恢复可推。</p>
+     */
+    @Override
+    public boolean isPushable() {
+        if (this.level() instanceof ServerLevel server
+                && BallBehavior.isGoldShiny(this.getItem())
+                && this.isGoldLuring(server.getGameTime())) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 被推动时把位移转成「滚动」：直接切到贴地滚动状态，而不是被弹回空中。
+     */
+    @Override
+    public void push(double x, double y, double z) {
+        super.push(x, y, z);
+        if (!this.level().isClientSide() && this.isTough()) {
+            Vec3 velocity = this.getDeltaMovement();
+            this.setDeltaMovement(velocity.x, 0.0D, velocity.z);
+            if (!this.isRolling()) {
+                this.setRolling(true);
+            }
+            this.setSettled(false);
+            this.impulseTicks = IMPULSE_GRACE_TICKS;
+        }
+    }
+
+    /**
+     * 重力：滚动中贴地、或已经停下等人来捡，都不再受重力；其余情况按重量与发射方式换算。
+     *
+     * <p>静止态也必须切断重力 —— 否则球停下后会被重力拽向地面、撞出一次「微型反弹」，
+     * 接着又弹又停又沉，视觉上就是停下来时的一顿一顿。</p>
+     */
+    @Override
+    protected double getDefaultGravity() {
+        // 只有「还踩在地上」的滚动 / 静止球才断重力。
+        // 一旦离地（被弹起、被撞飞、被拽开），重力必须恢复 ——
+        // 否则球会带着一丁点向上的速度永远飘着上升（作者反馈过这个现象）。
+        //
+        // 【空气动力球】回归途中同样断重力：它是「飞回去」，不是「掉回去」。
+        // 判定用 homingTicks > 0 兜底 —— 只要这颗球已经起飞过，就一直是回归状态，
+        // 哪怕中间某一刻拿不到主人（下线、维度切换）也不该突然被重力拽下去。
+        if (this.isSettled() || this.homingBack || this.isReturning()
+                || (this.isRolling() && this.hasSupportBelow())) {
+            return 0.0D;
+        }
+        return BallWeight.gravityFor(this.getWeight(), this.isFromCrossbow());
+    }
+
+    /** 这颗球是不是已经在回家的路上了（起飞过就一直算） */
+    private boolean isReturning() {
+        // 注：「次数未耗尽就不回家」的**主拦截点在 homingToOwner()**，
+        // 这里再判一次是为了让「已经在回家路上」的球在次数被重置时也能立刻停 —— 双保险。
+        if (this.wisdomStillTracking()) {
+            return false;
+        }
+        return this.returnToOwner && this.homingTicks > 0;
+    }
+
+    /**
+     * 回归期间不受方块影响。
+     *
+     * <p><b>注意：这条不是恼鬼的做法。</b>翻 `Vex.isAffectedByBlocks()` 的字节码，
+     * 它其实是 {@code return !isRemoved();} —— 返回 {@code true}，也就是<b>默认行为</b>，
+     * 恼鬼压根没动这个方法。我先前误判成「它靠这个穿墙」，还照着改了一版，属于走错路。
+     *
+     * <p>这里保留覆盖是因为「回归期间确实不该受方块影响」本身是对的，
+     * 但要清楚：<b>穿墙真正靠的是 {@code noPhysics}</b>，别再把希望寄托在这个方法上。</p>
+     */
+    @Override
+    protected boolean isAffectedByBlocks() {
+        return !this.homingBack && super.isAffectedByBlocks();
+    }
+
+    /**
+     * 维持回归路上的<b>区块票据</b> —— 让球能在自己飞出去的那片未加载区域里继续存在、继续 tick。
+     *
+     * <p>用 {@code ServerLevel.setChunkForced} 直接强制加载球所在的那<b>一格</b>区块：
+     * 够球飞出当前区块前把下一块准备好，又不像传送门票据那样一次拉一大片、外头刷满怪。
+     * 球跨区块时先撤旧的再挂新的，移除时释放，所以身后不会留一串。</p>
+     *
+     * <p><b>只给带【空气动力球】的球挂</b>——调用点在 {@link #homingToOwner()} 里，
+     * 那里有 {@code returnToOwner} 守卫。普通球不会回家，没必要为它开区块。</p>
+     */
+    private void updateLoadTicket(ServerLevel level) {
+        ChunkPos now = this.chunkPosition();
+        if (now.equals(this.ticketChunk)) {
+            return; // 还在同一块里，不用动
+        }
+        this.releaseLoadTicket(level);
+        // 激进：不用票据那套分级，直接强制加载这一格。
+        // setChunkForced 是原版最硬的加载手段，只作用一个区块 ——
+        // 比票据半径 1 的 3×3 还省，更不会在外面刷怪。
+        level.setChunkForced(now.x(), now.z(), true);
+        this.ticketChunk = now;
+    }
+
+    /**
+     * 释放强制加载。回归结束、或者球被移除时都要调 ——
+     * 否则那一格会永久留在 forcedchunks 里，变成实打实的泄漏。
+     */
+    private void releaseLoadTicket(ServerLevel level) {
+        if (this.ticketChunk == null) {
+            return;
+        }
+        level.setChunkForced(this.ticketChunk.x(), this.ticketChunk.z(), false);
+        this.ticketChunk = null;
+    }
+
+    @Override
+    public void onRemoval(Entity.RemovalReason reason) {
+        if (this.level() instanceof ServerLevel level) {
+            this.releaseLoadTicket(level);
+        }
+        super.onRemoval(reason);
+    }
+
+    /**
+     * 水里待着时的替代「落定」判定。     *
+     * <p>水里的球被浮力托着，速度压不到静止阈值以下，正常那套判定永远不成立。
+     * 这里按「连着泡够 {@value #WATER_SETTLE_TICKS} 刻」当作落定；一出水就清零重算，
+     * 所以球在水里漂的前一秒仍然跟着水流走，不会被硬拽。</p>
+     */
+    private boolean tickInWater() {
+        if (!this.isInWater()) {
+            this.inWaterTicks = 0;
+            return false;
+        }
+        return ++this.inWaterTicks >= WATER_SETTLE_TICKS;
+    }
+
+    /**
+     * 【潮涌】的状态机（作者 2026-10-13 规格）。
+     *
+     * <p>判据只有一条：<b>有【潮涌】词条 且 {@link #isInWater()}</b> —— 「雨天不算」天然成立，
+     * 因为 {@code isInWater} 只认流体方块，不看天气。所以「离开水面就结束、落回水面又触发」
+     * 不需要额外记忆，每一刻按当前是否在水里重新判定即可。</p>
+     *
+     * <p>两件事只在<b>状态真正翻转</b>时做（{@code setNoGravity} 是同步数据，
+     * 每 tick 都调会出现「卡一下闪现一下」—— 这条坑在【智慧】球那边踩过）：</p>
+     * <ul>
+     *   <li>进入潮涌：记下原重力状态 → 关重力 → <b>当前速度 ×3</b> → 放三叉戟「激流」音效</li>
+     *   <li>结束潮涌：还原重力（用记下的原值，不是硬写 false）</li>
+     * </ul>
+     *
+     * <p>速度只在进入的那一刻乘一次 —— 不是每刻 ×3（那会指数爆炸）。潮涌期间不受重力，
+     * 所以这个速度会一直保持到出水或撞上东西。</p>
+     */
+    private void tickTidalSurge() {
+        boolean hasSurge = this.traitFired(TRAIT_TIDAL);
+        boolean inWater = hasSurge && this.isInWater();
+
+        if (inWater && !this.tidalSurgeActive) {
+            this.tidalGravityBefore = this.isNoGravity();
+            this.setNoGravity(true);
+            // 速度 ×3 —— 作者 2026-10-16 明确：**每次重新入水都要再乘一遍**，这是设计不是 bug。
+            // （我上一版擅自改成「每趟只乘一次」，被作者纠正，已撤回。）
+            this.setDeltaMovement(this.getDeltaMovement().scale(TIDAL_SPEED_MULTIPLIER));
+            // 潮涌期间的速度上限 = 这一刻的速度（防止预乘与真实衰减不同步时凭空加速，见字段注释）
+            this.tidalSpeedCap = this.getDeltaMovement().length();
+            if (this.level() instanceof ServerLevel surgeLevel) {
+                surgeLevel.playSound(null, this.getX(), this.getY(), this.getZ(),
+                        net.minecraft.sounds.SoundEvents.TRIDENT_RIPTIDE_1,
+                        net.minecraft.sounds.SoundSource.NEUTRAL, 1.0F, 1.0F);
+            }
+            this.tidalSurgeActive = true;
+        } else if (!inWater && this.tidalSurgeActive) {
+            // 还原成**进入前**的重力状态（不是硬写 false）—— 见【智慧】球那边同款注释
+            this.setNoGravity(this.tidalGravityBefore);
+            this.tidalSurgeActive = false;
+        }
+
+        // ===== 【潮涌】的「不受阻力」（作者 2026-10-13 第三轮追加）=====
+        //
+        // ⚠️ 为什么不能像原来那样改 getAirDrag()：原版的阻力**不在** getAirDrag 里。
+        //    ThrowableProjectile.applyInertia()（private，覆盖不了）在水里是**写死的**
+        //    `inertia = 0.8F`，只有不在水里时才去问 getAirDrag() —— 所以那处改了等于没改，
+        //    这正是作者实测报的「水中速度不衰减未生效」。
+        //
+        // 做法：在这里（= super.tick() **之前**）把系数反向预乘回去 ——
+        //    tick 内 applyInertia() 再乘 0.8，净效果 1.0 = 完全不衰减。
+        //    位移不受影响：applyInertia() 是在算新位置**之前**乘的，
+        //    所以位置用的仍然是抵消后的正确速度。
+        if (this.tidalSurgeActive) {
+            this.setDeltaMovement(this.getDeltaMovement().scale(1.0F / WATER_INERTIA));
+
+            // 限速兜底（作者 2026-10-16 报的「像被水反弹了一样」）：
+            // 上面那次预乘抵消的是「水里 0.8 的衰减」，但 super.tick() 里究竟用哪个衰减系数，
+            // 取决于**跑物理那一刻**球在不在水里 —— 球卡在水面时会出现「预乘生效、衰减按空气算」，
+            // 速度凭空涨 25%。这里按进入潮涌时的速度封顶，涨出去的一律压回来。
+            double speed = this.getDeltaMovement().length();
+            if (this.tidalSpeedCap > 1.0E-4D && speed > this.tidalSpeedCap) {
+                this.setDeltaMovement(this.getDeltaMovement().scale(this.tidalSpeedCap / speed));
+            }
+        }
+
+        if (this.level() instanceof ServerLevel && this.getEntityData().get(TIDAL_SURGE) != this.tidalSurgeActive) {
+            this.getEntityData().set(TIDAL_SURGE, this.tidalSurgeActive);
+        }
+    }
+
+    /**
+     * 原版 {@code ThrowableProjectile.applyInertia()} 在水里写死的衰减系数。
+     *
+     * <p>⚠️ 它是<b>硬编码</b>的（且那个方法是 private，既重写不了、也不会走 {@code getAirDrag()}），
+     * 所以【潮涌】要「不受阻力」只能反着抵消 —— 见 {@code tickTidalSurge}。</p>
+     */
+    private static final float WATER_INERTIA = 0.8F;
+
+    /** 【潮涌】速度倍率（作者指定：当前值的 3 倍） */
+    public static final float TIDAL_SPEED_MULTIPLIER = 3.0F;
+
+    /** 客户端渲染用：这颗球此刻在不在潮涌状态 */
+    public boolean isTidalSurge() {
+        return this.getEntityData().get(TIDAL_SURGE);
+    }
+    /**
+     * 【空气动力球】的兜底落定：连续 {@value #STUCK_SETTLE_TICKS} 刻速度都不高，就当球停下了。
+     *
+     * <p>严格的静止条件（速度 &lt; 0.03 格/刻、脚下有支撑、不在脉冲保护期）在球卡进方块边缘、
+     * 贴着墙打转时可能永远凑不齐 —— 实测日志里 {@code settled} 从头到尾没变成过 {@code true}，
+     * 球就那么干卡在原地：既不落定（于是不启动回归），也不碎。这正是作者反馈的「卡住」。</p>
+     *
+     * <p>阈值 0.1 格/刻比严格静止宽三倍多，只给带【空气动力球】的球用（调用点有
+     * {@code returnToOwner} 守卫），所以不会影响普通球的落定手感。</p>
+     *
+     * <h2>⚠️ 只算<b>水平</b>速度（作者 2026-10-15 报的「打在墙上残留」）</h2>
+     * <p>原来判的是 {@code getDeltaMovement().lengthSqr()} —— <b>总速度，含垂直分量</b>。
+     * 而球贴着墙的时候会一直在<b>往下滑</b>：垂直速度稳定在 0.1 格/刻 以上，
+     * 于是 {@code stuckTicks} <b>每刻都被清零</b>，那 20 刻永远攒不满。</p>
+     *
+     * <p>结果是球既不落定也不碎，**球实体和【潮涌】的环绕水纹一起留在墙边** ——
+     * 而严格条件那条也救不了它：{@code hasSupportBelow()} 只看正下方那一格，
+     * 贴墙时脚下是空气，那条同样不成立。两条路都堵死。</p>
+     *
+     * <p>改成只看水平分量之后：球贴着墙往下掉时水平速度≈0，
+     * 它就能攒满 {@link #STUCK_SETTLE_TICKS} → 落定 → 5 刻坐实 → {@code burst()}，
+     * 球与特效一并消失。</p>
+     *
+     * <p>这个改动<b>不影响正常飞行的球</b>：飞行时水平速度远大于 0.1，照样清零重算。</p>
+     */
+    private boolean tickSlowStuck() {
+        Vec3 velocity = this.getDeltaMovement();
+        // 只取水平分量 —— 垂直那一份是重力在拖它，不该算进「有没有在动」
+        double horizontalSqr = velocity.x * velocity.x + velocity.z * velocity.z;
+        if (horizontalSqr > STUCK_SPEED_SQR) {
+            this.stuckTicks = 0;
+            return false;
+        }
+        return ++this.stuckTicks >= STUCK_SETTLE_TICKS;
+    }
+
+    /** 滚动（以及静止）时阻力由地面摩擦负责，不叠加空气阻力 */
+    @Override
+    protected float getAirDrag() {
+        // 【潮涌】（「其它特殊」类，作者 2026-10-13 追加的规格）——
+        // 在水中时除了不受重力，**也不受阻力**（即没有速度衰减）。
+        // 返回 1.0 就是「完全不衰减」，和下面滚动/静止用的是同一个手法。
+        // 为什么只改这一处就够：26.2 的原版 Entity 没有单独的「水中阻力」钩子
+        // （fluidInteraction 那条是「被流体推动」，不是减速），在水里走的同样是 getAirDrag()。
+        if (this.tidalSurgeActive) {
+            return 1.0F;
+        }
+        return (this.isRolling() || this.isSettled()) ? 1.0F : super.getAirDrag();
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(PIERCE_LEVEL, (byte) 0);
+        builder.define(WEIGHT, BallWeight.BASELINE);
+        builder.define(FROM_CROSSBOW, false);
+        builder.define(TOUGHNESS, BallBehavior.NOT_TOUGH);
+        builder.define(BOUNCE, BallBehavior.DEFAULT_BOUNCE);
+        builder.define(SETTLED, false);
+        builder.define(ROLLING, false);
+        builder.define(TIDAL_SURGE, false);
+        builder.define(FIRED_TRAITS, 0);
+    }
+
+    @Override
+    protected Item getDefaultItem() {
+        return Items.SNOWBALL;
+    }
+
+    /**
+     * 能否命中某个实体。
+     *
+     * <p>这里<b>不</b>排除投掷者 —— 球允许撞到自己（碰撞本身是正常的），
+     * 只是出手瞬间（{@link #SPAWN_GRACE_TICKS} 刻）不结算伤害，
+     * 见 {@link #onHitEntity}。原版 {@code Projectile} 自带的那套
+     * 「离开投掷者之后才可命中」逻辑保持不动。</p>
+     */
+    @Override
+    protected boolean canHitEntity(Entity target) {
+        // 怪物扔出来的球不该打到自己（作者指定）。
+        // 超类那句「离开投掷者之后才可命中」只兜住出手瞬间，而怪物都是贴脸出手的，
+        // 几刻之后球还在它自己身上 → 被自己的球打疼 → 一头扎进去和球纠缠不休。
+        // 玩家投掷的球维持原样：弹回来打到自己是明确定过的手感，不动。
+        if (target == this.getOwner() && this.getOwner() instanceof Mob) {
+            return false;
+        }
+        // 【招蜂引蝶】召唤出来的蜜蜂**不吃自己人的球**（作者 2026-10-15 实测反馈）。
+        //
+        // 现象：「【招蜂引蝶x】会击中蜜蜂，导致后续所有蜜蜂的仇恨不在目标上而是在蜜蜂上」。
+        // 链条：球打中一只召唤蜂 → 原版蜜蜂「被打就反击 + 通知同伴」
+        //      （HurtByTargetGoal.setAlertOthers → BeeHurtByOtherGoal.alertOther，
+        //        L192 / L1018-1022）把它和同伴的目标全改成「打它的那个」
+        //      → 蜂群内讧、目标反而没人咬。
+        //
+        // 修法：球**直接无视**这些蜜蜂（连碰撞都不算，直接穿过去）——
+        // 配合 BallExtraTraits 每 10 刻的仇恨纠偏，双保险。
+        if (BallExtraTraits.isSummonedBee(target)) {
+            return false;
+        }
+        return super.canHitEntity(target)
+                && (this.piercingIgnoreEntityIds == null
+                        || !this.piercingIgnoreEntityIds.contains(target.getId()));
+    }
+
+    /**
+     * <b>单个维度**内允许同时存在的球实体上限（作者 2026-10-09 指定）。</b>
+     *
+     * <p>超出之后从**最旧的**开始消失：球的飞行、静止、区块加载、回归寻路都会占资源，
+     * 玩家在外面狂扔一通再传走，那些球会一直挂在那儿 tick。上限本身就是防堆积。</p>
+     */
+    public static final int BALL_CAP = 50;
+
+    /**
+     * 上限检查的间隔（刻）。
+     *
+     * <p>原为 20（一秒一次）。作者 2026-10-09 指定放宽到 <b>100（五秒一次）</b> ——
+     * 这是整个卡顿问题里最大的开销源：每次检查都要拿 {@link #WHOLE_LEVEL_BOX}
+     * 扫一遍**全世界已加载区块的实体**，实测单次累计 110ms/200 采样。</p>
+     *
+     * <p>这个机制本身是「防堆积」的兜底，晚五秒清理完全不影响体验
+     * （球本来也不会瞬间堆到 50 颗）。</p>
+     */
+    public static final int BALL_CAP_CHECK_INTERVAL = 100;
+
+    /**
+     * 覆盖整个维度的包围盒 —— {@code getEntitiesOfClass} 需要一个 AABB，
+     * 而我们要的是「这个维度里的全部球」。取值按 MC 的世界边界上界再放宽一点。
+     */
+    private static final net.minecraft.world.phys.AABB WHOLE_LEVEL_BOX =
+            new net.minecraft.world.phys.AABB(
+                    -3.0E7D, -2048.0D, -3.0E7D,
+                    3.0E7D, 2048.0D, 3.0E7D);
+
+    /**
+     * 上一次做上限检查的游戏刻 —— <b>全局共享</b>。
+     *
+     * <p>⚠️ 这是性能修复的关键（作者 2026-10-09：卡顿真凶，实测 110.1ms/200 采样）。</p>
+     *
+     * <p>原来判据只有 {@code gameTime % 20 == 0}，那是**每个球各自**成立的 ——
+     * 25 个球在同一个 tick 里各做一次 {@code WHOLE_LEVEL_BOX} 全维度扫描，
+     * 等于同一件事重复 25 遍。单人游戏的集成服务器跟客户端同线程，
+     * 于是卡感直接体现在操作上（但帧率统计看不出来，因为不是渲染管线本身慢）。</p>
+     *
+     * <p>改成「记下上次检查的刻，同一个刻只跑一次」—— 同一刻的重复扫描从 25 次降到 1 次。
+     * 再叠加 {@link #BALL_CAP_CHECK_INTERVAL} 从 20 放宽到 100，总开销约为原来的 1/125。</p>
+     *
+     * <p>注：gameTime 是全服务器共享的，所以多维度同刻只会让先到的那个维度跑检查，
+     * 另一个维度下一轮再查 —— 对「防堆积」这种兜底机制来说，晚几秒完全无所谓。</p>
+     */
+    private static long ballCapLastCheckTick = Long.MIN_VALUE;
+
+    /**
+     * 执行一次上限检查：本维度的球多于 {@link #BALL_CAP} 时，
+     * 按<b>存在时长从久到近</b>的顺序清掉多出来的那些。
+     *
+     * <h2>为什么用 tickCount 排「新旧」</h2>
+     * <p>{@code tickCount} 是实体从生成起累计的 tick 数，越大代表存在越久 ——
+     * 正好就是「最旧」。不需要额外记时间戳。</p>
+     *
+     * <h2>为什么用 discard() 而不是 kill()</h2>
+     * <p>{@code kill()} 会走 {@code hurt(damageSources().genericKill())} 那条路，
+     * 对投射物来说会触发掉落/碎裂之类的收尾逻辑；{@code discard()} 是直接移除，
+     * <b>不产生任何掉落物</b> —— 这正是作者要的「无掉落消失」。</p>
+     */
+    private static void enforceBallCap(net.minecraft.server.level.ServerLevel server) {
+        java.util.List<BallProjectile> all =
+                server.getEntitiesOfClass(BallProjectile.class, WHOLE_LEVEL_BOX);
+        int overflow = all.size() - BALL_CAP;
+        if (overflow <= 0) {
+            return;
+        }
+        // 存在最久的排前面
+        // tickCount 是 Entity 的 public 字段（不是 getter）
+        all.sort((a, b) -> Integer.compare(b.tickCount, a.tickCount));
+        for (int i = 0; i < overflow; i++) {
+            // 现在不再由「自己」触发，所以不用排除自己 —— 该清就清。
+            all.get(i).discard();
+        }
+        MoreBalls.LOGGER.debug("[ball] 实体上限 {}：本维度有 {} 颗，清掉最旧的 {} 颗",
+                BALL_CAP, all.size(), overflow);
+    }
+
+    /** 【尖啸】是否已经炸过 —— 一只球只炸一次（回收后再放出不该重复触发） */
+    private boolean shriekFired;
+
+    /** 【尖啸】落点扩散动画的剩余帧数；<= 0 表示不在播 */
+    private int shriekWaveFrames;
+
+    /**
+     * <b>【尖啸】飞行期间的「一 tick 多步」步数</b>（作者 2026-10-16 要求）。
+     *
+     * <p>作者要的是「把路径与数值的计算一并纳入」—— 也就是【尖啸】飞出去的那一趟里，
+     * <b>所有受速度 / 方向影响的词条都要照常参与</b>：【智慧】的索敌转向、【感应】的积热、
+     * 【磁吸】的牵引、【磁性】的偏航、【潮涌】的入水、【照明】【透镜】的下方积热……
+     * 逐个去接是不可能接全的。</p>
+     *
+     * <p>所以改成：<b>尖啸期间把速度拉到极大，然后在同一 tick 内把
+     * {@code super.tick() + ballTickPost()} 多跑若干遍</b> ——
+     * 球就是<b>真的在按物理飞</b>，该撞墙撞墙、该转向转向，词的逻辑一条都不用另写。
+     * 速度足够大时视觉上仍然是「瞬间抵达」。</p>
+     */
+    private int shriekExtraSteps;
+
+    /** 由 {@link BallExtraTraits} 在尖啸起飞时调用：本趟要在一 tick 内多跑几步 */
+    public void setShriekFlight(int extraSteps) {
+        this.shriekExtraSteps = Math.max(0, extraSteps);
+    }
+
+    /** 【尖啸】飞行中「上一步的位置」—— 用来把每步的位移当成一段路径做判定 */
+    private Vec3 shriekStepFrom;
+
+    /** 【尖啸】这一趟是否已经收尾（撞到东西、落点结算过了） */
+    private boolean shriekDone;
+
+    /**
+     * 【尖啸】的等效速度：一 tick 飞完 256 格 ⇒ <b>256 格/刻</b>。
+     *
+     * <p>出手速度约 1.5 格/刻，所以这相当于把按速度缩放的词条拉到约 <b>170 倍</b> ——
+     * 任何「速度 / 出手速度」形式的效率都会直接顶满。</p>
+     */
+    public static final double SHRIEK_EQUIVALENT_SPEED = 256.0D;
+
+    /**
+     * 【尖啸】期间给「按速度缩放」的词条用的<b>等效速度</b>（作者 2026-10-17 定的方案）。
+     *
+     * <p>作者原话：「把球的轨迹改回原来的计算，然后在计算其它词条的相互作用时用这种
+     * 1 刻跑 256 的速度，<b>就是两边分开算</b>」。</p>
+     *
+     * <p>也就是说：<b>弹道</b>走几何射线（球不再是一颗高速实体，轨迹由 {@code shriek()}
+     * 当场算完），而<b>词条的数值</b>仍按「一 tick 跑完 256 格」的等效速度算 ——
+     * 谁也不用迁就谁。凡是要读速度做缩放的词条，一律读这个方法，
+     * 而不是直接读 {@code getDeltaMovement()}。</p>
+     */
+    public double effectiveSpeed() {
+        if (this.shriekFired && !this.shriekDone) {
+            return SHRIEK_EQUIVALENT_SPEED;
+        }
+        return this.getDeltaMovement().length();
+    }
+
+    /**
+     * 【尖啸】<b>待播放的路径音波点</b>（按飞行顺序排队）。
+     *
+     * <p>⚠️ 为什么要排队而不是「当场画完」（作者 2026-10-17 两次指出）：
+     * 尖啸是<b>一 tick 内飞完 256 格</b>，如果路径音波也在一 tick 内全部生成，
+     * 那整条光束就在同一帧铺好、下一帧散掉 —— 肉眼看不出「打出去有一道音波」。</p>
+     *
+     * <p>所以这里改成：飞行时只把路径点<b>登记</b>进来，之后由
+     * {@link #emitShriekTrail()} 每 tick 取一段真正生成，整条音波就被摊开成
+     * 十几 tick 的「一道横扫过去的光束」。</p>
+     */
+    private final java.util.ArrayDeque<Vec3> shriekTrail = new java.util.ArrayDeque<>();
+
+    /**
+     * 排队中的音波点里，<b>每 tick 生成多少个</b>。
+     *
+     * <p>取 12：256 格的路径大约排进 512 个点（每格 2 个），
+     * 每 tick 12 个 ≈ 43 tick（2 秒多）走完整条 —— 足够看清那一道光，
+     * 又不至于拖太久像「残留特效」。想更快就调大这个数。</p>
+     */
+    private static final int SHRIEK_TRAIL_PER_TICK = 12;
+
+    /** 把一个路径点登记进待播放队列（由 {@link BallExtraTraits} 在飞行判定时调用） */
+    public void enqueueShriekTrail(Vec3 point) {
+        this.shriekTrail.addLast(point);
+    }
+
+    /** 把排队中的路径音波每 tick 放一段出来（见 {@link #shriekTrail} 的说明） */
+    private void emitShriekTrail() {        if (this.shriekTrail.isEmpty()) {
+            return;
+        }
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+        int budget = SHRIEK_TRAIL_PER_TICK;
+        while (budget-- > 0 && !this.shriekTrail.isEmpty()) {
+            Vec3 point = this.shriekTrail.pollFirst();
+            BallExtraTraits.shriekTrailPoint(level, point);
+        }
+    }
+
+    /**
+     * 【尖啸】的<b>路径音波</b>是否还在生效 —— 起飞后为真，撞到东西收尾后转假。
+     *
+     * <p>⚠️ 与 {@link #isShriekFlying()} 不是一回事：那个判的是「本 tick 还要不要再跑几步」
+     * （只在起飞那一 tick 成立），这个判的是「这一趟尖啸还在不在飞」——
+     * 主 tick 要靠它决定要不要沿路径画音波。</p>
+     *
+     * <p>作者 2026-10-17 报「回来的时候一直挂着特效」：原来主 tick 只判 {@code shriekFired}，
+     * 而那个位<b>一旦置位就永不清除</b>，于是球之后每 tick（包括回归回家的路上）都在画音波。
+     * 加上 {@link #shriekDone} 之后，撞到东西就停止。</p>
+     */
+    private boolean shriekPathActive() {
+        return this.shriekFired && !this.shriekDone;
+    }
+
+    /** 【尖啸】是否正在「极速飞行」中（每步都要补路径判定） */
+    public boolean isShriekFlying() {
+        return this.shriekFired && this.shriekExtraSteps > 0;
+    }
+
+    /** 尖啸飞行时每步调一次：把「上一步 → 当前位置」这一段交给路径判定 */
+    private void shriekFlightStep() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+        Vec3 now = this.position();
+        Vec3 fromPos = this.shriekStepFrom == null ? now : this.shriekStepFrom;
+        if (fromPos.distanceToSqr(now) > 1.0E-9D) {
+            BallExtraTraits.shriekFlightTick(this, level, this.traitFired(TRAIT_PIERCE), fromPos, now);
+        }
+        this.shriekStepFrom = now;
+    }
+
+    @Override
+    public void tick() {
+        // 作者 2026-10-18：世界里的球实体一直带「发光」轮廓（无限时长）。
+        // 用 setGlowingTag 而不是 GLOWING 药水效果 —— 药水有持续时间要每 tick 续期，
+        // 而发光标记是实体上的布尔状态，设置一次就是永久的。
+        this.setGlowingTag(true);
+
+        ballTickPre();
+
+        // 父类 tick —— 物理、移动、碰撞检测都在里面
+        super.tick();
+        ballTickPost();
+
+        // ⚠️ **主 tick 也要补一次「这一步的位移」判定**（作者 2026-10-17 报「路径上的音波消失了」）。
+        //
+        //    1.1.1.33 之后 `shriekFlightStep()` 原来**只挂在下面的多步循环里**，
+        //    而那个循环只在起飞那一 tick 跑一次（`shriekExtraSteps` 消费即清零）。
+        //    于是尖啸球飞行途中的**每一个普通 tick 都没有任何路径判定** ——
+        //    音波只在起飞那一刻出现一次，之后就消失了。
+        //    这里补上：只要这一趟尖啸还在生效，每 tick 都把位移交给路径判定。
+        if (this.shriekPathActive() && !this.isRemoved()) {
+            shriekFlightStep();
+        }
+
+        // ===== 【尖啸】的「一 tick 多步」（作者 2026-10-16）=====
+        // 同一 tick 内继续把「物理 + 后段逻辑」跑几遍：
+        // 球按极速飞，途中该撞墙撞墙、该由【智慧】改向就改向、该由【感应】积热就积热。
+        // 每跑一步都要判一下「是不是已经不该继续了」（被移除 / 已落定 / 尖啸收尾完毕）。
+        if (this.shriekExtraSteps > 0 && !this.isRemoved()) {
+            int steps = this.shriekExtraSteps;
+            this.shriekExtraSteps = 0;   // 只在起飞那一 tick 用一次，之后恢复普通飞行
+            for (int i = 0; i < steps; i++) {
+                if (this.isRemoved() || this.isSettled()) {
+                    break;
+                }
+                super.tick();
+                ballTickPost();
+                shriekFlightStep();
+            }
+        }
+
+        // ===== 悬空总兜底（放在最末，覆盖上面所有分支）=====
+        // 见 tickNoGravityStall() 的说明：无重力 + 完全静止撑满 5 秒就强制放开重力。
+        this.tickNoGravityStall();
+
+        // ===== 【尖啸】路径音波：每 tick 放一段（见 shriekTrail 的说明）=====
+        // 放的是「这一趟飞过的路径」排下来的队，与球现在在哪无关，
+        // 所以撞到东西之后它还会把剩下的那一段播完 —— 那才是「一道音波扫过去」。
+        this.emitShriekTrail();
+    }
+
+    /** tick 的前半段：上限检查、回归开关、票据 */
+    private void ballTickPre() {
+        // ⚠️⚠️ **本趟投掷的特性判定必须最先做**（作者 2026-10-16 报的【穿甲】未生效，根因就在这）。
+        //
+        //    原来这行排在【尖啸】判定**之后**（文末那句「放这里能覆盖所有发射入口」）。
+        //    但第一个 tick 里 `FIRED_TRAITS` 还是 0 —— 而【尖啸】这类「投出第一刻就结算」
+        //    的词条正好在那一刻读它，于是 `traitFired(TRAIT_SHRIEK / TRAIT_PIERCE)` 全是 false：
+        //      · 【尖啸】要等到第二刻才触发；
+        //      · 更要命的是那一刻的伤害**拿不到穿甲**，走成了普通伤害源 ⇒ 护甲照常减免
+        //        （主人实测：下界合金套 + 保护4 只掉 4 血，而正确行为应是只吃附魔那层）。
+        //    提到函数最前面之后，同一 tick 内所有 traitFired 判据都拿到本趟的真实结果。
+        this.rollTraitsOnce();
+
+        // ===== 【尖啸】（回响球专属，作者 2026-10-16）=====
+        // 投出后的**第一刻**就结算：射线找终点 → 路径与落点两轮效果 → 球瞬移过去并停下。
+        // 之后若干刻由球自己把落点那三道扩散音波逐帧画完。
+        // 详细规格见 BallExtraTraits 的【尖啸】段。
+        if (this.traitFired(TRAIT_SHRIEK)
+                && this.level() instanceof ServerLevel shriekLevel) {
+            if (!this.shriekFired) {
+                this.shriekFired = true;
+                this.shriekWaveFrames = BallExtraTraits.shriek(this, shriekLevel,
+                        this.traitFired(TRAIT_PIERCE));
+            } else if (this.shriekWaveFrames > 0) {
+                BallExtraTraits.shriekWaves(this, shriekLevel, this.shriekWaveFrames--);
+            }
+        }
+
+        // 【忠诚】—— 「唯一特性」类（切开不继承、不参与合成）——
+        // 潮汐球**永远带忠诚附魔**，且这个附魔不能因为球被改变状态而消失。
+        //
+        // 实现上不逐个改 returnToOwner 的 5 个读取点（homingToOwner + 4 个分支），
+        // 而是**每刻把它压成 true**。
+        //
+        // ⚠️⚠️ **但多重射击的附属弹必须排除在外**（作者 2026-10-14 报的 bug）。
+        //
+        //   附属弹按设计是「一落定就碎、不留在地上、也不回家」——
+        //   `BallAmmo.createProjectile()` 那边专门写成 `if (!side) setReturnToOwner(...)`，
+        //   而 `setMultishotSide(true)` 内部也会把 returnToOwner 清掉（见 L3200）。
+        //
+        //   原先这里是**无条件**压 true，把那两处清除全盖回来了：附属弹于是也变成「要回家」的球，
+        //   落定之后先撞上「已落定分支」里那句 `if (returnToOwner && homingToOwner()) return;`，
+        //   **永远走不到下面的 burst()**。表现就是作者说的「有时碎有时不碎」——
+        //   取决于那一 tick 是被「第一次静止判定」接住（那里 burst 在前，会碎），
+        //   还是被「已落定分支」接住（那里 homingToOwner 的 return 在前，不碎）。
+        //
+        //   主球（非附属弹）的行为一个字不变。
+        //
+        // 判据走 profile，所以带潮汐球的组合球同样享有忠诚。
+        // ⚠️ **附属弹也必须走这条** —— 不是为了回家，而是为了保留「回收体系」里的那些**兜底**：
+        //    挂区块票据、tickSlowStuck() 的「卡住就当落定」、水里那条替代落定，
+        //    全都挂在 returnToOwner 上。少了它们，附属弹卡在墙上就**永远不落定、也不碎**，
+        //    【潮涌】的激流特效会一直挂着（作者 2026-10-14 报的现象②）；
+        //    水里那条替代落定没了之后，球会落到严格条件那条路上，
+        //    而那里的 burst() 排在 homingToOwner() 检查**之前** → 表现为「提前破碎」（现象①）。
+        //
+        //    「不回家」由 homingToOwner0() 开头那条 multishotSide 判据负责，与这里解耦。
+        if (this.profile().loyalty() || this.multishotSide) {
+            this.returnToOwner = true;
+        }
+
+        // 【潮涌】（「其它特殊」类，作者 2026-10-13）——
+        // 有词条 + 球在水里 ⇒ 不受重力、速度 ×3，并环绕激流的纹理特效（雨天不算，靠 isInWater 天然满足）。
+        // 从水底射出后离开水面 ⇒ 结束潮涌、还原重力；再落回水面会重新触发；直到停止。
+        this.tickTidalSurge();
+
+        // 【实体上限】本维度的球超过上限时，从最旧的开始清掉。
+        //
+        // 每 100 刻（5 秒）才查一次 —— 逐刻遍历整个维度的实体没意义，
+        // 而这个上限本身是「防堆积」用的，晚五秒清理完全够。
+        // 只在服务端做：客户端的实体列表不完整，也轮不到它决定谁该消失。
+        //
+        // ⚠️ **同一个刻只让一个球跑**（`ballCapLastCheckTick` 是全局静态的）。
+        //    原来只判 `gameTime % 20 == 0`，那是**每个球各自成立**的 ——
+        //    25 个球在同一刻各做一次全维度扫描，等于同一件事重复 25 遍。
+        if (this.level() instanceof ServerLevel capLevel) {
+            long capNow = capLevel.getGameTime();
+            if (capNow % BALL_CAP_CHECK_INTERVAL == 0L && capNow != ballCapLastCheckTick) {
+                ballCapLastCheckTick = capNow;
+                enforceBallCap(capLevel);
+            }
+        }
+
+        // 回归期间，<b>在 super.tick() 之前</b>先把恼鬼的开关压上。
+        //
+        // 这是照着恼鬼的字节码来的：它的 tick() 在父类 tick <b>前后各设一次</b>
+        // noPhysics、并且每刻重设 noGravity —— 说明这些开关在父类 tick 过程里会被动到。
+        // 我之前的写法全在事后设，于是「这一 tick 里跑的物理」用的还是旧值，
+        // 球照样被方块卡住。前后都压住才算真的一样。
+        if (this.homingBack) {
+            this.noPhysics = true;
+            // ⚠️ 只在值真的变化时调用 —— setNoGravity 是同步数据，
+            //    值没变也会触发实体同步，每 tick 调就是「卡一下闪现一下」。
+            if (!this.isNoGravity()) {
+                this.setNoGravity(true);
+            }
+        }
+
+
+        // 【区块加载】带空气动力球的球<b>从落地那刻就得挂上</b>，不能等回归启动再挂。
+        //
+        // 踩过：之前只在 homingToOwner() 里挂，也就是「回归已启动」之后才挂 ——
+        // 而球真正需要被加载的恰恰是它<b>停下来等着落定</b>的那段时间。
+        // 实测往 100 格外扔一颗，区块一卸载球就冻结在那儿不 tick，
+        // 于是永远等不到落定、也就永远不启动回归，看起来就是「最后几发没回来」。
+        //
+        // 判据是 returnToOwner（= 武器带空气动力球附魔），普通球不参与，不浪费加载。
+        if (this.returnToOwner && this.level() instanceof ServerLevel ticketLevel) {
+            this.updateLoadTicket(ticketLevel);
+        }
+
+        // 记下这一 tick 开始时的状态，super.tick() 之后要用它补位移
+        this.tickTickStartPos = this.position();
+        this.tickTickStartVel = this.getDeltaMovement();
+    }
+
+    /** tick 的后半段：回归补位、落定、磁吸、粒子等 */
+    private void ballTickPost() {
+        Vec3 tickStartPos = this.tickTickStartPos;
+        Vec3 tickStartVel = this.tickTickStartVel;
+
+        // 【回归虚化】把被「钉住」的位移补回来。
+        //
+        // 父类 ThrowableProjectile.tick() 是这么移动的：
+        //     HitResult hit = ProjectileUtil.getHitResultOnMoveVector(this, ...);
+        //     if (hit != MISS) this.setPos(hit.getLocation());      // ← 钉在命中点
+        //     else            this.setPos(position().add(delta));
+        // 球一旦落在方块里，射线检测每刻立刻命中（距离 0），于是位置被设成
+        // 「紧贴方块表面的那一点」—— 表现就是速度 4.0、而 110 刻只挪了 0.2 格
+        // （实测日志）。那个 setPos 是无条件的，noPhysics 也好、覆盖
+        // hitTargetOrDeflectSelf 也好，都拦不住它。
+        //
+        // 所以这里按「本刻起点 + 本刻速度」把正确位置补回去。
+        if (this.homingBack) {
+            Vec3 wanted = tickStartPos.add(tickStartVel);
+            if (this.position().distanceToSqr(wanted) > 1.0E-6D) {
+                this.setPos(wanted.x, wanted.y, wanted.z);
+            }
+        }
+        if (this.level().isClientSide()) {
+            return;
+        }
+
+        // 「感应」必须在 isTough() 之前执行：带这个性质的「雪球？（铁粒）」本身<b>不坚固</b>，
+        // 若放在坚固分支之后，会被上面那道 return 直接跳过 —— 表现就是「感应完全不生效」。
+        //
+        // 判据是底层词条 BallProfile#hasSense()，不再硬编码具体物品 ——
+        // 以后任何球加上 .withSense(n) 就自动具备这套能力。
+        // 【作者 2026-10-09 指定】**静止后停止一切扫描/加热/判定**。
+        //
+        //    球一旦停下就没什么可做的了 —— 不需要再扫矿物、扫生物、算热量、
+        //    检测球间碰撞。球多的时候这些「静止球的无用功」是卡顿的主要来源。
+        //    （落定后的球只剩「等空气动力球回收」一件事，那个由 homingToOwner 管，
+        //    不需要这些扫描。）
+        boolean idle = this.isSettled();
+        if (!idle && this.profile().hasSense()) {
+            this.prospectingTick();
+        }
+
+        // 【智慧】—— 紫水晶球：发射后扫描 10 格内无遮挡可直达的敌对（或仇恨中的中立）
+        // 生物，找到最近的立刻锁定、把速度改成朝它飞。锁定一次即生效，之后不再改方向。
+        // 【智慧】原来是「锁一次就不再评估」（wisdomLocked 一置位永不复评），
+        // 而且搜索窗口只有前 40 刻。结果：怪物扔回来的球出手时方向已经对着目标，
+        // 那一次锁定几乎不改变弹道，之后再也不会拐弯 —— 表现就是「智慧不生效」。
+        // 改成周期性重锁：持续跟踪目标，直到球失效。
+        if (this.profile().wisdom() > 0) {
+            // 首次初始化剩余次数
+            if (this.wisdomUsesLeft < 0) {
+                this.wisdomUsesLeft = this.profile().wisdom();
+                // ⚠️ 这里**必须写 false，不能记当时的 isNoGravity()**（作者 2026-10-16 报的悬空球成因之一）：
+                //    `ballTickPre()` 里先跑了 `tickTidalSurge()`，带【潮涌】的球那一刻**已经**是无重力了，
+                //    于是「最初的重力状态」被记成 true ⇒ 之后每刻 `setNoGravity(true)` 还原回来，
+                //    出水以后仍然无重力 ⇒ 永久悬空。
+                //    球出厂时本来就是受重力的，这里直接以 false 为基准最稳。
+                this.wisdomGravityBefore = false;
+            }
+            // 【智慧x】的三段式重力（作者 2026-10-09 修正）：
+            //   第一次命中**之前** —— 照常受重力（正常弹道，扔出去该抛就该抛）
+            //   命中一次之后、次数未耗尽 —— **无视重力**，锁定目标追过去
+            //   最后一次机会消耗完 —— **恢复重力**，正常掉落在原地静止
+            // ⚠️ 「追踪」与「无重力」是**两件事**，不能绑在一起。
+            //    作者 2026-10-09 实测：绑在一起时第一次命中之前连追踪都不做了。
+            //
+            //   追踪：只要还有次数就一直做（包括第一次出手的飞行途中）
+            //   重力：第一次命中**之前**照常受重力；命中一次后改用无重力飞行；
+            //         次数耗尽后恢复重力，让它正常掉落静止
+            if (this.wisdomHitGrace > 0) {
+                this.wisdomHitGrace--;
+            }
+            if (!this.isSettled() && this.wisdomUsesLeft > 0) {
+                if (this.wisdomRelockCooldown-- <= 0) {
+                    this.wisdomRelockCooldown = WISDOM_RELOCK_INTERVAL;
+                    // 比对尝试前后的剩余次数就知道这一轮有没有锁到（tryWisdomLock 是 void）
+                    int usesBefore = this.wisdomUsesLeft;
+                    this.tryWisdomLock();
+                    if (this.wisdomUsesLeft < usesBefore) {
+                        this.wisdomNoTargetTicks = 0;        // 锁到了 —— 重新计时
+                    } else {
+                        // ⚠️ **只累计，绝不作废剩余次数**（作者 2026-10-11 报的
+                        //    「第一次锁定之后不会变向」）。
+                        //
+                        //    0.4.0.3 那版在这里把 `wisdomUsesLeft` 清零，于是球只要
+                        //    空追 5 秒就**永久失去追踪能力**。次数是【智慧】的本体，不能动。
+                        //
+                        //    这个计数现在的唯一用途是给「要不要放它回家」当判据
+                        //    （见 homingToOwner0）—— 空追够久就把球收回来，
+                        //    但**追踪能力仍然完好**，下次再遇到目标照样锁定。
+                        this.wisdomNoTargetTicks += WISDOM_RELOCK_INTERVAL;
+                    }
+                }
+            }
+            boolean tracked = this.wisdomUsesLeft < this.profile().wisdom();   // 已经命中过至少一次
+            // ⚠️⚠️ **「还在空追」也要有个头**（作者 2026-10-16 报的「悬在空中的球」成因之一）。
+            //
+            //    原来这里只判 `tracked && usesLeft > 0` —— 于是【智慧】球只要**命中过一次**、
+            //    之后再也锁不到目标，次数就永远扣不完，这个分支每刻都成立 ⇒
+            //    **永远保持无重力**；而 `setSettled()` 在 `isNoGravity()` 时又拒绝进入静止态 ⇒
+            //    球既不落地也不静止、也走不到 2400 刻的自动消失，就那么**永久悬停在半空**。
+            //
+            //    现在加上「最近还在锁目标」这条 —— 空追超过 WISDOM_GIVEUP_TICKS（100 刻）就放开重力，
+            //    球自然掉下来落地。这与「放它回家」那边用的是同一个判据，口径一致。
+            boolean stillHunting = this.wisdomNoTargetTicks < WISDOM_GIVEUP_TICKS;
+            if (tracked && this.wisdomUsesLeft > 0 && stillHunting) {
+                if (!this.isNoGravity()) {
+                    this.setNoGravity(true);
+                }
+            } else if (this.isNoGravity() != this.wisdomGravityBefore) {
+                // ⚠️ 还原成**最初的重力状态**（通常是 false = 受重力）。
+                //
+                //    这里原来错写成 setNoGravity(true) —— 在「还原重力」的分支里
+                //    又把重力关掉了，于是次数耗尽后球永远不落地
+                //    （作者 2026-10-09 遍历时发现的）。
+                //
+                //    ⚠️ 同时注意：**只在值真的变化时**调用 —— setNoGravity 是同步数据，
+                //    值没变也会触发一次实体同步，每 tick 调就是「卡一下闪现一下」。
+                this.setNoGravity(this.wisdomGravityBefore);
+            }
+        }
+
+        // 【金光闪闪】的吸引窗口：**无论球是不是静止**都要吸引。
+        //
+        // 原来这段只在「已静止」分支里，于是金球刚撞完还在滚动的那 5 秒里
+        // 猪灵完全没反应 —— 而作者要的正是「碰撞后的那 5 秒」。
+        if (BallBehavior.isGoldShiny(this.getItem())
+                && this.level() instanceof ServerLevel goldLevel
+                && this.isGoldLuring(goldLevel.getGameTime())) {
+            PiglinLure.lure(goldLevel, this);
+        }
+
+        // 【熔融】状态的外观：进了熔融的球周身冒火（环绕 + 拖尾）
+        if (!this.isSettled()) {
+            this.moltenParticlesTick();
+        }
+
+        // ===== 【照明】/【透镜】：必须在「不坚固就早退」之前 =====
+        //
+        // ⚠️ 作者 2026-10-10 报「【照明】未生效」—— 根因就是位置。
+        //    雪球-红石是 **不坚固** 的，而下面那句 `if (!this.isTough()) return;`
+        //    会把它直接挡回去，挂在后面的照明逻辑永远执行不到。
+        //    这两个词条与「坚固与否」无关，本来就该放在早退之前。
+        if (this.profile().hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE)
+                && this.level() instanceof ServerLevel illuminateLevel) {
+            // 【照明】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+            if (this.traitFired(TRAIT_ILLUMINATE)) {
+                BallIlluminate.tick(illuminateLevel, this.position());
+            }
+        }
+        if (this.profile().hasFlag(BallBehavior.BallProfile.FLAG_LENS)
+                && this.level() instanceof ServerLevel lensLevel) {
+            // 【透镜】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+            if (this.traitFired(TRAIT_LENS)) {
+                BallLens.tick(lensLevel, this.position());
+            }
+        }
+        // 【照明】的飞行拖尾：红色粒子，每颗滞留约 1 秒（不坚固的雪球也有）
+        this.redstoneTrailTick();
+
+        if (!this.isTough()) {
+            return;
+        }
+
+        if (this.isRolling()) {
+            this.rollTick();
+        }
+        // 球间碰撞无论是否在滚动都要检测 —— 滚动的球撞上静止的球一样该传递动能。
+        //
+        // ⚠️ **必须限流**：这段每 tick 对每个球做一次 getEntitiesOfClass，
+        //    球的数量一多就是 O(n²)。作者实测「十来个球就特别卡、球越多越严重」。
+        //    球速上限约 1.5 格/刻，而这段本身用「上一刻→这一刻的线段」做连续检测，
+        //    把间隔放到 4 刻（最大相对位移 6 格）仍然接得住 —— 线段判定不会漏。
+        // ⚠️ **静止的球也必须参与**（作者 2026-10-09 明确）：停在地上的球正是需要
+        //    被别的球撞动的那个 —— 曾经试过「静止就跳过」，结果是
+        //    「停着的球怎么撞都不动」。这条不能按静止裁剪，只能靠间隔限流。
+        if (this.level().getGameTime() % BALL_COLLIDE_INTERVAL == 0L) {
+            this.collideWithNearbyBalls();
+        }
+        // 「磁吸」：飞行中把身边的金属拽向自己（空心铁球）
+        // 磁吸扫描会遍历附近实体 —— 每 5 刻一次足够（它只是「把附近的金属拽过来」）
+        if (!this.isSettled()
+                && this.level() instanceof ServerLevel serverLevel
+                && this.level().getGameTime() % MAGNET_SCAN_INTERVAL == 0L) {
+            this.magnetTick(serverLevel);
+        }
+
+
+        if (this.impulseTicks > 0) {
+            this.impulseTicks--;
+        }
+
+        // 【空气动力球】：回归逻辑必须独立于静止态。
+        //
+        // 之前这段挂在「静止分支」里，而 homingToOwner 自己会把球拉出静止态
+        // （setSettled(false) 才能起飞），于是球只飞一 tick 就掉回普通物理、落地、
+        // 再判定静止、再飞一 tick……表现就是「球在主人旁边一直弹，永远回不了背包」。
+        // 回归期间<b>全程硬维持</b>「恼鬼三件套」。
+        //
+        // 作者指定：从开始回归到重新回收为止，这期间一直要拥有全部恼鬼特性。
+        // 只在起飞那一刻设一次是不够的 —— 中途任何一步把它还原、或者别的逻辑碰了这些开关，
+        // 球就会重新被方块卡住（这正是「还是会卡方块」的原因）。
+        // 第三件 isAffectedByBlocks() 是跟随 homingBack 的覆盖，不用在这里管。
+        if (this.homingBack) {
+            if (!this.noPhysics) {
+                this.noPhysics = true;
+            }
+            if (!this.isNoGravity()) {
+                this.setNoGravity(true);
+            }
+        }
+
+        if (this.homingBack) {
+            // ⚠️⚠️ **超时兜底**（作者 2026-10-16 报的「偶尔出现悬在空中的球」）。
+            //
+            //    回归期间球带着「恼鬼三件套」：noPhysics（穿墙）+ setNoGravity(true)（不吃重力），
+            //    而且 setSettled() 在 isNoGravity() 时会**拒绝进入静止态**。
+            //    这三条合起来的后果是：**只要回归一直不结束，球就永远悬在空中飞、永不落定、也不消失。**
+            //
+            //    而回归的出口原本只有两个 —— 到达主人（deliverToOwner）/ 主人已不在。
+            //    球如果在障碍里打转、或者方向一直选不出通的路，homingToOwner() 就会**恒为真**，
+            //    于是下面这三行还原永远执行不到，球就一直飘着（玩家看到的就是「悬在空中的球」）。
+            //
+            //    这里补一条时间上限：飞够了就放弃回归、把三件套还原，球自然会掉下来落地。
+            boolean giveUp = this.homingTicks > RETURN_GIVE_UP_TICKS;
+            if (!giveUp && this.homingToOwner()) {
+                return;
+            }
+            // 主人已不在（下线 / 换维度 / 已死），或回归超时 ——
+            // 必须把「恼鬼三件套」和记账状态一起还原，否则球会一直穿墙飘着
+            this.homingBack = false;
+            this.noPhysics = false;
+            this.setNoGravity(false);
+            this.wasInsideBlock = false;
+        }
+
+        if (!this.isSettled()) {
+            // 必须「脚下有支撑」才判定静止。只看速度的话，球飞到抛物线顶点时速度同样接近 0，
+            // 一旦被误判成静止就会切断重力 —— 表现就是球飘在半空缓慢移动，
+            // 直到玩家死亡、区块重载才掉下来。
+            //
+            // 刚被撞开的那几刻例外：碰撞传来的速度就在阈值附近，立刻判定静止的话
+            // 球会「粘」在原地 —— 现象就是已经停下的球怎么撞都不动。
+            if (this.impulseTicks <= 0
+                    // 【智慧x】刚命中过的那几刻**不判静止** —— 命中瞬间速度会被打到接近 0，
+                    // 那一刻判静止就会把球按在地上滑行（作者 2026-10-09 反馈
+                    // 「第一下打中之后有时候会掉地上然后滑行追踪」）。
+                    && this.wisdomHitGrace <= 0
+                    && this.hasSupportBelow()
+                    && this.getDeltaMovement().lengthSqr() < SETTLE_SPEED_SQR) {
+                // 多重射击的附属弹：一落定就碎，不留在地上、也不回家
+                if (this.multishotSide || this.shatterOnSettle) {
+                    this.burst();
+                    return;
+                }
+                // 【智慧x】次数未耗尽时**不触发【空气动力球】回收** —— 它还在追目标，
+                // 不该被拽回主人身边（作者 2026-10-09 指定：次数耗尽后才正常掉落并可被回收）。
+                // 【空气动力球】：本该停下的球，改成起飞回家
+                if (this.returnToOwner && this.homingToOwner()) {
+                    return;
+                }
+                this.setSettled(true);
+                this.settledTicks = 0;
+                // 先走 5 刻的「向下坐实」，再进真正的静止
+                this.settleDropTicks = SETTLE_DROP_TICKS;
+            } else if (this.returnToOwner && this.tickSlowStuck()) {
+                // 【空气动力球】的<b>兜底落定</b>。
+                //
+                // 上面那套严格条件（速度 < 0.03 且脚下有支撑）球卡在方块边缘滚动时可能
+                // 永远凑不齐 —— 实测日志里 settled 从头到尾没变成过 true，球就那么干卡在原地，
+                // 既不落定（所以不启动回归）也不碎。作者反馈的「卡住了」就是这个。
+                // 这里放宽成「连续一秒速度都不高」就当它停下了，直接起飞回家。
+                if (this.homingToOwner()) {
+                    return;
+                }
+
+                // ⚠️⚠️ **不回家的球必须在这里真的落定**（作者 2026-10-14 报的第二轮 bug）。
+                //
+                //    上面那段注释把它叫「兜底落定」，但它原来只做了一件事：把球交给回归逻辑。
+                //    这一句 `setSettled` 都没有 —— 于是不回家的球（多重射击的附属弹）走到这里后
+                //    什么都不会发生，而严格条件（速度阈值 + 脚下有支撑）在卡墙时又凑不齐，
+                //    结果就是**卡在原地既不落定也不碎、【潮涌】特效一直挂着**。
+                //
+                //    修法：不回家的球，这里就当作「停了」—— 落定之后走 5 刻「坐实」，
+                //    再落到下面那句 `if (multishotSide) burst()`，碎掉、特效随之消失。
+                this.setSettled(true);
+                this.settledTicks = 0;
+                this.settleDropTicks = SETTLE_DROP_TICKS;
+            } else if (this.returnToOwner && !this.profile().loyalty()
+                    && !this.traitFired(TRAIT_TIDAL) && this.tickInWater()) {
+                // 【潮涌】同样不走这条捷径（作者 2026-10-15 实测反馈：
+                //   「潮汐球参与组合球的时候，组合球在入水之后速度方向会偏移，导致到处乱飞」）。
+                //
+                //   根因：【忠诚】是**唯一特性**类词条，组合球一律写回 false（见 BallFragments.comboProfile），
+                //   于是「带【潮涌】的组合球」在这条判据里**通过了** —— 它一进水泡够 20 刻就被当成落定，
+                //   紧接着被 `homingToOwner()` 接管：那里有一句
+                //   `this.setDeltaMovement(this.returnDirection.scale(nextSpeed))`，
+                //   **把整条飞行方向改写成「朝主人」**，表现就是方向突然偏移、球在水里来回乱窜。
+                //   完整潮汐球因为有【忠诚】一直躲过了这一条，所以这个现象只在组合球上看得见。
+                //
+                //   修法与忠诚球一致：带【潮涌】的球在水里也只走**严格条件**（真的撞停才回收）——
+                //   它本来就是「水中不受重力、不减速」的那颗球，不该被这条捷径拽走。
+                // 【忠诚】不走水里这条捷径（作者 2026-10-13 第三轮反馈：「水里会过早地触发忠诚回收，
+                // 这是最开始写空气动力球代码的时候搞的」）。
+                //
+                // 「泡水 20 刻 = 落定」本来是给【空气动力球】设计的：水里的球被浮力托着，
+                // 速度压不到静止阈值以下，不给它一条捷径就永远不落定、永远回不了家。
+                // 但对忠诚球来说这条太早 —— 球刚进水就被拽回去。
+                //
+                // 所以忠诚球只走上面那套**严格条件**（真的撞停 + 脚下有支撑 + 速度低于阈值），
+                // 于是它会一直留在水里，直到撞上东西停下来才回收 —— 即作者要的「撞停再回收」。
+                //
+                // ⚠️ 这条只在判据里加了一个 !loyalty()，【空气动力球】的行为一个字都没动。
+                // 水里的球是另一套：浮力托着它、速度永远压不到静止阈值以下，
+                // 走不到上面的落定判定，于是泡在水里一辈子也不会被回收（作者反馈的 bug）。
+                // 这里给个替代的「落定」条件 —— 泡够 1 秒就当它落定了。
+                if (this.homingToOwner()) {
+                    return;
+                }
+            }
+        } else {
+            // 【空气动力球】：停在地上的球同样要起飞回家
+            if (this.returnToOwner && this.homingToOwner()) {
+                return;
+            }
+
+            // 落定后的 5 刻「坐实」：只往下走，不弹、不滑、不上飘（作者指定）。
+            // 球判定静止那一瞬常常还悬在地面上方一点点，这几刻把它踏实按到地面。
+            if (this.settleDropTicks > 0) {
+                this.settleDropTicks--;
+                this.setDeltaMovement(0.0D, -SETTLE_DROP_SPEED, 0.0D);
+                return;
+            }
+
+            // 「坐实」走完 = 作者说明的「第二次静止」。附属弹到这一步<b>直接碎掉</b>。
+            //
+            // 作者指定按这个时机处理，理由很实在：第一次静止判定发生的那一瞬，
+            // 球往往还悬在地面上方一点点、状态还没稳定，检查有可能被别的分支抢先 return 掉。
+            // 放到这里就没有时序问题了 —— 只要它真的停稳，就一定裂。
+            if (this.multishotSide || this.shatterOnSettle) {
+                this.burst();
+                return;
+            }
+
+            // 静止态的球：<b>除了「向下」，另外五个方向的速度全部持续归零</b>（作者指定）——
+            // 水平不让它滑、向上不让它飘，只留下坠的分量。
+            //
+            // 之所以特意留着向下那一份：万一球悬在半空（支撑面被挖掉了、区块变动），
+            // 靠它还能自己落回地面，而不是定死在空中。
+            Vec3 velocity = this.getDeltaMovement();
+            double down = Math.min(velocity.y, 0.0D);
+            if (velocity.x != 0.0D || velocity.z != 0.0D || velocity.y != down) {
+                this.setDeltaMovement(0.0D, down, 0.0D);
+            }
+            // 脚下已经没有支撑的话，解除静止让它按正常物理落回去
+            if (!this.hasSupportBelow()) {
+                this.setSettled(false);
+                this.settledTicks = 0;
+            } else if (++this.settledTicks >= SETTLED_LIFETIME_TICKS) {
+                // 停够 2 分钟没人来捡就自动消失。
+                // 捡球由怪物那边负责（见 BallMobAI#tryPickUpBall：1.5 格 / 每 2 刻一次 / 4%）。
+                this.discard();
+            }
+
+            // 【金光闪闪】：金球躺在地上就一直在喊猪灵过来 ——
+            // 每刻覆写它们的寻路终点与攻击目标，直到球被捡走（球没了这段自然停止）。
+            if (BallBehavior.isGoldShiny(this.getItem())
+                    && this.level() instanceof ServerLevel lureLevel) {
+                PiglinLure.lure(lureLevel, this);
+            }
+        }
+    }
+
+    /**
+     * 【照明】的飞行拖尾 —— 红色粒子，每颗滞留约 1 秒。
+     *
+     * <p>用 {@code DustParticleOptions} 撒红色尘埃：原版这类粒子的存活时间就在 1 秒上下，
+     * 正好对上作者要的「单个粒子滞留时长 1s」，不需要额外控制寿命。</p>
+     *
+     * <p>隔刻撒即可 —— 逐刻撒会连成一条实心红线，反而看不出是拖尾。</p>
+     */
+    private void redstoneTrailTick() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+        if (!this.profile().hasFlag(BallBehavior.BallProfile.FLAG_ILLUMINATE)) {
+            return;   // 只有雪球-红石有拖尾
+        }
+        if (this.tickCount % 2 != 0) {
+            return;
+        }
+
+        RandomSource random = this.getRandom();
+        Vec3 velocity = this.getDeltaMovement();
+        // 沿速度反方向拖一点，速度越快尾巴越长；停下来时就撒在自己身上
+        Vec3 back = velocity.length() > 0.05D
+                ? velocity.normalize().scale(-0.25D)
+                : Vec3.ZERO;
+
+        int tint = random.nextInt(3);
+        int color = switch (tint) {
+            case 0 -> 0xFF2020;
+            case 1 -> 0xFF4020;
+            default -> 0xE01010;
+        };
+        level.sendParticles(new net.minecraft.core.particles.DustParticleOptions(color, 1.0F),
+                this.getX() + back.x + (random.nextDouble() - 0.5D) * 0.15D,
+                this.getY() + 0.1D + back.y + (random.nextDouble() - 0.5D) * 0.15D,
+                this.getZ() + back.z + (random.nextDouble() - 0.5D) * 0.15D,
+                1, 0.0D, 0.0D, 0.0D, 0.0D);
+    }
+
+    /**
+     * 「磁吸」：飞行过程中把身边的金属拽向自己（空心铁球）。
+     *
+     * <h2>规则（作者指定）</h2>
+     * <ul>
+     *   <li>作用半径 {@link BallProspecting#MAGNET_RADIUS}（2.5 格）</li>
+     *   <li>范围内<b>任何金属</b>——含粗矿、矿石、矿块、矿粉、以及用金属做出来的装备 ——
+     *       都会获得一个<b>指向球、大小等于球速一半</b>的瞬间速度</li>
+     *   <li>脱离范围就不再施加（本来就是逐刻检查，天然如此）</li>
+     *   <li><b>球静止后停止施加</b></li>
+     * </ul>
+     *
+     * <p>拽得动的有两类：</p>
+     * <ul>
+     *   <li><b>金属掉落物</b>（{@code ItemEntity}）—— 已经摆在世界里的金属方块拽不动，
+     *       能移动的金属形态就是掉在地上的那些</li>
+     *   <li><b>生物</b>（2026-10-09 新增）—— 按身上的金属装备数加权（见方法内说明）</li>
+     * </ul>
+     */
+    private void magnetTick(ServerLevel level) {
+        // 【磁吸】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定。
+        // 没中就整趟都不拽金属（不是每刻掷，所以不会一抽一抽）。
+        if (!this.traitFired(TRAIT_MAGNET)) {
+            return;
+        }
+        BallBehavior.BallProfile profile = this.profile();
+        if (!profile.hasMagnet() || this.isSettled()) {
+            return; // 没这个性质，或者球已经落定 → 停手
+        }
+        double speed = this.getDeltaMovement().length();
+        if (speed < 1.0E-3D) {
+            return; // 自己都停下来了，没什么可拽
+        }
+
+        Vec3 self = this.position();
+        double pull = speed * BallProspecting.MAGNET_SPEED_RATIO;
+        List<ItemEntity> metals = level.getEntitiesOfClass(ItemEntity.class,
+                this.getBoundingBox().inflate(profile.magnetRadius()),
+                item -> item.isAlive() && BallProspecting.isMetalEquipment(item.getItem()));
+
+        for (ItemEntity item : metals) {
+            Vec3 toSelf = self.subtract(item.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            item.setDeltaMovement(toSelf.normalize().scale(pull));
+        }
+
+        // ===== 【磁吸】对生物也生效（作者 2026-10-09 指定）=====
+        //
+        // 方向和基准速度**与掉落物那份完全一致**（从目标指向球、基准 = 球速 × 0.5），
+        // 额外再乘一个「(金属装备数 + 1) / 2」的系数：
+        //
+        //   没穿金属 ×0.5   穿 1 件 ×1.0   穿 3 件 ×2.0   穿 6 件 ×3.5
+        //
+        // 那个 **+1** 是有意的 —— 让**没穿金属的生物也会被拽**，只是弱一半；
+        // 而穿得越多拽得越狠，正好和「金属越多的东西越受磁场影响」对上。
+        //
+        // ⚠️ 掷出者本人排除在外 —— 和「球不烤自己的主人」同一条规矩，
+        //    否则穿着一身铁甲扔铁球，会把自己一起拽飞。
+        List<LivingEntity> pulled = level.getEntitiesOfClass(LivingEntity.class,
+                this.getBoundingBox().inflate(profile.magnetRadius()),
+                living -> living.isAlive() && living != this.getOwner());
+        for (LivingEntity living : pulled) {
+            Vec3 toSelf = self.subtract(living.position());
+            if (toSelf.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            // ⚠️ 这里必须是浮点除法（/ 2.0D）。写成 (metal + 1) / 2 会被整数截断，
+            //    穿 2 件和穿 1 件算出来一样，系数表整个失真。
+            double factor = (BallProspecting.countMetalEquipment(living) + 1) / 2.0D;
+            living.setDeltaMovement(toSelf.normalize().scale(pull * factor));
+        }
+    }
+
+    /** 一 tick 内方块状态不会变，缓存免得重复扫 */
+    private int supportCachedTick = -1;
+    private boolean supportCachedResult;
+
+    /** 脚下是否有可站立的碰撞箱（滚到悬崖边、或者还飞在半空时都会是 false） */
+    private boolean hasSupportBelow() {
+        if (this.supportCachedTick == this.tickCount) {
+            return this.supportCachedResult;
+        }
+        this.supportCachedTick = this.tickCount;
+        this.supportCachedResult = this.hasSupportBelow0();
+        return this.supportCachedResult;
+    }
+
+    private boolean hasSupportBelow0() {        BlockPos below = this.blockPosition().below();
+        return !this.level().getBlockState(below)
+                .getCollisionShape(this.level(), below)
+                .isEmpty();
+    }
+
+    /**
+     * 滚动一帧：球精确压在方块顶面之上（留一点间隙），再按摩擦与重量衰减水平速度。
+     *
+     * <p>间隙是必需的：球底正好贴着顶面时，浮点误差会让每 tick 的移动都判成一次地面碰撞，
+     * 位置被反复拉低再抬回 —— 那正是肉眼看到的「抽搐」。</p>
+     */
+    private void rollTick() {
+        Vec3 velocity = this.getDeltaMovement();
+
+        BlockPos below = this.blockPosition().below();
+        BlockState state = this.level().getBlockState(below);
+        VoxelShape shape = state.getCollisionShape(this.level(), below);
+
+        if (shape.isEmpty()) {
+            this.setRolling(false);
+            return;
+        }
+
+        double topY = below.getY() + shape.max(Direction.Axis.Y);
+        this.setPos(this.getX(), topY + this.getBbHeight() * 0.5D + GROUND_CLEARANCE, this.getZ());
+
+        double keep = BallRoll.keepFactor(this.getWeight(), state.getBlock().getFriction());
+        double vx = velocity.x * keep;
+        double vz = velocity.z * keep;
+        this.setDeltaMovement(vx, 0.0D, vz);
+
+        if (vx * vx + vz * vz < SETTLE_SPEED_SQR) {
+            this.setDeltaMovement(Vec3.ZERO);
+            this.setRolling(false);
+            // ⚠️ **多重射击的附属弹：滚停即碎**（作者 2026-10-15 报的 bug）。
+            //
+            //    这条路径原来直接 `setSettled(true)` —— 没有那套「附属弹一落定就碎」的判定。
+            //    于是附属弹变成「**已落定、却没碎**」的状态挂在地上，而收纳袋的自动收纳
+            //    （{@code BallPouchCurios.autoCollect}）只判 {@code isSettled()}，
+            //    就把它当普通球收进袋子里了 —— 表现正是作者说的
+            //    「附属球在即将停稳但未到达破碎时被收纳袋错误收纳」。
+            //
+            //    落定即碎是附属弹的既定设计（见 L1591 / L1666 那两处同款判定），这里补齐。
+            if (this.multishotSide || this.shatterOnSettle) {
+                this.burst();
+                return;
+            }
+            // 同一 tick 内转入静止态，让重力立刻断掉
+            this.setSettled(true);
+            this.settledTicks = 0;
+        }
+    }
+
+    /**
+     * 球与球之间的弹性碰撞。
+     *
+     * <p>沿两球连线做一维弹性碰撞，<b>质量取重量</b>（重量越大越难被撞动）、
+     * <b>弹性系数取两球弹射的平均值</b>（弹射 6 → e = 0.6）。
+     * 每对球只在 id 较小的一方处理，避免算两遍。</p>
+     *
+     * <p>球撞球<b>不再消耗耐久</b>（作者 2026-10-09 修正）—— 两球会持续接触，
+     * 记账的话不到一秒就把耐久耗光当场炸掉；动能传递照旧，耐久只由撞墙 / 撞生物消耗。
+     * 已经在分离的两球不重复处理，所以同一次接触只会处理一次。</p>
+     */
+    private void collideWithNearbyBalls() {
+        // ===== 连续碰撞检测 =====
+        // 球速能到 1.5+ 格/刻，而球的碰撞箱只有 0.25 宽 —— 只查「包围盒是否重叠」的话，
+        // 飞行球会<b>一整个 tick 直接跨过</b>停在地上的球，两边从未重叠、碰撞被整个跳过。
+        // 现象就是「停着的球怎么撞都不动」。所以改成拿「上一刻位置 → 当前位置」
+        // 这条线段去判接近，路径擦过就算撞上。
+        Vec3 from = new Vec3(this.xo, this.yo, this.zo);
+        Vec3 move = this.position().subtract(from);
+
+        // ⚠️ 搜索半径**设上限**：原来直接拿 `move.length()` 去膨胀包围盒，
+        //    被爆炸打飞的球一 tick 能移动好几格，查询范围随之膨胀、开销陡增。
+        //    超过 MAX_COLLIDE_REACH 之后就交给下几次检测（间隔 4 刻）覆盖。
+        double reach = Math.min(MAX_COLLIDE_REACH, Math.max(0.5D, move.length() + CONTACT_DISTANCE));
+        List<BallProjectile> others = this.level().getEntitiesOfClass(
+                BallProjectile.class,
+                this.getBoundingBox().inflate(reach),
+                other -> other != this && other.isAlive());
+
+        for (BallProjectile other : others) {
+            if (this.getId() > other.getId()) {
+                continue; // 每对只算一次
+            }
+
+            // 对方这一 tick 也在动，所以拿两者的「相对路径」判断是否擦过
+            Vec3 otherFrom = new Vec3(other.xo, other.yo, other.zo);
+            Vec3 relativeFrom = from.subtract(otherFrom);
+            Vec3 relativeMove = move.subtract(other.position().subtract(otherFrom));
+            double t = closestApproachT(relativeFrom, relativeMove);
+            if (relativeFrom.add(relativeMove.scale(t)).lengthSqr() > CONTACT_DISTANCE * CONTACT_DISTANCE) {
+                continue; // 这一 tick 的路径根本没碰到
+            }
+
+            Vec3 delta = other.position().subtract(this.position());
+            if (delta.lengthSqr() < 1.0E-6D) {
+                continue;
+            }
+            Vec3 normal = delta.normalize();
+
+            double v1 = this.getDeltaMovement().dot(normal);
+            double v2 = other.getDeltaMovement().dot(normal);
+            // 已经在分离就不重复处理
+            if (v1 - v2 <= 0.0D) {
+                continue;
+            }
+
+            double m1 = Math.max(1.0D, this.getWeight());
+            double m2 = Math.max(1.0D, other.getWeight());
+            double e = (this.getBounce() + other.getBounce()) / 20.0D;
+
+            double u1 = ((m1 - e * m2) * v1 + (1.0D + e) * m2 * v2) / (m1 + m2);
+            double u2 = ((m2 - e * m1) * v2 + (1.0D + e) * m1 * v1) / (m1 + m2);
+
+            this.setDeltaMovement(this.getDeltaMovement().add(normal.scale(u1 - v1)));
+            other.setDeltaMovement(other.getDeltaMovement().add(normal.scale(u2 - v2)));
+
+            // ⚠️ **球撞球不再扣耐久**（作者 2026-10-09 修正）。
+            //
+            //    原来的规则是「两边各扣 1 点耐久」，但球是会互相持续接触的 ——
+            //    两个铁球撞在一起时每刻都在触发，<b>不到一秒就把耐久耗光当场炸掉</b>。
+            //    动能传递照旧做（上面已经算过），只是不再记账耐久。
+            //    耐久现在只由「撞墙 / 撞生物」这类真正的碰撞消耗。
+
+            // 被撞后转为贴地滚动。
+            //
+            // ⚠️ **必须限流**：球靠在一起时这一段每 tick 都会重新算一遍，
+            //    而 startRollingFromImpulse() 会反复切换状态、还带粒子/音效，
+            //    十来个球就足以让服务端每 tick 卡顿（作者 2026-10-09 反馈
+            //    「十来个球就特别卡、生物卡一下闪现一下」）。
+            //    用「最近碰撞刻」做冷却：同一对球在 COLLIDE_COOLDOWN_TICKS 内只处理一次。
+            long now = this.level().getGameTime();
+            long thisLast = this.lastBallCollideTick;
+            long otherLast = other.lastBallCollideTick;
+            if (now - thisLast < COLLIDE_COOLDOWN_TICKS || now - otherLast < COLLIDE_COOLDOWN_TICKS) {
+                continue;
+            }
+            this.lastBallCollideTick = now;
+            other.lastBallCollideTick = now;
+            this.startRollingFromImpulse();
+            other.startRollingFromImpulse();
+        }
+    }
+
+    /**
+     * 线段与点最接近的位置参数 t ∈ [0,1]。
+     *
+     * <p>用来做连续碰撞检测：把「上一刻到这一刻的相对位移」当成一条线段，
+     * 求它离原点最近的那一点 —— 距离够近就说明这一 tick 里擦到了对方。
+     * 不对整条路径采样，所以再快的球也不会漏判。</p>
+     *
+     * @param origin 线段起点
+     * @param dir    线段位移（终点 = origin + dir）
+     */
+    private static double closestApproachT(Vec3 origin, Vec3 dir) {
+        double lengthSqr = dir.lengthSqr();
+        if (lengthSqr < 1.0E-9D) {
+            return 0.0D; // 相对没动，只有起点本身有意义
+        }
+        double t = -origin.dot(dir) / lengthSqr;
+        if (t < 0.0D) {
+            return 0.0D;
+        }
+        return Math.min(t, 1.0D);
+    }
+
+    /** 受到外力后转入滚动状态 */
+    private void startRollingFromImpulse() {        Vec3 velocity = this.getDeltaMovement();
+        this.setDeltaMovement(velocity.x, 0.0D, velocity.z);
+        this.impulseTicks = IMPULSE_GRACE_TICKS;
+        if (!this.isRolling()) {
+            this.setRolling(true);
+        }
+        this.setSettled(false);
+    }
+
+    /**
+     * 右键交互 —— 分两种：地上的球直接捡走，空中的球「接住」。
+     *
+     * <p><b>接球</b>（作者指定）：消耗 1 点耐久，同时让玩家承受该球原本伤害的<b>一半</b>。
+     * 若这一下把耐久扣到 0，球会当场碎裂、也就拿不到手了。</p>
+     */
+    @Override
+    public InteractionResult interact(Player player, InteractionHand hand, Vec3 location) {
+        if (this.level().isClientSide() || !this.isAlive()) {
+            return InteractionResult.PASS;
+        }
+
+        if (this.isSettled()) {
+            // 地上的球：作者指定「主手副手都空着」才能捡 ——
+            // 手上还拿着东西时右键不该把球顺手收走
+            if (!player.getMainHandItem().isEmpty() || !player.getOffhandItem().isEmpty()) {
+                return InteractionResult.PASS;
+            }
+            this.giveTo(player);
+            return InteractionResult.SUCCESS;
+        }
+
+        // 空中的球：和捡地上的球同一条规矩 —— <b>主手副手都空着</b>才能接（作者指定）。
+        // 手上拿着任何东西（包括另一颗球）时右键，都不该是把球收走。
+        if (!player.getMainHandItem().isEmpty() || !player.getOffhandItem().isEmpty()) {
+            return InteractionResult.PASS;
+        }
+        // 投掷者不能把自己<b>刚出手</b>的球立刻收回来（那等于白扔一下）。
+        // 但球飞出去一段之后就允许接回来 —— 不设这道时限的话，自己扔的球永远接不到。
+        if (player == this.getOwner() && this.tickCount < OWNER_SELF_PICKUP_DELAY_TICKS) {
+            return InteractionResult.PASS;
+        }
+        // 同一条规矩：刚 Q 丢过球 → 5 秒内不许把它接回来（作者 2026-10-11 指定）
+        if (com.mcmodworkspace.moreballs.BallPickupHandler.isDropLocked(player)) {
+            return InteractionResult.PASS;
+        }
+
+        // 空中的球：接住它 —— 先结算代价（一半伤害）
+        if (this.level() instanceof ServerLevel serverLevel) {
+            player.hurtServer(serverLevel, this.damageSources().thrown(this, this.getOwner()),
+                    this.damage * CATCH_DAMAGE_RATIO);
+        }
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvents.ITEM_PICKUP, SoundSource.NEUTRAL, 0.6F, 1.4F);
+
+        // 再接一次耐久消耗；限次坚固可能因此当场碎裂
+        this.consumeDurability("接球");
+        if (this.isRemoved()) {
+            return InteractionResult.SUCCESS; // 接球过程中球碎了，拿不到
+        }
+
+        this.giveTo(player);
+        return InteractionResult.SUCCESS;
+    }
+
+    /**
+     * 把球收进玩家手里（没地方就掉在原地），随后移除实体。
+     *
+     * <p>作者指定的拾取顺序：<b>快捷栏最前面的空位 → 手里 → 袋子的中转槽 → 背包最前面</b>。
+     * 交给 {@link BallPouchHelper#giveToPlayer} 统一处理。</p>
+     */
+    private void giveTo(Player player) {
+        ItemStack stack = this.getItem().copy();
+        // 洗掉弩留下的「不可回收」标记，否则捡回来的球与普通球叠不到一起
+        BallItem.stripIntangible(stack);
+        // 把飞行中消耗掉的耐久写回物品 —— 这就是「全局耐久」
+        BallItem.applyToughness(stack, this.getToughness());
+
+        // ===== 【球堆】交付前**默认套成球堆**（作者 2026-10-15 纠正的方向）=====
+        //
+        // ⚠️⚠️ 这里必须排在**交付之前** —— 我原先写的是「袋子优先、袋子收不下才套壳」，
+        //    结果带着袋子时袋子永远收得下、套壳那段永远不执行，**球堆成了死代码**
+        //    （作者原话：「球堆这个机制就没用」）。
+        //
+        //    作者要的是「回收时**默认**变成球堆」—— 套壳在前，之后不管进袋子还是进背包，
+        //    玩家拿到的都是「一格装一堆」。
+        //
+        //    满耐久的球会被 clusterize 原样返回（它们本来就能叠成一堆，不需要壳）。
+        stack = com.mcmodworkspace.moreballs.BallClusterItem.clusterize(stack);
+
+        if (!stack.isEmpty() && BallPouchHelper.giveToPlayer(player, stack)) {
+            this.discard();
+            return;
+        }
+
+        // 实在没地方 → 掉在脚边
+        if (!stack.isEmpty() && this.level() instanceof ServerLevel serverLevel) {
+            this.spawnAtLocation(serverLevel, stack, 0.1F);
+        }
+        this.discard();
+    }
+
+    private ParticleOptions getParticle() {
+        ItemStack item = this.getItem();
+        return item.isEmpty()
+                ? ParticleTypes.ITEM_SNOWBALL
+                : new ItemParticleOption(ParticleTypes.ITEM, ItemStackTemplate.fromNonEmptyStack(item));
+    }
+
+    /** 碎裂特效：碎屑炸开 + 一圈烟，让「球碎了」一眼可见 */
+    @Override
+    public void handleEntityEvent(byte id) {
+        if (id != 3) {
+            return;
+        }
+        ParticleOptions particle = this.getParticle();
+        for (int i = 0; i < 20; i++) {
+            this.level().addParticle(particle,
+                    this.getX(), this.getY(), this.getZ(),
+                    (this.random.nextDouble() - 0.5D) * 0.5D,
+                    this.random.nextDouble() * 0.4D,
+                    (this.random.nextDouble() - 0.5D) * 0.5D);
+        }
+        for (int i = 0; i < 10; i++) {
+            this.level().addParticle(ParticleTypes.SMOKE,
+                    this.getX(), this.getY(), this.getZ(),
+                    (this.random.nextDouble() - 0.5D) * 0.3D,
+                    this.random.nextDouble() * 0.2D,
+                    (this.random.nextDouble() - 0.5D) * 0.3D);
+        }
+    }
+
+    @Override
+    protected void onHitEntity(EntityHitResult hitResult) {
+        super.onHitEntity(hitResult);
+
+        // ===== 【移形换位】（「其它特殊」类，作者 2026-10-13 指定）=====
+        //
+        // 珠子自身是 BallEnderpearl 管，但**切出来的碎片 / 组合球射的是本类** ——
+        // 所以换位逻辑必须在这里也有一份，否则「带词条的组合球打人不换位」（作者实测报的）。
+        //
+        // 做法就是直接对调两者坐标：先把双方位置都读出来，再各写一次。
+        // ⚠️ 必须**先读全、再写**，边读边写的话第二次写入会读到已经被改过的坐标。
+        // ⚠️ **只有主球才换位**（作者 2026-10-14 指定）：
+        //    多重射击一次射出 2~3 颗，若每颗都换一次，掷出者会被连丢三次。
+        //    见 primaryOnlyEffectAllowed() —— 其余效果在附属弹上照常生效。
+        if (this.primaryOnlyEffectAllowed()
+                && this.profile().transpose() && this.traitFired(TRAIT_TRANSPOSE)
+                && this.level() instanceof ServerLevel swapLevel) {
+            Entity ballOwner = this.getOwner();
+            Entity hitEntity = hitResult.getEntity();
+            if (ballOwner instanceof LivingEntity shooter
+                    && hitEntity instanceof LivingEntity target
+                    && target != shooter
+                    && target.isAlive()) {
+                double shooterX = shooter.getX();
+                double shooterY = shooter.getY();
+                double shooterZ = shooter.getZ();
+                double targetX = target.getX();
+                double targetY = target.getY();
+                double targetZ = target.getZ();
+                shooter.teleportTo(targetX, targetY, targetZ);
+                target.teleportTo(shooterX, shooterY, shooterZ);
+                MoreBalls.LOGGER.debug("[ball][移形换位] 与 {} 互换位置", target.getName().getString());
+            }
+        }
+
+        // 【空气动力球】回家途中撞到主人：这一下就是「到家」，直接交付。
+        //
+        // 不这么处理的话，球会先撞在主人身上结算伤害、然后被弹开，
+        // 于是永远走不到静止态、也就永远回不了背包 ——
+        // 现象就是「球在旁边一直弹，就是不进背包」（作者反馈过）。
+        if (this.homingBack && hitResult.getEntity() == this.getOwner()
+                && hitResult.getEntity() instanceof LivingEntity owner
+                && this.level() instanceof ServerLevel level) {
+            this.deliverToOwner(level, owner);
+            return;
+        }
+
+        // 出手后的 0.1 秒内不结算伤害：防止贴脸投掷、反弹回来把自己打死
+        if (this.tickCount < SPAWN_GRACE_TICKS) {
+            MoreBalls.LOGGER.debug("[ball][伤害] 早退：出手宽限期内（tick={} < {}），目标={}",
+                    this.tickCount, SPAWN_GRACE_TICKS, hitResult.getEntity().getName().getString());
+            return;
+        }
+        Entity entity = hitResult.getEntity();
+
+        // 会打架的怪物有可能把球接下来（按难度掷概率），接着蓄力扔回来 ——
+        // 接住了就整颗球归它，命中伤害自然不结算
+        if (entity instanceof Mob mob && BallMobAI.tryCatchBall(mob, this)) {
+            MoreBalls.LOGGER.debug("[ball][伤害] 早退：{} 接住了球（Mob 接球），不结算伤害", mob.getName().getString());
+            return;
+        }
+
+        // 【善良】：<b>不伤害同阵营</b> —— 碰到自己人就原样弹开，不结算伤害。
+        //
+        // 作者 2026-10-09 明确：判据是「**同阵营**」，而不是「对方是不是友好生物」。
+        // 也就是**按发射者**决定：玩家扔出的球不伤玩家阵营（友好 + 中立），
+        // 而**敌怪扔出的球不伤敌怪** —— 怪物互相残杀不算「善良」。
+        //
+        // 阵营用原版的 {@link Enemy} 接口划分：僵尸 / 骷髅 / 苦力怕 / 掠夺者实现它，
+        // 中立（猪 / 末影人）与友好（村民 / 铁傀儡）不实现 ——
+        // 比按 MobCategory 分类更准，也自动涵盖其它模组添加的生物。
+        // ⚠️ 前提是**还知道发射者是谁**。发射者已经消失时（典型的：持球苦力怕扔完球
+        //    当场自爆，球的主人 UUID 查不到了）无从判断「是不是自己人」——
+        //    此时**不弹开、照常结算伤害**。
+        //    否则 owner 为 null 会让 isSameSide 恒返回 true，那颗球就谁都不打
+        //    （作者 2026-10-09 实测：苦力怕扔的紫水晶球打玩家不掉血）。
+        // 【善良】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+        if (this.traitFired(TRAIT_KINDNESS)) {
+            if (this.getOwner() != null
+                    && this.profile().kindness()
+                    && entity instanceof LivingEntity other
+                    && other != this.getOwner()
+                    && isSameSide(this.getOwner(), other)) {
+                MoreBalls.LOGGER.debug("[ball][伤害] 早退：{}（kindness={}）判定为「同阵营」被弹开，不结算伤害。"
+                                + " 发射者={} 是敌对={}，目标={} 是敌对={}",
+                        other.getName().getString(), this.profile().kindness(),
+                        String.valueOf(this.getOwner()),
+                        this.getOwner() instanceof net.minecraft.world.entity.monster.Enemy,
+                        other.getName().getString(),
+                        other instanceof net.minecraft.world.entity.monster.Enemy);
+                this.bounceOffEntity(other);
+                this.friendlyBounced = true;   // 见 onHit：别让二次 bounceBack 覆盖它
+                return;
+            }
+        }
+
+        if (this.level() instanceof ServerLevel serverLevel) {
+            // 命中伤害走 impactDamage()：基础伤害再按「实际速度 / 投掷基准速度」加成，
+            // 所以被爆炸打飞的球会比手扔的疼（作者指定）
+            float dealt = this.impactDamage();
+            boolean hurt = entity.hurtServer(serverLevel, this.damageFromOwner(), dealt);
+
+            // 【烈焰人之间不结仇】（作者 2026-10-14 指定）
+            //
+            // 烈焰人有独立的「球袋」机制（见 BallMobAI 的 BLAZE_BALLS / blazeAddBall），
+            // 会主动互相投球；而原版 hurtServer 会把这次伤害的来源记进 lastHurtByMob，
+            // 于是被砸中的那只烈焰人**掉头就去打掷出它的那只烈焰人** —— 作者要求这条不生效。
+            //
+            // 只清「同族互砸」这一种情形：掷出者是烈焰人、挨打的也是另一只烈焰人。
+            // 掷出者是玩家或别的怪时照旧结仇，那是本来就该有的行为。
+            if (hurt
+                    && entity instanceof net.minecraft.world.entity.monster.Blaze hitBlaze
+                    && this.getOwner() instanceof net.minecraft.world.entity.monster.Blaze ownerBlaze
+                    && hitBlaze != ownerBlaze) {
+                hitBlaze.setLastHurtByMob(null);
+                if (hitBlaze.getTarget() == ownerBlaze) {
+                    hitBlaze.setTarget(null);
+                }
+            }
+
+            // ===== 两个「被打」成就（都在确认真的掉了血之后才发）=====
+            if (hurt && entity instanceof Player victim) {
+                // 「你咋也有？」：被**怪物**用球击中（玩家之间互扔不算）
+                if (this.getOwner() instanceof Mob) {
+                    ModAdvancements.award(victim, ModAdvancements.HURT_BY_MOB_BALL);
+                }
+                // 「谁**掺石子了？」：被任意**雪球类**的球打掉血。
+                // 判据是名字里带 snowball 的球 —— 也就是「雪球？」系列那四颗，
+                // 它们本来就更像雪球而不是石头球。
+                if (this.getItem().is(ModTags.Items.BALLS_SNOWBALL)) {
+                    ModAdvancements.award(victim, ModAdvancements.SNOWBALL_HURT);
+                }
+            }
+
+            // 【熔融】触发概率（当前 100% 必触发；以后调这个常量即可）
+            // 【熔融】：热量攒够阈值后，这一击会给目标挂上「熔融物烧伤」。
+            // 空心铁球那颗是 120 —— 得先在矿脉附近飞一会儿把矿石烤热、自己攒够热量才行。
+            BallBehavior.BallProfile moltenProfile = this.profile();
+            if (moltenProfile.hasMolten() && this.heat >= moltenProfile.moltenThreshold()
+                    && entity instanceof LivingEntity livingTarget) {
+                MoltenBurnEffect.applyMoltenBurn(serverLevel, livingTarget,
+                        this.getOwner() instanceof LivingEntity livingOwner ? livingOwner : null,
+                        BallBehavior.MOLTEN_BURN_TICKS);
+            }
+
+            // 【魔法】（青金石球）—— 命中目标时随机施加一个负面效果。
+            //
+            // 作者 2026-10-10 规格：时长 1–20 秒随机、等级 1–5 级随机，
+            // 池子取「所有非瞬时的负面效果」，详见 BallMagic。
+            //
+            // 放在这个 if 块里（而不是 onHit）是因为这里才有**目标实体** ——
+            // onHit 的 EntityHitResult 分支虽然也能拿到，但那条路径在
+            // 穿透 / 反弹的早退分支后面，会漏掉一部分命中。
+            if (this.profile().hasFlag(BallBehavior.BallProfile.FLAG_MAGIC)
+                    && entity instanceof LivingEntity magicTarget) {
+                // 【魔法】命中本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+                if (this.traitFired(TRAIT_MAGIC)) {
+                    BallMagic.applyToVictim(serverLevel, magicTarget);
+                }
+            }
+
+            // 【金光闪闪】：金球砸猪灵不结仇。
+            // 顺便给这只猪灵留个记号 —— 它之后捡起这颗球时，交易是不是「特殊交易」
+            // 就看这个记号（被球打过就只能拿普通回礼）。
+            if (entity instanceof AbstractPiglin piglin
+                    && BallBehavior.isGoldShiny(this.getItem())) {
+                piglin.setData(ModAttachments.GOLD_BALL_HURT.get(), true);
+                // 【金光闪闪】「砸猪灵不结仇」本趟是否生效 —— 由本球在第一个 tick 掷定
+                if (this.traitFired(TRAIT_GOLD_SHINY)) {
+                    PiglinLure.forgetAnger(piglin);
+                }
+            }
+
+            // 【敌对球 · 蜘蛛系】（作者 2026-10-11 指定）
+            // 蜘蛛扔出的球击中任意生物 → 缓慢 IV（5 秒）；洞穴蜘蛛再加中毒 II（5 秒）。
+            // 判据只看「投掷者是不是蜘蛛系」，所以玩家自己扔的球不受影响。
+            MobBallSpecials.onBallHitCreature(this, serverLevel, entity);
+
+            // ===== 第十三批重做（作者 2026-10-15）：击中类词条 =====
+            //
+            // 全都放在这个 if (serverLevel) 块里 —— 这里才有**目标实体**，
+            // 而且它在穿透 / 反弹那些早退分支之后，不会漏掉一部分命中。
+
+            // 【敛财】绿宝石球：给被击中者挂【腰缠万贯】（10 秒）
+            if (this.traitFired(TRAIT_MONEY)
+                    && entity instanceof LivingEntity moneyTarget) {
+                BallExtraTraits.applyMoney(moneyTarget,
+                        this.getOwner() instanceof LivingEntity moneyOwner ? moneyOwner : null);
+            }
+
+            // 【招蜂引蝶N】蜜饯球（数值类特性）：召唤 N 只仇恨目标、血量 5 的蜜蜂
+            if (this.profile().hasBees() && entity instanceof LivingEntity beeTarget) {
+                BallExtraTraits.summonBees(serverLevel, beeTarget, this.profile().beeCount(),
+                        this.getOwner(), this.piercesArmor());   // 召唤者 = 球的主人（蜜蜂绝不打他）
+            }
+
+            // 【封印】符箓球：封玩家快捷栏 / 封怪物攻击并打掉它手里的球
+            if (this.traitFired(TRAIT_SEAL)
+                    && entity instanceof LivingEntity sealTarget) {
+                BallExtraTraits.seal(serverLevel, sealTarget, this.getOwner());
+            }
+
+            // 【尖刺】滴水石球：规格里的「击中」那一档 —— 击中生物时同样射一圈锥子
+            if (this.traitFired(TRAIT_SPIKE)) {
+                BallExtraTraits.shootSpikes(serverLevel, this.position(),
+                        this.getDeltaMovement(), this.getOwner(), this.piercesArmor());
+            }
+        }
+    }
+
+    /**
+     * 【善良】碰到友好 / 中立生物时的反弹。
+     *
+     * <p>做的是<b>标准向量反射</b>：把速度沿「球 → 目标」的法线翻折，
+     * 再乘一个阻尼。这样是一次干净的弹开，而不是原路折回 ——
+     * 后者会让球沿着来路飞回去打在投掷者身上。</p>
+     *
+     * <p>弹射值高的球反弹后保留的速度更多（和方块弹射共用 {@code bounce} 这个性质）。</p>
+     */
+    private void bounceOffEntity(LivingEntity target) {
+        Vec3 delta = this.getDeltaMovement();
+        Vec3 away = this.position().subtract(target.position());
+
+        // 完全重叠时法线取不到，退化成「原路返回」
+        Vec3 normal = away.lengthSqr() < 1.0E-6
+                ? (delta.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 1.0, 0.0) : delta.reverse().normalize())
+                : away.normalize();
+
+        // r = v - 2(v·n)n
+        double along = delta.dot(normal);
+        Vec3 reflected = delta.subtract(normal.scale(2.0 * along));
+
+        // 弹射越高保留得越多；再追加一点法向推力，确保能脱离目标（不然会黏住反复触发）
+        double keep = this.profile().bounce() > 0 ? 0.90 : 0.70;
+        Vec3 out = reflected.scale(keep).add(normal.scale(0.12));
+        this.setDeltaMovement(out);
+
+        // 沿法线顶出去一点，避免下一刻还判定在同一个命中位置
+        this.setPos(this.getX() + normal.x * 0.15, this.getY() + normal.y * 0.15,
+                this.getZ() + normal.z * 0.15);
+
+        BallBehavior.BallSound sound = this.profile().sound();
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                sound.resolveHitSound(), SoundSource.NEUTRAL,
+                0.7F * sound.volume(), 1.35F);
+    }
+
+
+    /**
+     * 【热量积累效率】= 当前速度 / 自身初速度（作者 2026-10-08 指定）。
+     *
+     * <p>基础增量乘以这个系数才是实际增量。于是：</p>
+     * <ul>
+     *   <li><b>停住的球效率为 0</b> —— 不再凭空积热（修掉的历史遗留问题）</li>
+     *   <li>飞得越快积得越快，扔出去的那一下增量最大</li>
+     *   <li>初速度取球自己的 {@code profile.physicalVelocity()}，所以慢球（雪球那类）与
+     *       快球各自以「自己扔出去时的速度」为基准</li>
+     * </ul>
+     *
+     * <p>双向的三个入口（球自身、金属矿、生物）都走这一个函数，
+     * 保证「热量的叠加是双向的、且两侧同速」。</p>
+     */
+    /**
+     * 【感应N】的积热倍率（作者 2026-10-12 指定）。
+     *
+     * <p>不带【感应】或 1 级 → 按原版速度积累（×1）；n 级就是 <b>n 倍</b>速度。
+     * 没有【感应】的球压根走不到积热代码（调用点前有 {@code profile().hasSense()} 早退），
+     * 所以这里只需把 1 当作下限兜底。</p>
+     */
+    private float senseMultiplier() {
+        return Math.max(1, this.profile().sense());
+    }
+
+    private float heatEfficiency() {
+        // 分母 = **0 级蓄力的出手速度**（作者 2026-10-08 明确指定）。
+        //
+        // 这个量在投掷那边叫「无蓄力投掷速度」，就是 profile.physicalVelocity()：
+        //   BallThrowHandler 里 baseVelocity = profile.physicalVelocity()，
+        //   实际出手速度 = baseVelocity × BallCharge.velocityMultiplier(蓄力等级)。
+        // 所以用 0 级（倍率 1.0）的速度当基准，正好是「不蓄力扔出去那一下」的速度。
+        //
+        // ⚠️ 千万别写成 profile.velocity()：那是**配置量纲**（基准 10），
+        //    而 getDeltaMovement() 是**物理量纲**，两者差一个 LAUNCH_SPEED_SCALE（0.15）。
+        //    写错的话比值整体缩水 6.7 倍，表现就是「热量积累慢了很多」。
+        float base = this.profile().physicalVelocity();
+        if (base <= 0.0F) {
+            return 0.0F;   // 没配初速度就别积热，免得除以零
+        }
+        // ⚠️ 分子用 effectiveSpeed() 而**不是** getDeltaMovement().length()（作者 2026-10-17 定的方案）。
+        //
+        //    【尖啸】的轨迹已经回到几何射线 —— 球本身**不再以极速飞行**，
+        //    所以 getDeltaMovement() 读到的是普通速度。但作者要求
+        //    「计算其它词条的相互作用时用 1 刻跑 256 的速度，两边分开算」，
+        //    于是让 effectiveSpeed() 在尖啸这一趟里返回 256 格/刻。
+        //    这样【感应】的积热效率照样被顶满，而弹道与特效不受影响。
+        return (float) (this.effectiveSpeed() / base);
+    }
+    /**
+     * 回归虚化：<b>整条命中链都跳过</b>。
+     *
+     * <h2>为什么非要在这一层拦</h2>
+     * 实测日志里球的「速度 = 4.0」而「190 刻只挪了 0.8 格」—— 开关（`noPhysics`、`noGravity`）
+     * 全都是对的，速度也对，就是位移不兑现。原因就在这条链上：
+     * 投射物撞到方块时，`hitTargetOrDeflectSelf` 会在<b>调用 `onHit` 之前</b>
+     * 就把球按到方块表面、并把速度改掉。我只在 `onHit` 里 return，拦到的是第二道工序，
+     * 球早被按住了。
+     *
+     * <p>返回 {@code NONE} 表示「不偏转、什么都不做」，让它老老实实一路穿过去。
+     * 穿墙的耐久代价由 {@link #chargeForPhasing()} 独立记账，不受影响。</p>
+     */
+    @Override
+    protected ProjectileDeflection hitTargetOrDeflectSelf(HitResult hitResult) {
+        if (this.homingBack) {
+            return ProjectileDeflection.NONE;
+        }
+        return super.hitTargetOrDeflectSelf(hitResult);
+    }
+
+    /** 命中分岔：<b>穿透 → 继续飞；坚固 → 反弹；其余 → 碎裂</b> */
+    @Override
+    protected void onHit(HitResult hitResult) {
+        // 【金光闪闪】作者 2026-10-08 指定：金球**第一次碰撞**之后 5 秒内，
+        // 猪灵与猪灵蛮兵不会被它捡起，且这段时间会被强制禁用仇恨并被它吸引。
+        // 每次碰撞都把窗口往后推 5 秒 —— 见 refreshGoldLureWindow()。
+        if (BallBehavior.isGoldShiny(this.getItem())) {
+            this.refreshGoldLureWindow();
+        }
+        // 回归虚化期间穿过一切，不结算任何碰撞。
+        //
+        // 光设 noPhysics 不够：那只让 move() 不再做碰撞推挤，
+        // 而投射物自己的射线检测照样会命中方块并回调到这里 ——
+        // 于是球回归时仍会撞墙、被弹开甚至撞碎，表现就是「虚化没实现」。
+        // 穿墙的耐久代价由 chargeForPhasing 独立记账，不受这里影响。
+        if (this.homingBack) {
+            return;
+        }
+
+        // ===== 【尖啸】落点判定（作者 2026-10-17 报「撞到墙没有球体范围和特效」）=====
+        //
+        // ⚠️ 这是 1.1.1.33 改造时漏掉的一环。那次把【尖啸】从「几何迭代射线」换成了
+        //    「极速飞行 + 每步判定」，于是 `shriekLand` 变成了**没有任何调用点的死方法** ——
+        //    撞墙时既不补落点音爆、也不做半径 10 的范围判定，玩家看到的就是
+        //    「有时候撞到墙什么都没有」。这里把它接回来。
+        //
+        //    先把「当前位置 → 命中点」这一小段补一次路径判定（保证音波画到墙上），
+        //    再把命中点当作尖啸的落点：`bounce > 0` 会反弹（弹射档位用掉一次），
+        //    `bounce == 0`（回响球本体）就停下。
+        if (this.shriekFired && this.level() instanceof ServerLevel shriekLevel) {
+            Vec3 impact = hitResult.getLocation();
+            BallExtraTraits.shriekFlightTick(this, shriekLevel,
+                    this.traitFired(TRAIT_PIERCE), this.position(), impact);
+            Direction face = (hitResult instanceof BlockHitResult blockHit) ? blockHit.getDirection() : null;
+            // ⚠️ 这里**不要再调 shriekImpact** —— 轨迹已回到几何射线，
+            //    `shriekSegment` 每算完一段就自带「落点音效 + 球爆」，
+            //    这里再调一次就是在同一个点炸两圈。
+            this.shriekLand(impact, face);
+            // ⚠️ **不能 return** —— 后面还有碎裂 / 扣耐久 / 脉冲等常规命中逻辑，
+            //    早退会让尖啸球撞墙不扣耐久。这里只补完落点特效与判定，然后照常往下走。
+        }
+
+        // ===== 【脉冲】红石球：命中即触发（实体与方块都算）=====
+        //
+        // 作者 2026-10-10 指定：以「命中点」为球心、半径 7 格，对范围内
+        // 「身着金属护甲、或护甲值超过 20 点」的生物施加【震荡】（3 秒）；
+        // 若目标「金属装备 ≥ 4 件、或护甲值 ≥ 40」则升级成【震荡 2】（5 秒）。
+        //
+        // 挂在这里而不是 onHitEntity：作者的规格是「命中时」，没区分撞的是生物还是方块，
+        // 挂实体那个分支就漏掉了砸地面 / 砸墙的情形。
+        // 位置放在「回归虚化」早退之后 —— 回家途中的球不该炸开脉冲。
+        if (this.profile().hasFlag(BallBehavior.BallProfile.FLAG_PULSE)
+                && this.level() instanceof ServerLevel pulseLevel) {
+            // 【脉冲】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+            if (this.traitFired(TRAIT_PULSE)) {
+                MoreBalls.LOGGER.info("[ball][脉冲] 命中触发脉冲，位置={}", hitResult.getLocation());
+                RedstonePulse.detonate(pulseLevel, hitResult.getLocation());
+            } else {
+                MoreBalls.LOGGER.info("[ball][脉冲] 本趟脉冲未生效（本球判定为未触发）");
+            }
+        }
+
+        if (hitResult.getType() == HitResult.Type.ENTITY) {
+            EntityHitResult entityHit = (EntityHitResult) hitResult;
+
+            // 【穿透】触发概率（当前 100% 必触发；以后调这个常量即可）
+            if (this.getPierceLevel() > 0) {
+                if (this.piercingIgnoreEntityIds == null) {
+                    this.piercingIgnoreEntityIds = new IntOpenHashSet(5);
+                }
+                if (this.piercingIgnoreEntityIds.size() >= this.getPierceLevel() + 1) {
+                    if (this.isTough()) {
+                        super.onHit(hitResult);
+                        // 同上：善良已经反射过就不要覆盖
+                        if (this.friendlyBounced) {
+                            this.friendlyBounced = false;
+                        } else {
+                            this.bounceBack();
+                        }
+                    } else {
+                        this.burst();
+                    }
+                    return;
+                }
+                this.piercingIgnoreEntityIds.add(entityHit.getEntity().getId());
+                super.onHit(hitResult);
+                this.consumeDurability("穿透");
+                return;
+            }
+
+            // 【反弹】触发概率（当前 100% 必触发；以后调这个常量即可）
+            if (this.isTough()) {
+                super.onHit(hitResult);
+                // ⚠️ 【善良】命中友好生物时 super.onHit 已经走过 bounceOffEntity
+                //    做过标准向量反射；这里再无条件 bounceBack()（水平整体取反）
+                //    会把那次反射**覆盖成原路折回** —— 表现就是「善良的反弹不生效」。
+                if (this.friendlyBounced) {
+                    this.friendlyBounced = false;   // 用完即清，别影响后续命中
+                } else {
+                    this.bounceBack();
+                }
+                return;
+            }
+        } else if (hitResult.getType() == HitResult.Type.BLOCK) {
+            // ===== 【破坏王】钻石球：把撞到的方块砸掉 =====
+            //
+            // 作者 2026-10-10 指定：破坏接触到的方块，每碎一块速度降到当前的 85%、
+            // 扣 1 点耐久；速度衰减到静止阈值之后就停止破坏并静止。
+            // 放在 isTough() 判断之前 —— 这是「撞到什么碎什么」，不管球本身坚固与否。
+            // ⚠️ 作者 2026-10-10 更正：**砸掉了就不要反弹** ——
+            //    原来是砸完照样走下面的 bounceOff()，球被弹开后又被重力带着往下坠，
+            //    表现就是「因为反弹老是往下掉」。路已经砸开了，直接放它继续往前飞。
+            // 【尖刺】滴水石球：规格里的「碰撞」那一档 —— 撞到方块这一下也射一圈锥子。
+            // 放在破坏王 / 点金之前：「碰撞」这个时机与「有没有砸掉方块」无关。
+            if (this.traitFired(TRAIT_SPIKE)
+                    && this.level() instanceof ServerLevel spikeLevel) {
+                BallExtraTraits.shootSpikes(spikeLevel, this.position(),
+                        this.getDeltaMovement(), this.getOwner(), this.piercesArmor());
+            }
+
+            // 【破坏王】触发概率（当前 100% 必触发；以后调这个常量即可）
+            if (this.profile().hasBreaker()
+                    && this.breakerUsed < this.profile().breaker()
+                    && this.level() instanceof ServerLevel breakerLevel) {
+                if (this.breakerHit(breakerLevel, (BlockHitResult) hitResult)) {
+                    return;   // 砸成功 → 沿原方向继续飞，不结算反弹
+                }
+            }
+
+            // 【点金】：命中方块时先把这一片石头点成矿物（不坚固的球也要触发，
+            // 所以放在 isTough() 判断之外）
+            if (this.profile().transmuteChance() > BallBehavior.NOT_TRANSMUTE
+                    && this.level() instanceof ServerLevel serverLevel) {
+                // 【点金】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+                if (this.traitFired(TRAIT_TRANSMUTE)) {
+                    BallTransmute.transmute(serverLevel, (BlockHitResult) hitResult);
+                }
+            }
+
+            if (!this.isTough()) {
+                // 不坚固的球落下去走统一的碎裂流程
+                super.onHit(hitResult);
+                this.burst();
+                return;
+            }
+
+            BlockHitResult blockHit = (BlockHitResult) hitResult;
+            if (this.isRolling() && blockHit.getDirection().getAxis() == Direction.Axis.Y) {
+                return;
+            }
+            // 落定后的「坐实」阶段不结算反弹 —— 作者指定这 5 刻只有下落、不弹。
+            // 位置本身仍受方块碰撞约束（那是 move() 干的），所以它只是贴到地面，不会陷进去。
+            if (this.settleDropTicks > 0) {
+                return;
+            }
+            this.bounceOff(blockHit.getDirection());
+            return;
+        }
+
+        super.onHit(hitResult);
+        this.burst();
+    }
+
+    /**
+     * <b>【尖啸】的收尾</b> —— 把球放到射线终点，并按<b>弹射</b>决定它是弹开还是停下。
+     *
+     * <p>⚠️ 作者 2026-10-16 要求「<b>尖啸要能受弹射影响</b>」。原先 {@code BallExtraTraits.shriek}
+     * 收尾是写死的 {@code setDeltaMovement(Vec3.ZERO)} —— 于是**不管球的弹射是多少，
+     * 撞墙一律钉死在原地**，组合球里带着高弹射的部件也白搭。</p>
+     *
+     * <p>现在这里分两种情况：</p>
+     * <ul>
+     *   <li><b>撞到了方块</b>且 {@code bounce > 0} ⇒ 直接调 {@link #bounceOff(Direction)}，
+     *       复用现有那套「镜面反射 + 按 {@code bounce/10} 衰减 + 撞击音 + 扣耐久」，
+     *       与普通球撞墙完全同一条路径；</li>
+     *   <li>没撞到方块（对着天空 / 末地虚空打）或 {@code bounce == 0} ⇒ 停下，维持原行为。
+     *       回响球本体是 <b>弹射 0</b>，所以它自己一点不变。</li>
+     * </ul>
+     *
+     * @param end  射线终点
+     * @param face 撞到的方块面；没撞到传 {@code null}
+     */
+    public void shriekLand(Vec3 end, @Nullable Direction face) {
+        // 这一趟尖啸到此收尾 —— 主 tick 不再沿路径画音波（否则球回家路上会一直挂着特效）。
+        this.shriekDone = true;
+        this.setPos(end.x, end.y, end.z);
+        if (face != null && this.getBounce() > 0) {
+            this.bounceOff(face);
+            return;
+        }
+        this.setDeltaMovement(Vec3.ZERO);
+    }
+
+    /** 撞方块反弹：先沿碰撞面法线推离，再做镜面反射，最后按弹射衰减 */
+    private void bounceOff(Direction face) {        Vec3 vel = this.getDeltaMovement();
+        double nx = face.getStepX();
+        double ny = face.getStepY();
+        double nz = face.getStepZ();
+        double dot = vel.x * nx + vel.y * ny + vel.z * nz;
+
+        this.setPos(this.getX() + nx * SURFACE_PUSH,
+                this.getY() + ny * SURFACE_PUSH,
+                this.getZ() + nz * SURFACE_PUSH);
+
+        this.applyBounce(new Vec3(
+                vel.x - 2.0D * dot * nx,
+                vel.y - 2.0D * dot * ny,
+                vel.z - 2.0D * dot * nz));
+    }
+
+    /** 撞实体反弹：水平速度反向，竖直分量保留 */
+    private void bounceBack() {
+        Vec3 vel = this.getDeltaMovement();
+        this.applyBounce(new Vec3(-vel.x, vel.y, -vel.z));
+    }
+
+    private void applyBounce(Vec3 direction) {
+        if (this.level().isClientSide()) {
+            return;
+        }
+
+        Vec3 bounced = direction.scale(this.getBounce() / 10.0D);
+
+        // 微小的向上分量直接抹掉。
+        // 留着它的话，球会带着一丁点速度「慢慢往上飘」—— 因为重力本来就小，
+        // 这点速度够它飘很久，看起来就像球自己无端飞起来了（作者反馈过这个现象）。
+        if (bounced.y > 0.0D && bounced.y < MIN_BOUNCE_UP_SPEED) {
+            bounced = new Vec3(bounced.x, 0.0D, bounced.z);
+        }
+
+        // 转入滚动的判据按「这一跳还能弹多高」算（高度 = vy² / 2g），而不是绝对速度
+        double gravity = BallWeight.gravityFor(this.getWeight(), this.isFromCrossbow());
+        if (BallRoll.shouldRoll(bounced.y, gravity)) {
+            bounced = new Vec3(bounced.x, 0.0D, bounced.z);
+            this.setRolling(true);
+        }
+
+        // 只要这一下真给了速度，就必须退出静止态 ——
+        // 静止态是<b>断重力</b>的，带着速度留在静止态就等于永远飘着不落地。
+        // 之前的「慢慢往上飞」正是从这里漏出来的：球被弹起却仍被当成静止。
+        if (bounced.lengthSqr() > 1.0E-6D) {
+            this.setSettled(false);
+        }
+
+        this.setDeltaMovement(bounced);
+        // 撞击音按每个球的音效配置取，音量也由配置决定（铁球类压到 30%）
+        BallBehavior.BallSound sound = this.profile().sound();
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                sound.resolveHitSound(), SoundSource.NEUTRAL, 0.4F * sound.volume(), 1.4F);
+        this.consumeDurability("反弹");
+    }
+
+    /**
+     * 【破坏王】：砸掉撞到的那个方块。
+     *
+     * <p>三件事按顺序做：<b>碎块 → 扣耐久 → 降速</b>（并消耗一次【破坏王】额度）；降速之后如果掉到静止阈值以下，
+     * 就把 {@link #breakerUsed} 立起来 —— 从此不再破坏，让球按正常流程落定。</p>
+     *
+     * <p><b>两个刻意的取舍</b>（作者没细说，这里按「最符合直觉」定）：</p>
+     * <ul>
+     *   <li><b>方块正常掉落</b>（{@code destroyBlock(pos, true)}）——
+     *       「砸碎东西」的常规语义就是碎块掉出来；如果不想让它变成挖矿神器，说一声改成不掉落</li>
+     *   <li><b>硬度为负的方块砸不动</b>（基岩 / 结界方块那种 {@code getDestroySpeed < 0}）——
+     *       原版把这些定义为「不可破坏」，球不该绕过它</li>
+     * </ul>
+     *
+     * <p>砸掉的是<b>运动路径上的下一块方块</b>；没砸掉（额度用完 / 硬度 &lt; 0 /
+     * 钻石工具挖不动）就返回 false，走正常的反弹流程。</p>
+     *
+     * @return <b>true 表示真的砸掉了</b> —— 调用方据此决定「不反弹、继续飞」。
+     */
+    private boolean breakerHit(ServerLevel level, BlockHitResult hit) {
+        // ===== 破坏目标是「运动路径上的**下一块方块**」，既不是当前命中格、也不是固定往前一格 =====
+        //
+        // ⚠️ 作者 2026-10-10 指定并**更正过措辞**：「破坏路径上的下一块方块，
+        //    不是破坏路径上的下面一块方块」。所以这里是**沿运动方向往前扫，
+        //    找第一块真正挡路的方块** —— 球飞得快时正前方那一格往往还是空气，
+        //    固定往前一格会扑空。具体见 aimAheadOfMotion。
+        // 路径上扫不到方块（整段都是空气）就什么都不砸
+        BlockPos pos = aimAheadOfMotion(level);
+        if (pos == null) {
+            return false;
+        }
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir()) {
+            return false;
+        }
+        // 硬度 < 0 = 原版定义的「不可破坏」（基岩等），球不该越过这条线
+        if (state.getDestroySpeed(level, pos) < 0.0F) {
+            return false;
+        }
+        // 【破坏王】的挖掘能力**等同钻石工具**（镐 / 斧 / 锹，作者 2026-10-10 指定）：
+        // 只有「三种钻石工具之一能挖」且「不要求下界合金等级」的方块才砸得动。
+        if (!canBreakLikeDiamond(state)) {
+            return false;
+        }
+        if (!level.destroyBlock(pos, true)) {
+            return false;   // 被别的机制挡下了（保护区 / 事件取消），不扣耐久也不减速
+        }
+
+        this.consumeDurability("破坏王");
+
+        // 额度 -1（作者指定的【破坏王10】：一共只有 10 次机会）
+        this.breakerUsed++;
+
+        Vec3 scaled = this.getDeltaMovement().scale(BREAKER_SPEED_RETAIN);
+        this.setDeltaMovement(scaled);
+        this.hurtMarked = true;
+
+        // 撞不动了 —— 收手，剩下的交给正常的静止流程。
+        // 这里把额度一次性用光，等价于「从此不再破坏」。
+        //
+        // 每砸一块掉 15% 速度（BREAKER_SPEED_RETAIN = 0.85，作者要求保留）——
+        // 所以连续开路几块之后球自然会慢下来，这时就该收手了。
+        if (scaled.lengthSqr() < SETTLE_SPEED_SQR) {
+            this.breakerUsed = this.profile().breaker();
+        }
+        return true;
+    }
+
+    /** 沿运动方向最多往前扫多少格找「路径上的下一块方块」 */
+    private static final double BREAKER_SCAN_MAX = 4.0D;
+
+
+    /**
+     * 找<b>运动路径上的下一块方块</b>。
+     *
+     * <p>⚠️ 作者 2026-10-10 更正过措辞：「破坏<b>路径上的下一块方块</b>，
+     * 不是<b>路径上的下面一块</b>方块」。也就是 —— 沿运动员方向往前<b>扫</b>，
+     * 找**第一块真正挡路的方块**，而不是「固定往前一格」。</p>
+     *
+     * <p>为什么不能固定往前一格：球飞得快时，正前方那一格往往还是空气 ——
+     * 固定一格会扑空，然后退回命中格，等于又变成「砸自己贴着的那一格」。</p>
+     *
+     * @return 路径上第一块非空气方块的坐标；速度几乎为零、或整段都是空气时返回 {@code null}
+     */
+    private BlockPos aimAheadOfMotion(ServerLevel level) {
+        Vec3 velocity = this.getDeltaMovement();
+        if (velocity.lengthSqr() < 1.0E-6D) {
+            return null;
+        }
+        // ===== 怎么找「路径上的下一块方块」=====
+        //
+        // ⚠️ 走**原版射线**（{@link ClipContext}），不要自己 normalize 速度后按步长采点：
+        //
+        //   · 直接用 normalize(velocity)：球一被重力拽着下落，方向就朝下 →
+        //     整颗球只会「径直向下挖方块」（作者 2026-10-10 报过）。
+        //   · 改成纯水平方向：平飞略向下时又**挖不到斜下方的方块**（作者接着报的）。
+        //   · 射线一次就同时解决了这两件事 —— 它沿**真实运动方向**走，
+        //     斜向下自然命中斜下方的方块，而且自动跳过空气、直接给到第一块挡路的方块。
+        //
+        // ⚠️ 最后一个参数是 **CollisionContext**，不是 Entity —— 传 null 会 NPE
+        //    （见 BallIlluminate.findGroundY 那次崩服）。
+        Vec3 from = this.position();
+        Vec3 to = from.add(velocity.normalize().scale(BREAKER_SCAN_MAX));
+        BlockHitResult hit = level.clip(new ClipContext(
+                from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE,
+                CollisionContext.empty()));
+        if (hit.getType() == HitResult.Type.MISS) {
+            return null;
+        }
+        BlockPos pos = hit.getBlockPos();
+        return level.getBlockState(pos).isAir() ? null : pos;
+    }
+
+    /**
+     * 【破坏王】的挖掘能力判定 —— <b>等同钻石工具（镐 / 斧 / 锹）</b>（作者 2026-10-10 指定）。
+     *
+     * <p>判据全走原版标签，不硬编码方块：</p>
+     * <ul>
+     *   <li>{@code MINEABLE_WITH_*} —— 三种钻石工具之一挖得动的那种方块</li>
+     *   <li>{@code INCORRECT_FOR_DIAMOND_TOOL} —— 原版定义的「钻石工具挖不动」，挖不了的就不砸</li>
+     * </ul>
+     *
+     * <p>⚠️ 26.2 里**没有** {@code NEEDS_NETHERITE_TOOL} 这个常量（只有 NEEDS_STONE / IRON /
+     * DIAMOND + 一组 INCORRECT_FOR_*）。要表达「钻石级的挖掘能力」就用
+     * {@code INCORRECT_FOR_DIAMOND_TOOL} 取反 —— 这正是原版自己判定工具够不够格的方式。</p>
+     */
+    private static boolean canBreakLikeDiamond(BlockState state) {
+        boolean rightTool = state.is(BlockTags.MINEABLE_WITH_PICKAXE)
+                || state.is(BlockTags.MINEABLE_WITH_AXE)
+                || state.is(BlockTags.MINEABLE_WITH_SHOVEL);
+        if (!rightTool) {
+            return false;
+        }
+        // 「钻石工具挖不动」的方块（黑曜石、远古残骸那类）砸不动；其余都可以
+        return !state.is(BlockTags.INCORRECT_FOR_DIAMOND_TOOL);
+    }
+
+    /**
+     * 限次坚固：每次碰撞扣 1 点耐久，归零即碎裂。
+     *
+     * <p>同一 tick 内只结算一次 —— 球在方块表面抖动时可能连续触发碰撞，
+     * 那种重复绝不该算成「弹了两次」。</p>
+     */
+    private void consumeDurability(String cause) {
+        int toughness = this.getToughness();
+        if (toughness == BallBehavior.TOUGH_FOREVER || toughness <= BallBehavior.NOT_TOUGH) {
+            return;
+        }
+        if (this.tickCount == this.lastDamageTick) {
+            return; // 同一 tick 内的重复碰撞不计
+        }
+        this.lastDamageTick = this.tickCount;
+
+        int remaining = Math.max(0, toughness - 1);
+        this.setToughness(remaining);
+
+        if (remaining == 0) {
+            this.burst();
+        }
+    }
+
+    /** 当前球的行为参数 —— 实体通过携带的物品堆反查，不必把一整份参数都塞进同步数据 */
+    private BallBehavior.BallProfile profile() {
+        return BallBehavior.profileFor(this.getItem());
+    }
+
+    /**
+     * 【导电】被自然闪电劈中时的处理 —— 消耗 1 点耐久（作者指定）。
+     *
+     * <p>走的是和碰撞同一套扣耐久逻辑，所以「耐久归零就碎裂」、
+     * 「同一 tick 不重复结算」这些既有规则一并生效。</p>
+     *
+     * <p>公开给 {@link BallConduction} 调用 —— 它负责把闪电挪到这颗球身上。</p>
+     */
+    public void onStruckByLightning() {
+        this.consumeDurability("lightning");
+    }
+
+    /** 【智慧】的扫描半径（格）—— 作者指定 10 */
+    public static final double WISDOM_RADIUS = 10.0;
+
+    /** 这颗球是否带【智慧】词条（供 {@code BallExtraTraits} 判断「尖啸至少要拐几段」） */
+    public boolean hasWisdom() {
+        return this.profile().wisdom() > 0;
+    }
+
+    /**
+     * 【尖啸】轨迹修正链里<b>【智慧】那一位</b>用：从给定点找 10 格内最近的目标，返回朝它的单位向量。
+     *
+     * <p>⚠️ 由 {@code BallExtraTraits.steerWisdom}（一个 {@code ShriekPathModifier} 实现）调用，
+     * 不再是写死在 {@code shriek()} 里的专用钩子 —— 作者 2026-10-17 指定「要接口不要专用钩子」，
+     * 以后任何会改轨迹的词条都往那条修正链里登记一份即可。</p>
+     *
+     * <p>判据与 {@code tryWisdomLock} 一致（10 格内、活着、非旁观、非主人、敌人或仇恨中的中立），
+     * 只是搜索中心换成传入的 {@code point}。</p>
+     *
+     * @return 朝目标的单位向量；<b>锁不到目标时返回 {@code null}</b>（表示「这一位不干预」）
+     */
+    public Vec3 wisdomSteerToward(Vec3 point) {
+        // ⚠️⚠️ **判据不能写 `wisdomUsesLeft <= 0`**（作者 2026-10-17 报「【智慧】还是不能影响轨迹」）。
+        //
+        //    时间线（三个行号摆在一起就看出来了）：
+        //      · `wisdomUsesLeft` 的初值是 **-1**（表示「还没初始化」）；
+        //      · 它在 **`ballTickPost()`** 的智慧块里才被设成 `profile().wisdom()`；
+        //      · 而【尖啸】的 `shriek()` 在 **`ballTickPre()`** 里就被调用了 ——
+        //        **那时 `wisdomUsesLeft` 还是 -1**。
+        //    于是 `<= 0` 把「未初始化」当成了「次数用完」，只在第一次就返回 null，
+        //    转向永远不生效（轨迹永远走直线）。
+        //
+        //    正确语义：-1 = 未初始化（当作「有次数、可用」）；0 = 真的用完了（不干预）。
+        // ⚠️ 统一走 wisdomCanSeek()：-1 表示还没初始化（尖啸在 ballTickPre 里算轨迹时就是它），
+        //    不能当成「次数用完」—— 详见那个方法的说明。
+        if (!this.wisdomCanSeek()) {
+            return null;
+        }
+        if (!(this.level() instanceof ServerLevel steerLevel)) {
+            return null;
+        }
+        LivingEntity best = null;
+        double bestDistance = WISDOM_RADIUS;
+        AABB box = new AABB(point, point).inflate(WISDOM_RADIUS);
+        for (LivingEntity candidate : steerLevel.getEntitiesOfClass(LivingEntity.class, box)) {
+            if (candidate == this.getOwner() || candidate == this.getVehicle()) {
+                continue;
+            }
+            if (!candidate.isAlive() || candidate.isSpectator() || !isWisdomTarget(candidate)) {
+                continue;
+            }
+            double distance = point.distanceTo(candidate.position());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        Vec3 to = best.position().add(0.0D, best.getBbHeight() * 0.5D, 0.0D).subtract(point);
+        return to.lengthSqr() < 1.0E-6D ? null : to.normalize();
+    }
+
+
+
+
+    /** tick 起始位置 —— 前段记下、后段用（原来用局部变量，拆成两段后要跨方法传） */
+    private Vec3 tickTickStartPos = Vec3.ZERO;
+
+    /** tick 起始速度 —— 同上 */
+    private Vec3 tickTickStartVel = Vec3.ZERO;
+
+    /** 球撞球的处理冷却（刻）—— 防止贴在一起的球每 tick 重复触发 */
+    private static final int COLLIDE_COOLDOWN_TICKS = 8;
+
+    /** 球撞球的检测间隔（刻）—— 每 tick 做是 O(n²)，球一多就卡 */
+    private static final int BALL_COLLIDE_INTERVAL = 4;
+
+    /** 磁吸扫描间隔（刻）—— 它会遍历附近实体，没必要每 tick */
+    private static final int MAGNET_SCAN_INTERVAL = 5;
+
+    /** 熔融粒子的刷新间隔（刻）—— 每 tick 刷 3 组粒子太贵 */
+    private static final int MOLTEN_PARTICLE_INTERVAL = 2;
+
+    /** 单次球撞球检测的搜索半径上限（格） */
+    private static final double MAX_COLLIDE_REACH = 3.0D;
+
+    /** 本球上一次被别的球撞到的游戏刻 */
+    private long lastBallCollideTick = Long.MIN_VALUE / 2;
+
+
+    /**
+     * 【智慧N】的<b>剩余追踪次数</b>。
+     *
+     * <p>{@code -1} = 还没初始化（首次 tick 时从 {@code profile().wisdom()} 取）。
+     * 每次<b>成功锁定</b>扣 1，扣到 0 就彻底不再追踪 —— 于是球会正常坠落、静止、
+     * 并交还给【空气动力球】的回收逻辑。</p>
+     */
+    private int wisdomUsesLeft = -1;
+
+    /** 【智慧x】命中后的「别急着判静止」宽限刻数 —— 见 tick 里静止判定的说明 */
+    private int wisdomHitGrace;
+
+    /** 宽限期长度（刻）—— 够球脱离接触、速度重新起来 */
+    private static final int WISDOM_HIT_GRACE_TICKS = 10;
+
+    /** 开启【智慧】追踪前的原始重力状态，次数耗尽后还原 */
+    private boolean wisdomGravityBefore = false;
+
+    /** 【善良】已经在 onHitEntity 里反弹过 —— 告诉 onHit 不要再 bounceBack 覆盖它 */
+    private boolean friendlyBounced;
+
+    /** 【智慧】的重锁倒计时（刻）—— 归零时重新搜索并锁定目标 */
+    private int wisdomRelockCooldown;
+
+    /** 【智慧】连续没锁到目标的累计刻数（锁到就清零）—— 见 {@link #WISDOM_GIVEUP_TICKS} */
+    private int wisdomNoTargetTicks;
+
+    /**
+     * 【智慧】多久重新锁定一次目标（刻）—— 作者指定 <b>0.5 秒</b>（10 刻）。
+     *
+     * <p>原来是「只锁一次」，那对怪物扔回的球几乎无效。</p>
+     */
+    private static final int WISDOM_RELOCK_INTERVAL = 10;
+
+    /**
+     * 【智慧】连续多久没锁到任何目标就<b>放弃这一轮追踪</b>（刻）。
+     *
+     * <p>⚠️ <b>只影响「要不要放它回家」，绝不动 {@code wisdomUsesLeft}</b> ——
+     * 次数是追踪能力的本体，动了就会出现「第一次锁定之后不会变向」。</p>
+     *
+     * <p>⚠️ 这是「路径 B」的兜底，作者 2026-10-11 报的回收 bug 有两条路：</p>
+     * <ul>
+     *   <li><b>路径 A</b>：一次都没锁到 → 次数不扣 → {@code wisdomStillTracking()} 恒为真 →
+     *       {@code homingToOwner0()} 被永久拦住（那里已加「停稳即作废」）</li>
+     *   <li><b>路径 B</b>：<b>锁到过一次</b>之后再没目标 → 次数只剩一部分、扣不完 →
+     *       {@code tracked && usesLeft > 0} 让球<b>永远保持无重力</b>，
+     *       而 {@code setSettled()} 在 {@code isNoGravity()} 时<b>拒绝进入静止态</b>
+     *       （见 L528）→ 球既不落地也不静止，于是<b>永远走不到回收那一步</b>，
+     *       就那么无重力地在空中一直飞</li>
+     * </ul>
+     *
+     * <p>5 秒：锁定尝试每 10 刻一次，5 秒 = 10 次都没锁到 —— 已经够说明这一趟没戏了。
+     * 场上有目标时会不断重置这个计时（见 tick），所以只在真的空追时才触发。</p>
+     */
+    private static final int WISDOM_GIVEUP_TICKS = 100;
+
+    /**
+     * 【智慧】的扫描与锁定。
+     *
+     * <p>找的是「最近的一个合格目标」：
+     * <b>敌对生物</b>（实现了原版 {@link Enemy}），或<b>正处于仇恨中的中立生物</b>
+     * （有 {@code getTarget()}）。后者是按作者的说法「处于仇恨中」——
+     * 也就是「你打了它、它记恨了谁」，而不是路过的猪牛羊。</p>
+     *
+     * <p>「没有方块遮挡可以直接抵达」用一次方块射线判定：从球心到目标胸口，
+     * 全程不碰到碰撞体才算通。这样隔墙的怪不会被锁。</p>
+     *
+     * <p>锁定后<b>保留当前速度大小、只换方向</b> —— 球飞得快的还是快，
+     * 不会因为锁定突然减速或加速。</p>
+     */
+    private void tryWisdomLock() {
+        // 不再有「只在前 40 刻搜索」的硬窗口 —— 只靠上面的重锁间隔限流，
+        // 否则球飞过 2 秒后就永远不再识别新目标。
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+
+        // ===== 怪物持有的【智慧】球：目标与持有者一致（作者 2026-10-07 指定）=====
+        //
+        // 玩家扔的时候是「自己找最近的敌人」，而怪物扔的时候不该各找各的 ——
+        // 它该打谁就打谁。这样一群怪朝你扔【智慧】球时不会散开去打别人。
+        if (this.getOwner() instanceof Mob ownerMob && ownerMob.getTarget() != null) {
+            LivingEntity mobTarget = ownerMob.getTarget();
+            // 目标可能刚死、或者隔着墙 —— 那就退回下面的通用扫描
+            if (mobTarget.isAlive() && !mobTarget.isSpectator()
+                    && mobTarget != this.getOwner()
+                    && this.hasClearPathTo(level, mobTarget)) {
+                this.lockOnto(mobTarget);
+                return;
+            }
+        }
+
+        LivingEntity best = null;
+        double bestDistance = WISDOM_RADIUS;
+        // AABB 只是粗筛（立方体）。真正的「10 格内」由下面那句
+        // `distance < bestDistance` 保证 —— bestDistance 的初值就是 WISDOM_RADIUS，
+        // 所以超出半径的候选即使进了循环也选不中。这里保持原写法，
+        // 只是把这条隐含约束写在注释里，免得以后有人以为它是立方体范围。
+        AABB box = this.getBoundingBox().inflate(WISDOM_RADIUS);
+        double wisdomRangeSqr = WISDOM_RADIUS * WISDOM_RADIUS;
+
+        for (LivingEntity candidate : level.getEntitiesOfClass(LivingEntity.class, box)) {
+            if (candidate == this.getOwner() || candidate == this.getVehicle()) {
+                continue;
+            }
+            if (!candidate.isAlive() || candidate.isSpectator()) {
+                continue;
+            }
+            if (!isWisdomTarget(candidate)) {
+                continue;
+            }
+            // 显式判一次距离，和 bestDistance 那道门槛同义，读起来更直白
+            if (candidate.getBoundingBox().distanceToSqr(this.position()) > wisdomRangeSqr) {
+                continue;
+            }
+            if (!hasClearPathTo(level, candidate)) {
+                continue;
+            }
+            double distance = this.position().distanceTo(candidate.position());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        if (best == null) {
+            return;
+        }
+        this.lockOnto(best);
+    }
+
+    /**
+     * <b>统一的「【智慧】还能不能索敌」判据</b> —— 凡是要判这个的地方都用它。
+     *
+     * <p>⚠️⚠️ 为什么必须有这么一个方法（作者 2026-10-17：「改的是那个接口吧，别再只改了这一个」）：
+     * `wisdomUsesLeft` 有<b>三态</b>，而它被散落地判在好几个地方，一不留神就写错：
+     * <ul>
+     *   <li><b>-1 = 还没初始化</b> —— 初值。它要到 {@code ballTickPost()} 的智慧块里才被设成
+     *       {@code profile().wisdom()}；</li>
+     *   <li><b>0 = 次数用完了</b> —— 真的不能索敌；</li>
+     *   <li><b>&gt;0 = 还有次数</b> —— 可以索敌。</li>
+     * </ul>
+     * 而【尖啸】的轨迹是<b>在 {@code ballTickPre()} 里一次算完的</b>，那时字段基本还是 -1。
+     * 所以**绝不能写 `wisdomUsesLeft &gt; 0` 或 `&lt;= 0`** —— 那会把「未初始化」当成「用完」，
+     * 转向永远不生效。</p>
+     *
+     * @return {@code true} 表示这颗球带【智慧】、且次数还没用完（-1 按「可用」算）
+     */
+    private boolean wisdomCanSeek() {
+        return this.profile().wisdom() > 0 && this.wisdomUsesLeft != 0;
+    }
+
+    /**
+     * 【智慧x】是否还在追踪中（次数未耗尽）。
+     *
+     * <p>追踪期间这颗球<b>不受重力</b>、也<b>不被【空气动力球】回收</b> ——
+     * 它会一直追到把「机会」用完为止（作者 2026-10-09 指定）。</p>
+     *
+     * <p>⚠️ 注意这里与 {@link #wisdomCanSeek()} 的差别：这里问的是「<b>正在追踪中</b>」，
+     * 而「未初始化（-1）」并不算在追踪（球刚出手、还没走过 tick），所以仍然要求 {@code > 0}。</p>
+     */
+    private boolean wisdomStillTracking() {
+        return this.profile().wisdom() > 0 && this.wisdomUsesLeft > 0;
+    }
+
+    /**
+     * <b>【尖啸】整合用</b>：【智慧】在尖啸轨迹里参与一次索敌（作者 2026-10-16 要求）。
+     *
+     * <p>【尖啸】把整条轨迹一次算完，球的正常 tick 不再跑，于是【智慧】原本根本来不及索敌。
+     * 这里让尖啸的每一段都问一次「有没有可锁的目标」：锁到就 <b>改写航向</b>，
+     * 于是轨迹自己拐向目标 —— 也就是作者描述的「直线飞出 → 空中索敌转向 → 延伸一段后再拐回来」。</p>
+     *
+     * <p>复用 {@link #tryWisdomLock()} 本体（它只找目标 + 调 {@code lockOnto}，观感与正常飞行一致），
+     * 通过「次数有没有被扣」判断这次到底锁没锁到 —— 与球自己的重锁循环同一套判据。</p>
+     *
+     * @return true 表示这次锁到了目标（航向已被改写）
+     */
+    public boolean shriekWisdomStep() {
+        // ⚠️ 用统一判据 wisdomCanSeek()，别再手写 `wisdomUsesLeft <= 0`
+        //    （-1 = 未初始化，会被误判成「用完」，见那个方法的说明）。
+        if (!this.wisdomCanSeek()) {
+            return false;
+        }
+        int before = this.wisdomUsesLeft;
+        this.tryWisdomLock();
+        return this.wisdomUsesLeft < before;
+    }
+
+    /**
+     * <b>【尖啸】整合用</b>：【感应】在尖啸轨迹里参与一次积热（作者 2026-10-16 要求）。
+     *
+     * <p>积热效率就是 {@code 速度 / physicalVelocity()}（见 {@link #heatEfficiency()}）——
+     * 尖啸把速度拉到极大时，这一步自然就是<b>满效率</b>：自身与范围内满足条件的金属目标
+     * 一次吃满热量。直接复用正常的 {@link #prospectingTick()}，不另写一套公式。</p>
+     */
+    public void shriekHeatStep() {
+        if (!(this.level() instanceof ServerLevel level) || !this.profile().hasSense()) {
+            return;
+        }
+        this.prospectingTick();
+    }
+
+    /**
+     * 锁定到指定目标 —— 把速度改成朝它飞。
+     *
+     * <p>瞄<b>胸口</b>高度而不是脚底：不然贴地球飞过去会从腿边擦过。</p>
+     *
+     * <p><b>保留当前速度大小、只换方向</b> —— 球飞得快的还是快，
+     * 不会因为锁定突然减速或加速。</p>
+     */
+    private void lockOnto(LivingEntity target) {
+
+        // 【智慧】触发概率（当前 100% 必触发；以后调这个常量即可）
+        // 【智慧N】每次成功锁定扣一次 —— 扣到 0 就不再追踪
+        // （作者 2026-10-09：数值代表可追踪次数，消耗完就不再锁定）
+        if (this.wisdomUsesLeft > 0) {
+            this.wisdomUsesLeft--;
+        }
+        // 命中后设一段宽限期：这期间不做静止判定，免得被按在地上滑行
+        this.wisdomHitGrace = WISDOM_HIT_GRACE_TICKS;
+
+        // 【智慧】成就：首次触发锁定 —— 记在**投掷者**头上（怪物扔的不算，
+        // 它没有成就页；作者给出的文案也是给玩家看的）
+        if (this.getOwner() instanceof Player wisdomOwner) {
+            ModAdvancements.award(wisdomOwner, ModAdvancements.WISDOM);
+        }
+
+        // 【智慧】瞄**上半身**（作者 2026-10-09 指定）—— 原来的 0.5 是身体中部，
+        // 锁定瞬间几乎没有抬升动作，看起来不像「抬头锁定」。
+        // 取 0.8 倍身高（接近胸部/头部），锁定时会有一个明显的上抬。
+        Vec3 aim = target.position().add(0.0, target.getBbHeight() * 0.8, 0.0);
+        Vec3 direction = aim.subtract(this.position());
+        if (direction.lengthSqr() < 1.0E-6) {
+            return;
+        }
+        // 【智慧】的锁定 = **只把方向转向目标，速度大小原样保留**。
+        //
+        // ⚠️ 这里**不要**加任何「向上抬升」之类的人为修正。
+        //    作者 2026-10-09 明确：智慧就该是「反弹之后保留速度、无视重力、让球自己飞」——
+        //    球在追踪期间本来就不吃重力（见 tick 里的三段式），它会自然保持高度飞过去。
+        //    我之前加的上抬分量反而是「直接往天上飞」的元凶，已删除。
+        double speed = Math.max(0.6, this.getDeltaMovement().length());
+        this.setDeltaMovement(direction.normalize().scale(speed));
+    }
+
+    /**
+     * 发射者与命中目标是不是「同一阵营」。
+     *
+     * <p>划分依据是原版的 {@link Enemy} 接口 —— 它是「敌对生物」的标记接口：
+     * {@code Monster} 与 {@code Piglin} 系都实现它，而动物、村民、铁傀儡不实现。</p>
+     *
+     * <ul>
+     *   <li>发射者是敌怪 → 命中敌怪算同阵营（不伤害）</li>
+     *   <li>发射者不是敌怪（玩家 / 动物 / 没有发射者） → 命中非敌怪算同阵营</li>
+     * </ul>
+     *
+     * <p>没有发射者时按「玩家阵营」算 —— 无主之球不该误伤村民与动物。</p>
+     */
+    private static boolean isSameSide(net.minecraft.world.entity.Entity owner, LivingEntity target) {
+        boolean ownerHostile = owner instanceof Enemy;
+        boolean targetHostile = target instanceof Enemy;
+        return ownerHostile == targetHostile;
+    }
+    /**
+     * 这颗生物算不算【智慧】的目标。
+     *
+     * <p>三个来源：<b>敌对生物</b>（原版 {@link Enemy} 接口，自动涵盖模组生物）、
+     * <b>有仇恨目标的中立生物</b>，以及<b>玩家</b>。</p>
+     *
+     * <p>为什么玩家也算 —— 作者 2026-10-08 报的：怪物拿【智慧】球扔玩家时，
+     * 球完全不会锁定。原因是玩家既不是 {@link Enemy}、也不是 {@link Mob}，
+     * 在上面两条判据里全部落空。把玩家放进来之后：</p>
+     * <ul>
+     *   <li>玩家扔的球 —— 自己会被 {@code candidate == getOwner()} 排除，不会自锁</li>
+     *   <li>怪物扔的球 —— 锁定最近的玩家，正是想要的行为</li>
+     *   <li>玩家之间互扔 —— <b>不再互相锁定</b>，见下面那条改动</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>作者 2026-10-14 改动</b>：玩家掷出的球原先会锁定别的玩家，
+     * 但追上去也<b>造不成伤害</b>（PvP 默认关、又没有阵营判定），表现就是
+     * 「球追着人犯傻」。现在改成：<b>玩家掷出/射出时不把玩家当目标</b>；
+     * <b>怪物持有球时照旧锁玩家</b> —— 那正是它存在的意义。</p>
+     */
+    private boolean isWisdomTarget(LivingEntity entity) {
+        if (entity instanceof Enemy) {
+            return true;
+        }
+        if (entity instanceof Player) {
+            // 玩家掷出的球不锁玩家；怪物掷出的球照常锁
+            return !(this.getOwner() instanceof Player);
+        }
+        return entity instanceof Mob mob && mob.getTarget() != null;
+    }
+
+    /** 从球心到目标胸口有没有方块挡着 */
+    private boolean hasClearPathTo(ServerLevel level, LivingEntity target) {
+        Vec3 from = new Vec3(this.getX(), this.getY() + this.getBbHeight() * 0.5, this.getZ());
+        Vec3 to = new Vec3(target.getX(), target.getY() + target.getBbHeight() * 0.5, target.getZ());
+        BlockHitResult hit = level.clip(new ClipContext(
+                from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+        return hit.getType() == HitResult.Type.MISS;
+    }
+
+    /**
+     * 【熔融】状态的外观 —— <b>火焰粒子环绕 + 拖尾</b>（作者 2026-10-07 指定）。
+     *
+     * <p>判据和伤害那边同一条：{@code profile.hasMolten()} 且自身热量已经攒到
+     * {@code moltenThreshold}（空心铁球是 120）。没到这个温度就是普通球，
+     * 一旦到了它已经在发红发热，外面也得看得出来。</p>
+     *
+     * <p>两层观感：</p>
+     * <ul>
+     *   <li><b>环绕</b>：球身边随机方位上冒一点火，看起来像整颗球被火焰包着</li>
+     *   <li><b>拖尾</b>：顺着速度反方向拖一串火，快飞时有明显的火线；
+     *       再偶尔掺一缕烟，像烧红的铁在冒</li>
+     * </ul>
+     *
+     * <p>隔刻发射即可 —— 逐刻发会把球糊成一团光斑，反而看不出是球。</p>
+     */
+    private void moltenParticlesTick() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+        BallBehavior.BallProfile profile = this.profile();
+        if (!profile.hasMolten() || this.heat < profile.moltenThreshold()) {
+            return;
+        }
+        if (this.tickCount % MOLTEN_PARTICLE_INTERVAL != 0) {
+            return;
+        }
+
+        // ① 环绕：球身边随机方位上冒一点火（随机源用实体自带的 —— Level.random 是 protected）
+        RandomSource random = this.getRandom();
+        double angle = random.nextDouble() * (Math.PI * 2.0D);
+        double ring = 0.28D;
+        level.sendParticles(ParticleTypes.FLAME,
+                this.getX() + Math.cos(angle) * ring,
+                this.getY() + 0.05D + random.nextDouble() * 0.22D,
+                this.getZ() + Math.sin(angle) * ring,
+                1, 0.0D, 0.0D, 0.0D, 0.0D);
+
+        // ② 拖尾：沿速度反方向拉一串
+        Vec3 velocity = this.getDeltaMovement();
+        if (velocity.length() > 0.05D) {
+            Vec3 back = velocity.normalize().scale(-0.30D);
+            level.sendParticles(ParticleTypes.FLAME,
+                    this.getX() + back.x, this.getY() + 0.10D + back.y, this.getZ() + back.z,
+                    1, 0.02D, 0.02D, 0.02D, 0.005D);
+            if (random.nextFloat() < 0.4F) {
+                level.sendParticles(ParticleTypes.SMOKE,
+                        this.getX() + back.x * 1.6D, this.getY() + 0.12D + back.y * 1.6D,
+                        this.getZ() + back.z * 1.6D,
+                        1, 0.01D, 0.01D, 0.01D, 0.0D);
+            }
+        }
+    }
+
+    /**
+     * 「探寻」每刻结算 —— 「雪球？（铁粒）」的特殊能力。
+     *
+     * <p>半径 7 的球形范围约 1419 格（立方体 15³ = 3375 格里一半以上是白读的），每刻全扫太贵，所以每
+     * {@link BallProspecting#SCAN_INTERVAL} 刻才重新扫一次，中间的每刻沿用上次结果继续累加热量。</p>
+     */
+    private void prospectingTick() {
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        if (--this.scanCooldown <= 0) {
+            this.scanCooldown = BallProspecting.SCAN_INTERVAL;
+            BallProspecting.ScanResult result = BallProspecting.scan(serverLevel, this.position());
+            this.nearbyMetalBlocks = result.metalBlocks();
+            this.nearbyOres = result.orePositions();
+
+            // ⚠️ AABB 是**立方体**（inflate(7) 的角落离中心 7√3 ≈ 12.1 格），
+            //    所以必须再按**实际距离**精筛一次 —— 否则站在斜角上的生物会被误算进积热。
+            //    用碰撞箱到球心的最短距离，大个子站在边界上也不会被漏掉。
+            double senseRangeSqr = BallProspecting.RADIUS * BallProspecting.RADIUS;
+            this.nearbyEntities = serverLevel.getEntitiesOfClass(LivingEntity.class,
+                            this.getBoundingBox().inflate(BallProspecting.RADIUS))
+                    .stream()
+                    .filter(e -> e.getBoundingBox().distanceToSqr(this.position()) <= senseRangeSqr)
+                    .toList();
+            // 磁吸偏转的候选：只有进入 PULL_RADIUS 的才有资格（矿物与生物同一条赛道）。
+            // 投掷者本人排除在外 —— 自己扔的球不该往自己身上拐。
+            //
+            // ⚠️ 这里排除的只是「不给磁吸当目标」；**他的金属装备仍然算进球的积热**
+            //    （见下面「球自身热量」那一段，作者 2026-10-09 指定）。
+            Entity owner = this.getOwner();
+            List<LivingEntity> candidates = this.nearbyEntities.stream()
+                    .filter(e -> e != owner)
+                    .toList();
+            // 偏航只归【磁性】管 —— 空心铁球只有【感应】（只管积热），不该自己拐弯。
+            // 之前这里无条件选目标，于是 2.0.0 给它加上感应之后它就开始「飞出去」了（作者反馈过）。
+            // 【磁性】本趟是否生效 —— 同上，由 rollTraitsOnce() 掷定
+        this.magnetTarget = this.profile().hasMagnetic() && this.traitFired(TRAIT_MAGNETIC)
+                    ? BallProspecting.bestMagnetTarget(serverLevel, this.position(), this.nearbyOres, candidates)
+                    : null;
+        }
+
+        // 磁吸转向：直接把速度方向指向目标 —— 掠过头了也会掉头咬回来，
+        // 所以孤零零一格矿物同样追得到（螺旋收敛那套对单格矿物会错过）
+        if (this.magnetTarget != null) {
+            this.setDeltaMovement(BallProspecting.homeToward(
+                    this.getDeltaMovement(), this.position(), this.magnetTarget.position()));
+        }
+
+        // 玩家与生物热量：先把范围内的目标加热（衰退由 BallHeatHandler 统一处理）
+        this.heatNearbyEntities(serverLevel);
+
+        // ===== 球自身热量：**双向叠加**（作者 2026-10-08 指定）=====
+        //
+        // 两个来源加在一起：
+        //   · 附近的**金属方块**：每格每刻 +1
+        //   · 附近的**生物**：按它身上的金属装备件数给，与「生物那边被加热的速度」完全一致
+        //     （生物侧是 heatNearbyEntities 里每件 +1，这边镜像过来，所以是双向等速的）
+        //
+        // 之前只算了方块那一半 —— 球擦着一身铁甲的玩家飞过去，球自己一点热都不积，
+        // 那套「热是双向的」就只成立了一半。
+        //
+        // ⚠️ **掷出者本人的装备也算**（作者 2026-10-09 指定）：
+        //    他身上的盔甲会让这颗球按**正常效率**积热 —— 自己扔出去的球，
+        //    起飞那一段就能蹭到自己的一身甲，不必先飞到别人身边。
+        //    但**他自己不会被这颗球加热**（对称的那一半仍然排除他，
+        //    见 heatNearbyEntities 里的 `living == owner` 判断）。
+        //    原来这里是「两侧都排除掷出者」，所以自己扔的球永远蹭不到自己的装备。
+        int heatFromEntities = 0;
+        for (LivingEntity nearby : this.nearbyEntities) {
+            heatFromEntities += BallProspecting.countMetalEquipment(nearby);
+        }
+
+        int totalGain = this.nearbyMetalBlocks + heatFromEntities;
+        if (totalGain <= 0) {
+            return;
+        }
+        // 【热量积累效率】（作者 2026-10-08 指定）：实际增量 = 基础增量 × (当前速度 / 初速度)。
+        //
+        // 这修掉了一个历史遗留问题 —— 停在【感应】球也会一直积热。
+        // 球停下来后速度为 0，效率也就是 0，于是热量不再增长；飞得越快积得越快。
+        // 双向的两个来源（方块侧、生物侧）都乘同一个系数，保持对称。
+        // 【感应N】倍率（作者 2026-10-12 指定）：不带或 1 级按原版速度积累，n 级就是 n 倍。
+        // 原先这个倍率完全没接进热链 —— sense 只在 tooltip 与切分缩放里出现过。
+        this.heat += totalGain * heatEfficiency() * senseMultiplier();
+
+        // 同时给范围内的矿升温：每格每刻 +（1 + 紧邻六面矿物数），攒到阈值会被炸开。
+        // 这里只负责升温，降温与爆破交给 BallHeatHandler 的世界 tick —— 球飞走后余热也该继续散
+        ProspectingHeatData heatData = ProspectingHeatData.get(serverLevel);
+        long gameTime = serverLevel.getGameTime();
+        for (BlockPos ore : this.nearbyOres) {
+            // 顺手记下加热者：矿物被烤熟是在世界 tick 里结算的，那时候球早飞走了，
+            // 只有现在把「谁干的」写进去，成就「这真的科学吗？」才知道该发给谁。
+            // 怪物烤熟的不记（它没有成就页），统一留空串。
+            String heater = this.getOwner() instanceof Player heaterPlayer
+                    ? heaterPlayer.getStringUUID() : "";
+            heatData.addHeat(ore, (1.0F + BallProspecting.countNeighborOres(serverLevel, ore))
+                            * heatEfficiency(),
+                    gameTime, heater);
+        }
+
+
+        // 攒到「融化」阈值就化掉（雪球类默认 200）；没配融化的球不会被热量搞没
+        BallBehavior.BallProfile profile = this.profile();
+
+        // 诊断：带【熔融】的球，热量每跨过 100 点记一条 ——
+        // heat 是实体内部字段（不进 NBT、不同步客户端），想让作者「看看攒到多少了」只能靠日志。
+        // 用「档位」而不是「每刻」来打，一条日志对应 100 点，既看得到过程也不会刷屏。
+        if (profile.hasMolten()) {
+            int milestone = (int) (this.heat / HEAT_DIAG_STEP);
+            if (milestone != this.heatDiagMilestone) {
+                this.heatDiagMilestone = milestone;
+                MoreBalls.LOGGER.info("[ball] {} 热量 {} / {}（邻近金属矿 {} 格）",
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(this.getItem().getItem()),
+                        this.heat, profile.moltenThreshold(), this.nearbyMetalBlocks);
+            }
+        }
+
+        // 【融化】触发概率（当前 100% 必触发；以后调这个常量即可）
+        if (profile.hasMelt() && this.heat >= profile.meltThreshold()) {
+            this.melt(serverLevel);
+        }
+
+        // 【引雷】—— 空心铜球：热量攒够阈值就释放一次雷电，并<b>清空自身热量</b>。
+        //
+        // 和【融化】并列放在这里判断 —— 两者都是热量系词条，区别是
+        // 融化让自己消失，引雷把自己打出去（球留着，热量清零重新攒）。
+        // 【引雷】触发概率（当前 100% 必触发；以后调这个常量即可）
+        if (profile.hasThunder() && this.heat >= profile.thunderThreshold()) {
+            this.heat = 0;
+            BallThunder.release(serverLevel, this, this.piercesArmor());
+        }
+    }
+
+    /**
+     * 给范围内的目标加热 —— <b>玩家与生物一视同仁</b>（作者指定），
+     * 但<b>投掷者本人除外</b>：热量机制不该烧到使用者自己。
+     *
+     * <p>穿/持金属装备 → 每件每刻 +1（全套铁甲 4 点、再加把铁剑 5 点）；
+     * 热量超过阈值就把目标点着，每刻续燃直到热量降回去。
+     * 僵尸、骷髅戴着铁头盔一样会被烤。
+     * 注意这里只负责「加热」，脱离检测后的自然消退在
+     * {@code BallHeatHandler} 的实体 tick 事件里统一做 —— 否则球一消失热量就永远留着。</p>
+     */
+    private void heatNearbyEntities(ServerLevel serverLevel) {
+        Entity owner = this.getOwner();
+        for (LivingEntity living : this.nearbyEntities) {
+            // 使用者自己不吃这套（作者指定）
+            if (living == owner) {
+                continue;
+            }
+            int metal = BallProspecting.countMetalEquipment(living);
+            if (metal <= 0) {
+                continue; // 没穿金属的不吃这套，交给衰退逻辑
+            }
+            living.setData(ModAttachments.LAST_HEATED_TICK.get(), living.tickCount);
+
+            float heat = living.getData(ModAttachments.PROSPECTING_HEAT.get())
+                    + metal * heatEfficiency() * senseMultiplier();
+            living.setData(ModAttachments.PROSPECTING_HEAT.get(), heat);
+
+            if (heat > BallProspecting.PLAYER_HEAT_IGNITE) {
+                living.igniteForTicks(20);
+            }
+        }
+    }
+
+    /**
+     * 「融化」：热量攒到阈值时球化掉（雪球类默认 200）。
+     *
+     * <p>作者指定：感应球积攒的热量到顶不是「炸开」而是<b>融化</b> ——
+     * 毕竟是雪做的球。这里走雪片粒子 + 积雪破碎音，然后<b>必掉</b>
+     * {@link BallProspecting#BURST_NUGGETS} 个铁粒（这是「探寻」能力本来就有的回报，
+     * 保持不变），最后走常规碎裂流程收尾。</p>
+     */
+    private void melt(ServerLevel serverLevel) {
+        serverLevel.sendParticles(ParticleTypes.SNOWFLAKE,
+                this.getX(), this.getY() + this.getBbHeight() * 0.5D, this.getZ(),
+                12, 0.25D, 0.25D, 0.25D, 0.02D);
+        serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvents.SNOW_BREAK, SoundSource.NEUTRAL, 0.8F, 1.2F);
+        this.spawnAtLocation(serverLevel,
+                new ItemStack(Items.IRON_NUGGET, BallProspecting.BURST_NUGGETS), 0.1F);
+        this.burst();
+    }
+
+    /** 【空气动力球】：标记这颗球会在静止后自己飞回来 */
+    public void setReturnToOwner(boolean value) {
+        this.returnToOwner = value;
+    }
+
+    /** 标记这是多重射击复制出来的附属弹（落定即碎、碎裂无掉落、也不回家） */
+    public void setMultishotSide(boolean value) {
+        this.multishotSide = value;
+        if (value) {
+            this.returnToOwner = false;
+        }
+    }
+
+    /** 这颗球有没有被认定成多重射击的附属弹 */
+    public boolean isMultishotSide() {
+        return this.multishotSide;
+    }
+
+    /**
+     * 标记这颗球<b>静止后破碎</b>（作者 2026-10-07 指定，用于苦力怕用爆炸甩出来的球）。
+     *
+     * <p>为什么苦力怕的球要这样：它是被爆炸「打」出去的，速度快、方向由爆炸决定，
+     * 落点基本是随机的 —— 让它静静躺在地上可捡，就成了「炸一次白送一颗球」。
+     * 碎掉就干净了。</p>
+     *
+     * <p>与 {@link #setMultishotSide(boolean)} 走同一套落定判定，区别只在碎裂时的<b>掉落</b>：
+     * 附属弹不掉材料，这颗照常掉（见 {@code burst()} 里那条 {@code !multishotSide} 判断）。</p>
+     */
+    public void setShatterOnSettle(boolean value) {
+        this.shatterOnSettle = value;
+    }
+
+    /**
+     * 静止后是否破碎 —— 见 {@link #setShatterOnSettle(boolean)}。
+     *
+     * <p>不收进 synched data：判定完全在服务端做。</p>
+     */
+    private boolean shatterOnSettle;
+
+    /**
+     * 「这一 tick 算过的」回归判定结果 —— {@code -1} 表示还没算过。
+     *
+     * <p>⚠️ 这个缓存是<b>性能关键</b>：{@code homingToOwner()} 在 tick 里被调用 5 次
+     * （L1116/1149/1163/1170/1176），每次都查 owner 实体、算距离、挂区块票据。
+     * 缓存之后一个 tick 只算一次。</p>
+     */
+    private int homingCachedTick = -1;
+    private boolean homingCachedResult;
+
+    /**
+     * 【空气动力球】：把球朝主人方向推过去，像忠诚附魔的三叉戟那样。
+     *
+     * <p>作者指定的细节都落在这里：回归途中<b>照常结算伤害与耐久</b>
+     * （因为位置更新仍然走正常的 {@code move()} 与命中回调，只是速度方向由这里定），
+     * 到家时额外来 1 点物理伤害，然后进背包。</p>
+     *
+     * @return true 表示这一 tick 已经由回归逻辑接管，常规的静止处理应当让路
+     */
+    private boolean homingToOwner() {
+        // 同一 tick 内复用上次结果
+        if (this.homingCachedTick == this.tickCount) {
+            return this.homingCachedResult;
+        }
+        this.homingCachedTick = this.tickCount;
+        this.homingCachedResult = this.homingToOwner0();
+        return this.homingCachedResult;
+    }
+
+    private boolean homingToOwner0() {
+        // 【多重射击的附属弹】—— **永远不真的回家**。
+        //
+        // returnToOwner 对它是 true（见 ballTickPre），但那只是为了拿到回收体系的兜底：
+        // 区块票据、卡住兜底、水里替代落定。它自己的归宿是**落定即碎**（见 burst 那两处调用）。
+        //
+        // 放在本方法最开头，是因为前面那条【智慧】判据允许「还在锁目标时不回家」，
+        // 而附属弹压根不该走到那一步 —— 它没有「还在追目标」这种豁免。
+        if (this.multishotSide) {
+            return false;
+        }
+        // 【智慧x】次数未耗尽时**不启动回归** —— 它还在追目标，不该被拽回主人身边。
+        // 次数用完（wisdomUsesLeft == 0）或**空追太久**才解除这条限制，正常掉落并可被回收。
+        // （作者 2026-10-09 指定）
+        //
+        // ⚠️ 判定必须放在**这里**而不是 isReturning()：本方法才是「开始回家」的入口，
+        //    它自己不检查 returnToOwner（由调用方检查），所以只有在这里拦才有效。
+        //
+        // ⚠️⚠️ 拦的判据是「**最近还在锁目标**」，而**不是**去动剩余次数。
+        //
+        //     0.4.0.3 那版为了解决「没反弹就不回收」，在这里把
+        //     `wisdomUsesLeft` **直接清零** —— 结果球只要空追 5 秒就
+        //     **永久失去追踪能力**，之后再出现目标也不变向了。
+        //     现象正是作者 2026-10-11 报的「**第一次锁定之后不会变向**」。
+        //
+        //     **次数是【智慧】的本体，任何时候都不能动它。**
+        //
+        //     正确判据（四条都要满足才拦）：
+        //       1. 没在回家的路上（`homingBack`）—— 一旦起飞就得一口气飞完，
+        //          否则下面 `setSettled(false)` 会让「停稳」这条立刻失效、来回震荡；
+        //       2. 还剩次数（`wisdomStillTracking()`）；
+        //       3. 没停稳 —— 停在地上根本不可能再锁目标；
+        //       4. **最近还在锁目标**（`wisdomNoTargetTicks < WISDOM_GIVEUP_TICKS`）——
+        //          空追 5 秒都锁不到，说明这一轮没戏了，放它回家。
+        if (!this.homingBack
+                && this.wisdomStillTracking()
+                && !this.isSettled()
+                && this.wisdomNoTargetTicks < WISDOM_GIVEUP_TICKS) {
+            return false;
+        }
+
+        Entity owner = this.getOwner();
+        if (!(owner instanceof LivingEntity living)
+                || !living.isAlive()
+                || living.level() != this.level()) {
+            return false; // 主人已不在（下线 / 换维度 / 已死），那就老实留在地上
+        }
+
+        // 挂区块票据 —— 但<b>只有带【空气动力球】的球才需要</b>（作者指定）。
+        //
+        // 注意：真正的挂载点已经在 tick() 里（从落地前就挂上），这里这一处算是冗余保险，
+        // 留着是因为回归路径上多一道检查没坏处。
+        if (this.returnToOwner && this.level() instanceof ServerLevel ticketLevel) {
+            this.updateLoadTicket(ticketLevel);
+        }
+
+        Vec3 target = living.getEyePosition();
+        Vec3 toOwner = target.subtract(this.position());
+        if (toOwner.length() <= RETURN_ARRIVE_DISTANCE) {
+            if (this.level() instanceof ServerLevel serverLevel) {
+                this.deliverToOwner(serverLevel, living);
+            }
+            return true;
+        }
+
+        this.homingBack = true;
+        this.setSettled(false);
+
+        // 回归期间照抄「恼鬼三件套」（作者给出的思路）：
+        //   1. noPhysics           —— 穿过方块不做碰撞推挤
+        //   2. setNoGravity(true)  —— 悬空飞行、不吃重力
+        //   3. isAffectedByBlocks  —— 见下面的覆盖，这是「穿墙被减速」的元凶
+        // 配合上面的「朝目标加速」就是恼鬼那套飞行方式。
+        // 代价照旧按穿墙次数扣耐久（见 chargeForPhasing），所以不是白穿。
+        this.noPhysics = true;
+        this.setNoGravity(true);
+        this.homingTicks++;
+
+        // 越飞越快（作者指定「加速飞回」）
+        double speed = Math.min(RETURN_MAX_SPEED,
+                RETURN_BASE_SPEED + this.homingTicks * RETURN_ACCEL);
+
+        // 方向不必每刻重算：贴着障碍物边缘时逐刻重算会左右横跳，
+        // 表现就是球在空中一抖一抖。隔几刻定一次就够，也省掉大部分射线检测
+        if (this.returnDirection == null || this.homingTicks % RETURN_RETARGET_INTERVAL == 0) {
+            this.returnDirection = this.chooseReturnDirection(living, toOwner);
+        }
+
+        // <b>仿恼鬼：朝目标全程加速前进</b>（作者指定的方案）。
+        //
+        // 上一版「速度清零 + 手动 setPos」是绕开物理引擎，结果飞得死板、没有惯性 ——
+        // 作者一句话点破了：不该绕开引擎，而是该换成恼鬼那种「对着目标持续加速」的走法。
+        // 所以这里：
+        //   · 方向 —— 每刻立即对齐目标（锐角转弯，不兜圈子）
+        //   · 速度 —— 在旧速度基础上持续累加（全程加速，越飞越快）
+        //   · 物理 —— 照常交给 move() 处理，惯性和位移都由引擎算
+        double currentSpeed = this.getDeltaMovement().length();
+        double nextSpeed = Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL);
+        this.setDeltaMovement(this.returnDirection.scale(nextSpeed));
+
+        // 已经在方块里 = 正在穿墙，按「每穿一个新方块扣一点耐久」记账
+        this.chargeForPhasing();
+        return true;
+    }
+
+    /**
+     * 挑一条尽量不撞墙的回家方向（作者指定：<b>先找无任何障碍的路线，找不到才穿墙</b>）。
+     *
+     * <p>三步：</p>
+     * <ol>
+     *   <li>直线通 → 直接朝主人飞</li>
+     *   <li>直线被挡 → 往主人上方逐格试探，找一个「球能直通」的抬头点绕过去
+     *       （很贴近忠诚附魔那种「从上方绕回来」的观感）</li>
+     *   <li>怎么绕都不通 → 硬飞，交给 {@link #chargeForPhasing()} 按穿墙次数扣耐久</li>
+     * </ol>
+     */
+    private Vec3 chooseReturnDirection(LivingEntity owner, Vec3 toOwner) {
+        Vec3 eyeTarget = owner.getEyePosition();
+
+        if (this.isPathClear(this.position(), eyeTarget)) {
+            return toOwner.normalize();
+        }
+
+        for (int up = 1; up <= RETURN_CLIMB_STEPS; up++) {
+            Vec3 lifted = eyeTarget.add(0.0D, up, 0.0D);
+            if (this.isPathClear(this.position(), lifted)) {
+                return lifted.subtract(this.position()).normalize();
+            }
+        }
+
+        return toOwner.normalize();
+    }
+
+    /**
+     * 两点之间有没有方块挡着。沿直线按 {@value #PATH_SAMPLE_STEP} 格采样，
+     * 任一点落在有碰撞体积的方块里就算「不通」。
+     */
+    private boolean isPathClear(Vec3 from, Vec3 to) {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return true; // 客户端不参与判定
+        }
+        Vec3 delta = to.subtract(from);
+        double length = delta.length();
+        int steps = Math.max(2, (int) Math.ceil(length / PATH_SAMPLE_STEP));
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+        for (int i = 1; i < steps; i++) {
+            Vec3 point = from.add(delta.scale((double) i / steps));
+            cursor.set(point.x, point.y, point.z);
+            if (!level.getBlockState(cursor).getCollisionShape(level, cursor).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 穿墙记账 —— 作者指定：<b>每次穿墙消耗一点耐久</b>。
+     *
+     * <h2>「一次」怎么算</h2>
+     * 按<b>连续实心段</b>计，不是按方块格数：
+     * <ul>
+     *   <li>一堵 1 格厚的实心墙 → 进入实心一次 → <b>扣 1 点</b></li>
+     *   <li>一堵 3 格厚、连成一片的实心墙 → 全程都在实心里 → 仍然<b>只扣 1 点</b></li>
+     *   <li>3 格厚但中间有空气夹层（实-空-实）→ 空气把它分成两段 → <b>扣 2 点</b></li>
+     * </ul>
+     * 所以判据是「从空气跨进实心」的那一下。
+     *
+     * <p>另外路径要<b>采样</b>：球回归时速度上限 {@link #RETURN_MAX_SPEED}（4.0 格/刻），只看落点会把整堵墙漏过去。</p>
+     */
+    private void chargeForPhasing() {
+        if (!(this.level() instanceof ServerLevel level)) {
+            return;
+        }
+        Vec3 from = new Vec3(this.xo, this.yo, this.zo);
+        Vec3 delta = this.position().subtract(from);
+        int steps = Math.max(1, (int) Math.ceil(delta.length() / PATH_SAMPLE_STEP));
+
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int i = 1; i <= steps; i++) {
+            Vec3 point = from.add(delta.scale((double) i / steps));
+            cursor.set(point.x, point.y, point.z);
+            boolean solid = !level.getBlockState(cursor).getCollisionShape(level, cursor).isEmpty();
+
+            // 只在「空气 → 实心」这一下记账，所以连成一片的厚墙只算一次
+            if (solid && !this.wasInsideBlock) {
+                this.consumeDurability("穿墙");
+            }
+            this.wasInsideBlock = solid;
+        }
+    }
+
+    /**
+     * 这颗球造成的伤害<b>归属到投掷者本人</b>（作者指定：来源要是投掷者，不是球本身）。
+     *
+     * <p>原版的 {@code thrown(球, 投掷者)} 是「投射物伤害源」，来源仍挂在球这个实体上；
+     * 换成 {@code playerAttack} / {@code mobAttack} 之后：</p>
+     * <ul>
+     *   <li>击杀归属正确 —— 算在投掷者头上，而不是「被球砸死」</li>
+     *   <li>仇恨归属正确 —— 猪灵记恨的是扔球的人，不是那颗球</li>
+     *   <li>各类「玩家击杀」「生物击杀」的判定与成就也才能正常触发</li>
+     * </ul>
+     */
+    /**
+     * 本球是否带【穿甲】—— <b>派生伤害的联动开关</b>。
+     *
+     * <p>【尖啸】之外，本模组还有几条伤害是<b>由球派生出去的东西</b>造成的：
+     * 【尖刺】的滴水石锥、【招蜂引蝶】的蜜蜂、【引雷】的雷击。
+     * 那些实体自己<b>拿不到「我是哪颗球派生的」</b>（球可能早被回收了），
+     * 所以在生成时把这里的结果<b>打标</b>给它们；它们结算伤害时照着选类型。</p>
+     *
+     * <p>词条是读 {@code profile()} 的，而组合球的 profile 是<b>合成后</b>的 ——
+     * 所以「组合球同时带【穿甲】与【尖刺】」时也自动生效，不需要额外接线。</p>
+     */
+    private boolean piercesArmor() {
+        return this.traitFired(TRAIT_PIERCE);
+    }
+
+    private DamageSource damageFromOwner() {
+        Entity owner = this.getOwner();
+
+        // ===== 【穿甲】（作者 2026-10-16）=====
+        // 携带本词条的球造成的**所有**伤害都换成「无视护甲值、但仍吃保护附魔与抗性」的类型。
+        // 按作者原话「包括其他词条内未说明伤害类型的伤害」，它**优先于**下面【电击】那条
+        // 改类型的逻辑 —— 所以放在最前面。
+        // 类型定义与「为什么不能复用原版类型」见 BallDamageTypes 的类注释。
+        if (this.traitFired(TRAIT_PIERCE)) {
+            return BallDamageTypes.truePhysical(this.level(), this, owner);
+        }
+
+        // 【电击】：这颗球直接造成的伤害按**闪电类型**结算。
+        //
+        // ⚠️ 不能直接用 damageSources().lightningBolt() —— 那样会把归属丢掉，
+        //    于是击杀不计在投掷者头上、仇恨也记到「闪电」身上。
+        //    这里用 source(类型, 归属) 两样都保住：伤害类型是闪电，归属仍是投掷者。
+        // 【电击】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+        if (this.traitFired(TRAIT_SHOCK)) {
+            if (this.profile().shockDamage()) {
+                return this.damageSources().source(
+                        net.minecraft.world.damagesource.DamageTypes.LIGHTNING_BOLT, owner);
+            }
+        }
+
+        if (owner instanceof Player player) {
+            return this.damageSources().playerAttack(player);
+        }
+        if (owner instanceof LivingEntity living) {
+            return this.damageSources().mobAttack(living);
+        }
+        // 找不到主人（比如它已下线）时退回投射物来源，总比没有来源好
+        return this.damageSources().thrown(this, null);
+    }
+
+    /**
+     * 回到主人身边：先结算那一下伤害，再把球放进发射者的背包。
+     */
+    private void deliverToOwner(ServerLevel level, LivingEntity owner) {
+        // 【魔法】（青金石球）—— <b>回收成功</b>时对主人施加随机正面效果；
+        // 另有 0.1% 概率改判成大奖（60 秒【不灭】+ 不死图腾的音效与粒子）。
+        //
+        // 作者 2026-10-10 规格：正面效果的池子里**不含本模组的效果**
+        // （【不灭】是 0.1% 大奖的专属奖励，不该被随机抽到）。排除逻辑在 BallMagic 里。
+        //
+        // 放在方法最开头 —— 这里是「球已经飞回主人身上」的那一刻，
+        // 也就是作者说的「回收成功」。
+        if (this.profile().hasFlag(BallBehavior.BallProfile.FLAG_MAGIC)) {
+            // 【魔法】回收本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+            if (this.traitFired(TRAIT_MAGIC_RECOVER)) {
+                BallMagic.applyToOwner(level, owner);
+            }
+        }
+
+        // ===== 【滋养】（组合类特性词条，作者 2026-10-15）=====
+        //
+        // 作者规格：「在回收成功受到伤害判定的瞬间，对主人施加一个 3 秒的生命恢复效果」。
+        // 这里就是那一刻。
+        //
+        // ⚠️ 它是**组合类**：完整球上携带但**不生效** —— 生效判据是「这球是不是组合球」，
+        //    由 BallExtraTraits.nurture 内部判；概率取 profile 的 nurture
+        //    （完整球 1.0 = 携带但不生效、四分之一球 0.25、四份合起来 1.0）。
+        BallExtraTraits.nurture(owner, this.getItem(), this.profile().nurture());
+
+        // 作者指定：回归时对主人造成 1 滴血的物理伤害；
+        // 本来就没伤害的球（伤害为 0）不造成
+        if (this.getDamage() > 0.0F) {
+            // ⚠️ 这一下**不能**用 damageFromOwner()（那是打受害者用的 playerAttack / mobAttack）。
+            //    playerAttack 的来源实体就是主人自己，dealDefaultKnockback 算出来的方向是 (0,0)，
+            //    但 knockback() 会用随机方向补一个 0.4 的推力、并把水平速度减半 —— 疾跑就是这么断的。
+            //    这里改用专属伤害类型，它在 no_knockback 标签里，整段击退会被原版跳过。
+            boolean hurt = owner.hurtServer(level, ModEnchantments.returnDamage(level, owner),
+                    ModEnchantments.AERODYNAMIC_SELF_DAMAGE);
+
+            // ===== 这一对成就共用同一个判定点：**回收受伤的那一刻**（作者指定）=====
+            if (hurt && owner instanceof Player victim) {
+                // 「它怎么回来的？」：用附魔了空气动力球的弩打出、又被它回来砸到
+                ModAdvancements.award(victim, ModAdvancements.AERODYNAMIC_RETURN);
+                // 「自刎归天！」（传奇）：被自己回收的球**砸死**。
+                // 放在这里而不是查死亡事件，是因为「是不是这一下打死的」
+                // 在受伤返回之后就能立刻判断，不必再去比对伤害来源。
+                if (!victim.isAlive()) {
+                    ModAdvancements.award(victim, ModAdvancements.KILLED_BY_OWN_BALL);
+                }
+            }
+        }
+
+        ItemStack stack = this.getItem().copy();
+        BallItem.stripIntangible(stack);
+        BallItem.applyToughness(stack, this.getToughness());
+
+
+
+        // ===== 【球堆】交付前**默认套成球堆**（作者 2026-10-15 纠正的方向）=====
+        //
+        // ⚠️⚠️ 这里必须排在**交付之前** —— 我原先写的是「袋子优先、袋子收不下才套壳」，
+        //    结果带着袋子时袋子永远收得下、套壳那段永远不执行，**球堆成了死代码**
+        //    （作者原话：「球堆这个机制就没用」）。
+        //
+        //    作者要的是「回收时**默认**变成球堆」—— 套壳在前，之后不管进袋子还是进背包，
+        //    玩家拿到的都是「一格装一堆」。
+        //
+        //    满耐久的球会被 clusterize 原样返回（它们本来就能叠成一堆，不需要壳）。
+        stack = com.mcmodworkspace.moreballs.BallClusterItem.clusterize(stack);
+
+        boolean diagIsShell = com.mcmodworkspace.moreballs.BallClusterItem.isCluster(stack);
+
+        // 作者指定的回收顺序：袋子的中转槽 → 背包最前 → 快捷栏最前 → 掉成掉落物。
+        // （用附魔回收时玩家多半没空手接，所以和主动拾取的顺序是反的）
+        //
+        BallPouchHelper.Delivery delivery = BallPouchHelper.Delivery.NOWHERE;
+        if (owner instanceof Player player) {
+            delivery = BallPouchHelper.deliverReturned(player, stack);
+        }
+
+        boolean stored = delivery != BallPouchHelper.Delivery.NOWHERE;
+        if (!stored) {
+            this.spawnAtLocation(level, stack, 0.1F);
+        }
+        this.discard();
+    }
+
+    /**
+     * 【变形】：停在当前位置，把球本身换成方块。
+     *
+     * <h2>作者 2026-10-07 重新定的规格</h2>
+     * <p>耐久耗尽时<b>随机变成组成该球的原材料之一</b>：</p>
+     * <ul>
+     *   <li>金球 → 金块（只有一种材质）</li>
+     *   <li>「木-金-圆石-铁球」→ 木板 / 金块 / 圆石 / 铁块 <b>四者随机之一</b></li>
+     * </ul>
+     * <p>该位置放不下时（被方块占了 / 超出世界高度），同样<b>随机</b>退化成
+     * 对应方块自己的物品形式 —— 不固定掉某一种。</p>
+     *
+     * <p>候选从 {@link BallMorph} 现算：普通球一种，组合球按组件的来源列表展开。
+     * 这里不读 {@code profile.morphBlock()}，因为那个字段只能存一个方块，
+     * 它现在的唯一职责是「表示这颗球有变形特质」。</p>
+     */
+    private void morphIntoBlock(ServerLevel level, Block block) {
+        // 真正要变的那一个：从这颗球的全部材质里随机挑（普通球只有一个候选，等于不变）
+        Block chosen = BallMorph.randomBlock(this.getItem(), this.getRandom());
+        if (chosen == null) {
+            chosen = block;   // 兜底：至少别什么都不做
+        }
+
+        BlockPos pos = this.blockPosition();
+        BlockState target = chosen.defaultBlockState();
+
+        if (level.getBlockState(pos).canBeReplaced()) {
+            // 原地变成方块
+            level.setBlockAndUpdate(pos, target);
+            level.playSound(null, pos, target.getSoundType().getPlaceSound(),
+                    SoundSource.BLOCKS, 0.8F, 1.2F);
+        } else {
+            // 放不下 → 退化成掉落物（掉的就是随机挑中的那一种）
+            this.spawnAtLocation(level, new ItemStack(chosen.asItem()), 0.1F);
+        }
+        this.discard();
+    }
+
+    /**
+     * 碎裂：材质破坏音 + 粒子 + 按概率掉落材料 + 移除自身。
+     *
+     * <p>掉落概率与数量由 {@link BallBehavior.BallDrop} 配置 ——
+     * 例如圆石球 60% 掉 1–2 个碎石、「雪球？」10% 掉 1 个碎石。</p>
+     */
+    private void burst() {
+        if (this.level().isClientSide()) {
+            return;
+        }
+
+        // 【尖刺】滴水石球：规格里的「破碎」那一档 —— 碎掉之前最后射一圈锥子。
+        // 用球当时的最终速度当基准（速度接近 0 时 shootSpikes 内部会退化成竖直方向）。
+        if (this.traitFired(TRAIT_SPIKE)
+                && this.level() instanceof ServerLevel spikeLevel) {
+            BallExtraTraits.shootSpikes(spikeLevel, this.position(),
+                    this.getDeltaMovement(), this.getOwner(), this.piercesArmor());
+        }
+
+        BallBehavior.BallProfile profile = this.profile();
+
+        // 【变形】：耐久耗尽不碎裂，而是停在原地变成方块
+        // （随机变成自身材质之一；变不了就掉对应的掉落物 —— 见 morphIntoBlock）
+        //
+        // ⚠️ 多重射击的**附属弹不变形**（作者指定）：附属弹连掉落物都没有，
+        //    会变成方块反而更奇怪。所以这里把它排除掉。
+        // 【变形】本趟是否生效 —— 由 rollTraitsOnce() 在第一个 tick 掷定
+        if (this.traitFired(TRAIT_MORPH)) {
+            if (!this.multishotSide
+                    && profile.morphBlock() != null
+                    && this.level() instanceof ServerLevel serverLevel) {
+                this.morphIntoBlock(serverLevel, profile.morphBlock());
+                return;
+            }
+        }
+
+        // 破碎音按每个球的音效配置取，音量由配置决定
+        BallBehavior.BallSound sound = profile.sound();
+        this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
+                sound.resolveBreakSound(), SoundSource.NEUTRAL, 0.8F * sound.volume(), 1.2F);
+
+        // 掉落：可多层，每层各自独立掷概率（铁球就是四层叠加）。
+        // 多重射击的附属弹<b>不掉落</b> —— 作者指定：附属弹碎裂应该无掉落物。
+        if (!this.multishotSide && this.level() instanceof ServerLevel serverLevel) {
+            // 组合球：不是把各来源的掉落表全跑一遍，而是**先按等权重随机挑一个来源**，
+            // 再只跑那个来源的掉落表（作者指定：「各组成的原版掉落物按照相等的权重
+            // 随机掉落其中一份」）。所以铁-金球碎了要么按铁球掉铁、要么按金球掉，
+            // 不会两边都掉。
+            // 【钻石球】的掉落是**递进互斥**的三段（60% 4–6 钻石 / 20% 1–3 钻石 /
+            // 都没中才 80% 煤炭），标准 BallDrop 的「每条独立掷」表达不了 —— 单独走一套。
+            // 判据用「来源球」而不是「球的物品」：组合球抽到钻石球当来源时也整体走这套。
+            Item dropSource = this.comboSourceFor(profile);
+            if (dropSource == ModItems.DIAMOND_BALL.get()) {
+                DiamondBallDrops.roll(serverLevel, this, this.random);
+            } else {
+                List<BallBehavior.BallDrop> drops = dropSource == null
+                        ? List.of()
+                        : BallBehavior.profileFor(new ItemStack(dropSource)).drops();
+                for (BallBehavior.BallDrop drop : drops) {
+                    if (this.random.nextFloat() >= drop.chance()) {
+                        continue;
+                    }
+                    int span = Math.max(1, drop.maxCount() - drop.minCount() + 1);
+                    int count = drop.minCount() + this.random.nextInt(span);
+                    if (count > 0) {
+                        this.spawnAtLocation(serverLevel, new ItemStack(drop.item(), count), 0.1F);
+                    }
+                }
+            }
+        }
+
+        this.level().broadcastEntityEvent(this, (byte) 3);
+        this.discard();
+    }
+
+
+    /**
+     * 这一颗球碎裂时，掉落表按<b>哪个来源球</b>算。
+     *
+     * <p>普通球就是它自己；组合球是从它的组成里<b>等权重随机抽一个</b>
+     * （作者指定：「各组成的原版掉落物按照相等的权重随机掉落其中一份」）。</p>
+     *
+     * <p>抽签只做一次、结果给调用方复用 —— 否则「先问掉落表、再问是不是钻石球」
+     * 会抽两次，两次抽到的可能不是同一个来源，掉落就对不上了。</p>
+     *
+     * @return 来源球物品；组合球没有任何来源时返回 {@code null}
+     */
+    private Item comboSourceFor(BallBehavior.BallProfile profile) {
+        if (this.getItem().getItem() != ModItems.COMBO_BALL.get()) {
+            return this.getItem().getItem();
+        }
+        List<Integer> indexes = BallFragments.parseIndexes(
+                this.getItem().getOrDefault(ModComponents.COMBO_SOURCES.get(), ""));
+        if (indexes.isEmpty()) {
+            return null;
+        }
+        int pick = indexes.get(this.random.nextInt(indexes.size()));
+        return BallFragments.sources().get(pick);
+    }
+}

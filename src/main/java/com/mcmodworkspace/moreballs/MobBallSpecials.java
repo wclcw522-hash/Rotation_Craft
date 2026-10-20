@@ -1,6 +1,6 @@
 package com.mcmodworkspace.moreballs;
 
-import com.mcmodworkspace.moreballs.entity.BallProjectile;
+import com.mcmodworkspace.moreballs.entity.BallPhysicsCore;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -59,7 +59,7 @@ public final class MobBallSpecials {
      *
      * <p>只认「投掷者是蜘蛛系」这一条 —— 玩家自己扔的球、别的怪扔的球都不受影响。</p>
      */
-    public static void onBallHitCreature(BallProjectile ball, ServerLevel level, Entity victim) {
+    public static void onBallHitCreature(BallPhysicsCore ball, ServerLevel level, Entity victim) {
         if (!(victim instanceof LivingEntity target)) {
             return;
         }

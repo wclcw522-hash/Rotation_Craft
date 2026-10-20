@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import com.mcmodworkspace.moreballs.entity.BallPhysicsCore;
 import com.mcmodworkspace.moreballs.entity.BallProjectile;
 
 /**
@@ -117,7 +118,7 @@ public final class BallThunder {
      *
      * @param source 作为闪电起点的空心铜球
      */
-    public static void release(ServerLevel level, BallProjectile source, boolean truePhysical) {
+    public static void release(ServerLevel level, BallPhysicsCore source, boolean truePhysical) {
         // 【引雷120】触发概率（当前 100% 必触发；以后调这个常量即可）
         RandomSource random = level.getRandom();
         int boltCount = MIN_BOLTS + random.nextInt(MAX_BOLTS - MIN_BOLTS + 1);
@@ -230,7 +231,7 @@ public final class BallThunder {
     }
 
     /** 扫一遍周围，把所有候选连同分值收好 */
-    private static List<Candidate> collect(ServerLevel level, BallProjectile source) {
+    private static List<Candidate> collect(ServerLevel level, BallPhysicsCore source) {
         List<Candidate> out = new ArrayList<>();
         AABB box = source.getBoundingBox().inflate(RADIUS);
         Entity owner = source.getOwner();
@@ -314,7 +315,7 @@ public final class BallThunder {
      * （作者给出的优先级表里没有这一类，但「其它方块」是最低级，
      * 实体总归比空气值得劈一点，所以取无装备生物那一档）。</p>
      */
-    private static int scoreEntity(Entity entity, BallProjectile source) {
+    private static int scoreEntity(Entity entity, BallPhysicsCore source) {
         if (!(entity instanceof LivingEntity living)) {
             return SCORE_BARE_ENTITY;
         }
