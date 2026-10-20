@@ -231,6 +231,27 @@ public class FlailHeadEntity extends BallProjectile {
     }
 
     /** 这把流星锤的物品栈（含内嵌球与耐久组件） */
+    /**
+     * <b>对父类（{@link BallProjectile}）暴露的物品栈 = 内嵌的那颗球</b>。
+     *
+     * <p>⚠️⚠️ 这是整个继承方案的关键一环（作者 2026-10-20 报「扔出去直接碎、
+     * 词条无反应、耐久不消耗」）。</p>
+     *
+     * <p>球的<b>全部</b>逻辑都通过 `this.getItem()` 取 profile：
+     * `isTough()` / `hasFlag()` / `bounce()` / `consumeDurability()` …… 而锤头实体
+     * 自己携带的物品栈原本是**流星锤**（`rotation_craft:flail`）。
+     * `BallBehavior.profileFor(流星锤)` 查不到表 ⇒ 落到 `DEFAULT` ⇒
+     * `toughness = NOT_TOUGH = 0` ⇒ `isTough()` 恒为 false ⇒
+     * 撞什么都是「不坚固的球」⇒ 立刻 `burst()` 碎掉、词条一条都不触发、耐久永不扣。</p>
+     *
+     * <p>所以这里让父类看到**内嵌球**。锤头自己的物品栈另外用
+     * {@link #flailStack()} 取（渲染、归还、扣耐久都走那个）。</p>
+     */
+    public ItemStack getItem() {
+        ItemStack flail = this.flailStack();
+        ItemStack inner = FlailItem.ballOf(flail);
+        return inner.isEmpty() ? super.getItem() : inner;
+    }
     public ItemStack flailStack() {
         return this.getItem();
     }
@@ -852,10 +873,31 @@ public class FlailHeadEntity extends BallProjectile {
      * 直接早退。</p>
      */
     // 同上：故意不写 @Override
+    /**
+     * 撞方块 —— 词条交给球，但**碎裂由锤头自己处理**。
+     *
+     * <p>球的 `burst()` 是 private，它碎掉时掉的是**球物品**；
+     * 锤头碎了必须「在掷出者脚下掉一根线、流星锤消失」（作者规格）。
+     * 所以这里不能直接 `super.onHit()` 走到球的 burst 分支。</p>
+     *
+     * <p>做法：不坚固 ⇒ 自己 {@link #shatter()}；坚固 ⇒ 扣耐久 + 交给球的弹射逻辑。</p>
+     */
     protected void onHit(HitResult hitResult) {
         if (this.stage() == Stage.SPIN || this.stage() == Stage.RETURNING) {
+            return;   // 这两段位置由公式/玩家决定，不结算方块碰撞
+        }
+        if (!(this.level() instanceof ServerLevel)) {
             return;
         }
+        BallBehavior.BallProfile profile = this.profile();
+
+        // 不坚固（蜜饯球这类）⇒ 撞到就碎：掉一根线 + 流星锤消失
+        if (!profile.isTough()) {
+            this.shatter();
+            return;
+        }
+
+        // 坚固 ⇒ 交给球那一套（脉冲 / 点金 / 尖刺 / 破坏王 / 弹射衰减）
         super.onHit(hitResult);
     }
 
