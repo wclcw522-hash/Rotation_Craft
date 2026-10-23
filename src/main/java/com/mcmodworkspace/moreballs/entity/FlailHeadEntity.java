@@ -270,9 +270,9 @@ public class FlailHeadEntity extends BallProjectile {
         return super.getItem();
     }
 
+    /** 这把锤头的数值档案（内嵌球推导；没有内嵌球时退回默认档案） */
     public BallBehavior.BallProfile profile() {
-        ItemStack flail = this.flailStack();
-        return FlailItem.profileOf(flail);
+        return FlailItem.profileOf(this.flailStack());
     }
 
     // ===== 拾取与碰撞：作者要求锤头绝不能被捡 / 被怪接 =====
@@ -840,6 +840,17 @@ public class FlailHeadEntity extends BallProjectile {
      * 「不变碎裂、原地变方块并 return」，照搬会导致「变形了但没掉线」，
      * 与作者给的破碎产物冲突。理由见通读记录。</p>
      */
+    /**
+     * 破碎：<b>在掷出者脚下掉一根线，并把手上那把流星锤一起销毁</b>（作者规格）。
+     *
+     * <p>⚠️⚠️ <b>必须销毁手上物品</b>（作者 2026-10-23 报「碎了还会正常拉回来一个锤头」）。</p>
+     *
+     * <p>之前这里只做了 `discard()` 掉实体 —— 而扔出时手上的流星锤**从来没被移走**
+     * （只把 `FLAIL_CASTING` 置 true 让它显示纯线形态）。于是实体没了、物品还在，
+     * 玩家松开再按右键，`use()` 又生成一个新锤头 —— 看起来就是「碎了还能拉回来一个」。</p>
+     *
+     * <p>所以这里要走 `FlailItem` 的正式销毁路径：把主手/原格那把 `shrink(1)`。</p>
+     */
     private void shatter() {
         if (!(this.level() instanceof ServerLevel level)) {
             this.discard();
@@ -850,12 +861,19 @@ public class FlailHeadEntity extends BallProjectile {
 
         BallBehavior.BallSound sound = this.profile().sound();
         level.playSound(null, dropAt.x, dropAt.y, dropAt.z,
-                sound.resolveBreakSound(), net.minecraft.sounds.SoundSource.NEUTRAL, 0.8F * sound.volume(), 1.2F);
+                sound.resolveBreakSound(), net.minecraft.sounds.SoundSource.NEUTRAL,
+                0.8F * sound.volume(), 1.2F);
 
         net.minecraft.world.entity.item.ItemEntity string =
                 new net.minecraft.world.entity.item.ItemEntity(level, dropAt.x, dropAt.y + 0.2D, dropAt.z,
                         new ItemStack(net.minecraft.world.item.Items.STRING, 1));
         level.addFreshEntity(string);
+
+        // ===== 销毁手上那把流星锤（这才是「碎了」的真正含义）=====
+        ItemStack live = this.findLiveFlail();
+        if (!live.isEmpty()) {
+            live.shrink(1);
+        }
 
         this.level().broadcastEntityEvent(this, (byte) 3);
         this.discard();
@@ -930,27 +948,33 @@ public class FlailHeadEntity extends BallProjectile {
      *
      * <p>做法：不坚固 ⇒ 自己 {@link #shatter()}；坚固 ⇒ 扣耐久 + 交给球的弹射逻辑。</p>
      */
+    /**
+     * 撞到东西 —— <b>完全交给球那一套</b>（作者 2026-10-23 指出我在这里多此一举）。
+     *
+     * <p>⚠️⚠️ 我原先在这里加过一个前置判断：</p>
+     * <pre>
+     * if (!profile.isTough()) { this.shatter(); return; }
+     * super.onHit(hitResult);
+     * </pre>
+     * <p>目的是让「不坚固的锤头碎掉时掉一根线而不是掉球」。但代价是：</p>
+     * <ul>
+     *   <li>它把球 {@code onHit} 的完整逻辑（脉冲/点金/尖刺/破坏王/弹射/碎裂）<b>整个挡在外面</b></li>
+     *   <li>而且只要那一瞬间判错，锤头就<b>无条件碎掉</b> —— 作者实测「耐久扣除正常，
+     *       但一撞就碎」，正是这个判据在乱开枪</li>
+     * </ul>
+     *
+     * <p><b>锤头是满耐久球做的</b>（{@code FlailItem.of()} 已经校验过 {@code isClustered()==false}），
+     * 本来就不该走「不坚固」这条路。球的 {@code onHit} 自己会判，不需要我提前插手。</p>
+     *
+     * <p>锤头真正该「碎」的时机只有一个：<b>耐久被扣到 0</b> ——
+     * 那在 {@link #consumeOneToughness} 里处理（掉线 + 销毁手上的流星锤）。</p>
+     *
+     * <p>SPIN / RETURNING 两段位置由公式与玩家决定，不结算方块碰撞，仍然早退。</p>
+     */
     protected void onHit(HitResult hitResult) {
         if (this.stage() == Stage.SPIN || this.stage() == Stage.RETURNING) {
-            return;   // 这两段位置由公式/玩家决定，不结算方块碰撞
-        }
-        if (!(this.level() instanceof ServerLevel)) {
             return;
         }
-        BallBehavior.BallProfile profile = this.profile();
-
-        // 不坚固（蜜饯球这类）⇒ 撞到就碎：掉一根线 + 流星锤消失
-        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
-                "[flail][撞方块] stage={} isTough={} toughness={} bounce={} innerEmpty={}",
-                this.stage(), profile.isTough(), profile.toughness(), profile.bounce(),
-                FlailItem.ballOf(this.flailStack()).isEmpty());
-
-        if (!profile.isTough()) {
-            this.shatter();
-            return;
-        }
-
-        // 坚固 ⇒ 交给球那一套（脉冲 / 点金 / 尖刺 / 破坏王 / 弹射衰减）
         super.onHit(hitResult);
     }
 
