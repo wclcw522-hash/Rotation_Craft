@@ -310,8 +310,15 @@ public class FlailItem extends Item {
         tooltip.accept(Component.translatable("tooltip.rotation_craft.flail.recover",
                 String.valueOf((int) Math.round(recoverSpeed(profileOf(stack)))))
                 .withStyle(ChatFormatting.GRAY));
-        tooltip.accept(Component.translatable("tooltip.rotation_craft.flail.broken")
-                .withStyle(ChatFormatting.DARK_GRAY));
+        // 剩余耐久（作者 2026-10-23：信息显示里没写剩余耐久）
+        int tMax = flailMaxToughness(stack);
+        if (tMax > 0) {
+            Integer tLeft = stack.get(ModComponents.TOUGHNESS_LEFT.get());
+            int left = tLeft == null ? tMax : Math.max(0, tLeft);
+            tooltip.accept(Component.translatable("tooltip.rotation_craft.flail.toughness",
+                    String.valueOf(left), String.valueOf(tMax))
+                    .withStyle(left <= 0 ? ChatFormatting.RED : ChatFormatting.GRAY));
+        }
     }
 
     /**
@@ -523,6 +530,23 @@ public class FlailItem extends Item {
         }
         head.setOwner(player);
         head.setItem(worldForm(stack));   // 世界里永远带球形态
+        // ⚠️⚠️ **必须把球的数值灌进实体的同步字段**（作者 2026-10-23 三个现象同一个根）
+        //
+        //   锤头的权威耐久在物品组件 TOUGHNESS_LEFT 里，但继承来的球逻辑
+        //   （onHit 的 !isTough()、physicalVelocity() 的配重、bounceOff 的档位、
+        //    onHitEntity 的穿甲）读的是**实体的同步字段** TOUGHNESS / WEIGHT /
+        //   BOUNCE / PIERCE_LEVEL。
+        //
+        //   这四个字段在 BallProjectile 里是构造时按 profile 设的，而锤头走
+        //   super(type, level) 那个构造器 —— **从来没设过，全是默认 0**：
+        //     · getToughness()==0 ⇒ 球判「不坚固」⇒ 一碰就 burst()（一撞就碎）
+        //     · 球的 consumeDurability 改的是实体字段 ⇒ 玩家物品的组件没动（耐久不掉）
+        //     · getWeight()==0 ⇒ 速度按最轻算 ⇒ 重球也飞得远（重量不对）
+        BallBehavior.BallProfile startProfile = profileOf(stack);
+        head.setToughness(startProfile.toughness());
+        head.setWeight(startProfile.weight());
+        head.setBounce(startProfile.bounce());
+        head.setPierceLevel((byte) startProfile.penetration());
         head.setOriginSlot(player.getInventory().getSelectedSlot());
         head.setPos(player.getX(), player.getY() + SPIN_HEIGHT, player.getZ());
         serverLevel.addFreshEntity(head);

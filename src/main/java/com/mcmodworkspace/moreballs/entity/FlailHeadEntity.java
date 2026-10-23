@@ -795,6 +795,9 @@ public class FlailHeadEntity extends BallProjectile {
             return;
         }
         live.set(ModComponents.TOUGHNESS_LEFT.get(), remaining);
+        // 实体字段也要跟着走：球的 onHit / physicalVelocity 读的是它，
+        // 不同步的话它会一直是开头的值（撞方块的耐久判定就永远停在原地）。
+        this.setToughness(remaining);
         // 锤头内部那份同步一下（tooltip / 渲染读到的是它）
         ItemStack mirror = FlailItem.worldForm(live);   // 锤头那份不带 CASTING，否则世界里只剩绳
         this.setItem(mirror);
@@ -971,11 +974,44 @@ public class FlailHeadEntity extends BallProjectile {
      *
      * <p>SPIN / RETURNING 两段位置由公式与玩家决定，不结算方块碰撞，仍然早退。</p>
      */
+    /**
+     * 撞到东西 —— 词条交给球，<b>但耐久账本由锤头统一</b>。
+     *
+     * <p>⚠️⚠️ 锤头和球的耐性是<b>两套存储</b>，必须在这里对齐（作者 2026-10-23「耐久好像也不掉」）：</p>
+     * <ul>
+     *   <li><b>物品组件</b> {@code TOUGHNESS_LEFT} —— 锤头的权威值，tooltip 与耐久条读它</li>
+     *   <li><b>实体同步字段</b> {@code TOUGHNESS} —— 球的 {@code onHit} / {@code isTough()} 读它</li>
+     * </ul>
+     *
+     * <p>球的 {@code onHit} 撞方块时会调它自己的 {@code consumeDurability}，那<b>只改实体字段</b> ——
+     * 于是「实体少 1、物品没动」，下一次 {@link #consumeOneToughness} 又按物品组件算，
+     * 扣掉的耐久会自己长回来。反过来如果只扣物品不同步字段，球那边会一直以为自己是满的。</p>
+     *
+     * <p>所以顺序固定为：<b>先按物品账本扣 → 再让球跑词条 → 最后把实体字段按物品账本重置</b>。</p>
+     */
     protected void onHit(HitResult hitResult) {
         if (this.stage() == Stage.SPIN || this.stage() == Stage.RETURNING) {
             return;
         }
+        if (!(this.level() instanceof ServerLevel)) {
+            return;
+        }
+
+        // ① 撞方块扣 1 点（写物品组件 + 同步实体字段）。
+        //    consumeOneToughness 内部已判「永久坚固 / 不坚固 ⇒ 不扣」，也会在归零时走 shatter。
+        if (hitResult instanceof BlockHitResult) {
+            this.consumeOneToughness("撞到方块");
+        }
+
+        // ② 词条（脉冲 / 点金 / 尖刺 / 破坏王 / 弹射 / 碎裂）全在球那边
         super.onHit(hitResult);
+
+        // ③ 球的 consumeDurability 可能又动了实体字段 —— 以物品账本为准重置回去
+        if (!this.isRemoved()) {
+            Integer leftComp = this.flailStack().get(ModComponents.TOUGHNESS_LEFT.get());
+            int max = this.profile().toughness();
+            this.setToughness(leftComp == null ? max : leftComp);
+        }
     }
 
     // ===== 工具 =====

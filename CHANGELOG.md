@@ -1,3 +1,44 @@
+## 1.2.0.29 — 耐久不掉 / 一撞就碎 / 重球飞得远：三个现象同一个根
+
+### 真因：锤头创建时没把球的数值灌进实体同步字段
+
+锤头的**权威耐久**活在物品组件 `TOUGHNESS_LEFT` 里，但继承来的球逻辑读的是
+**实体的同步字段**：
+
+| 球逻辑 | 读的字段 | 锤头初始值 |
+|---|---|---|
+| `onHit` 的 `!isTough()` | `TOUGHNESS` | **0** ⇒ 判「不坚固」⇒ `burst()` |
+| `physicalVelocity()` 配重 | `WEIGHT` | **0** ⇒ 速度按最轻算 |
+| `bounceOff()` 档位 | `BOUNCE` | **0** |
+| `onHitEntity()` 穿甲 | `PIERCE_LEVEL` | **0** |
+
+这四个字段在 `BallProjectile` 里是**构造时按 profile 设的**，而锤头走
+`super(type, level)` 那个构造器 —— **从来没设过**。所以：
+
+- **一撞就碎** = `getToughness()==0` ⇒ 球判不坚固 ⇒ burst
+- **耐久不掉** = 球的 `consumeDurability` 改的是实体字段，玩家物品的组件从头到尾没动
+- **重球飞得远** = `getWeight()==0` ⇒ 配重失效
+
+### 修法（四步）
+
+1. **`FlailItem.onUseTick` 创建锤头后灌入四个字段**：
+   `setToughness` / `setWeight` / `setBounce` / `setPierceLevel`
+2. **`consumeOneToughness` 写组件的同时同步 `setToughness(remaining)`**
+3. **`onHit` 统一账本**：先按物品扣（`consumeOneToughness`）→ 再让球跑词条 →
+   最后把实体字段按物品组件重置回去（球的 `consumeDurability` 会再动字段，必须盖回）
+4. **撞方块现在也扣耐久** —— 之前只有「到达线长上限」与「开始回收」两处扣，
+   撞方块压根没调过
+
+`FIRED_TRAITS` 不需要灌：`ballTickPre` 里的 `rollTraitsOnce` 会按 profile 掷骰，
+完整球概率 1.0，必然全中。
+
+### 顺带（作者同轮要求）
+
+- **信息显示加剩余耐久**：`tooltip.rotation_craft.flail.toughness` = 「剩余耐久：N / M」，
+  中英两版都加了；`≤0` 时显示为红色
+- **删掉「破碎后掉落一根线」那句**（`tooltip.rotation_craft.flail.broken`，中英文言键一并移除）
+
+---
 ## 1.2.0.28 — 删掉 `onHit` 里那个多余的前置判断（一撞就碎的真因）
 
 ### 现象与我的两次误判
