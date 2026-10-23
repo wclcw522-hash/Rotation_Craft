@@ -252,8 +252,22 @@ public class FlailHeadEntity extends BallProjectile {
         ItemStack inner = FlailItem.ballOf(flail);
         return inner.isEmpty() ? super.getItem() : inner;
     }
+    /**
+     * <b>锤头自己携带的物品栈 = 那把流星锤</b>（含内嵌球、耐久组件、三个状态标记）。
+     *
+     * <p>⚠️⚠️ <b>必须读 {@code super.getItem()}，不能读 {@code this.getItem()}</b>
+     * （作者 2026-10-23 实测崩服：`StackOverflowError`）。</p>
+     *
+     * <p>原因：本类覆写了 {@link #getItem()}，让它对父类暴露**内嵌球**（见那个方法的说明）。
+     * 如果这里再调 `this.getItem()`，就成了</p>
+     * <pre>
+     * getItem() ──► flailStack() ──► getItem() ──► …   ← 无限递归
+     * </pre>
+     * <p>`super.getItem()` 拿到的是 {@code ThrowableItemProjectile} 真正存着的那个栈，
+     * 也就是流星锤本身。渲染、归还、扣耐久、状态标记全走这里。</p>
+     */
     public ItemStack flailStack() {
-        return this.getItem();
+        return super.getItem();
     }
 
     public BallBehavior.BallProfile profile() {

@@ -1,3 +1,56 @@
+## 1.2.0.26 — 修蓄力崩服：`getItem()` 与 `flailStack()` 无限递归
+
+### 日志
+
+```
+java.lang.StackOverflowError
+  at FlailHeadEntity.flailStack(FlailHeadEntity.java:256)
+  at FlailHeadEntity.getItem(FlailHeadEntity.java:251)
+  at FlailHeadEntity.flailStack(FlailHeadEntity.java:256)
+  at FlailHeadEntity.getItem(FlailHeadEntity.java:251)
+  …
+```
+
+作者看到的现场是「蓄力时没有锤头，然后崩溃」。
+
+### 根因
+
+`1.2.3.1` 起为了让父类逻辑读到内嵌球，我覆写了 `getItem()`：
+
+```java
+public ItemStack getItem() {
+    ItemStack flail = this.flailStack();      // ← 调 flailStack
+    ...
+}
+public ItemStack flailStack() {
+    return this.getItem();                    // ← 又调 getItem
+}
+```
+
+两者互调 ⇒ **无限递归**。`onUseTick` 创建锤头的第一句 `head.setItem(worldForm(stack))` 一碰就爆栈，
+所以表现为「锤头没出现 + 崩溃」。
+
+### 修法
+
+`flailStack()` 改成读 **`super.getItem()`** —— 那才是 `ThrowableItemProjectile` 真正存着的栈
+（也就是流星锤本身）。`getItem()` 继续对外暴露内嵌球。
+
+### 排查（按「先列全清单」的规矩）
+
+列出本类所有覆写父类的方法（10 个），再列出 `getItem` / `flailStack` / `setItem` 的全部调用点：
+
+- `this.getItem()` —— **只出现在注释里**（L240/258/262），无实际调用
+- `this.flailStack()` —— 6 处（L251/274/543/672/736/757），全部走 `super.getItem()`
+- `setItem` —— 只转发 `super.setItem`
+
+**没有第二处互调。**
+
+### 教训
+
+这是我引入的 bug —— 覆写 `getItem()` 时没有检查 `flailStack()` 的实现。
+两个同义方法互相委托，只要方向成一个环就直接爆栈，而**编译期完全看不出来**。
+
+---
 ## 1.2.0.25 — 方案 A 第②步续：球间碰撞与上限清理也抽成钩子
 
 `BallPhysicsCore` 里再抽两个钩子，`BallProjectile` 覆写：
