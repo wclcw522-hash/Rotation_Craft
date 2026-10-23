@@ -334,10 +334,23 @@ public class FlailHeadEntity extends BallProjectile {
             this.storeAnchor(handAnchor(livingA));
         }
 
+        // ⚠️⚠️ **Entity 的基础 tick 必须跑**（作者 2026-10-23 报「转的时候抽搐」）。
+        //
+        //   SPIN / RETURNING 两段位置由公式算出，我原来只调了自己的 tickSpin / tickReturning，
+        //   完全跳过了 `super.tick()` —— 而 `Entity.tick()` 里有 `xo/yo/zo`（上一刻坐标）的更新，
+        //   客户端插值靠它算「这一帧该画在哪」。不更新就一直拿旧值插值，画面表现就是抽搐。
+        //
+        //   顺序也重要：先 `super.tick()` 再 `setPos` 覆盖位置 —— 反过来会被物理改掉。
         switch (this.stage()) {
-            case SPIN -> tickSpin();
-            case RETURNING -> tickReturning();
-            case FLYING -> super.tick();   // ← 球的完整 tick
+            case SPIN -> {
+                super.tick();
+                tickSpin();
+            }
+            case RETURNING -> {
+                super.tick();
+                tickReturning();
+            }
+            case FLYING -> super.tick();   // 球的完整 tick
         }
     }
 
@@ -927,6 +940,11 @@ public class FlailHeadEntity extends BallProjectile {
         BallBehavior.BallProfile profile = this.profile();
 
         // 不坚固（蜜饯球这类）⇒ 撞到就碎：掉一根线 + 流星锤消失
+        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                "[flail][撞方块] stage={} isTough={} toughness={} bounce={} innerEmpty={}",
+                this.stage(), profile.isTough(), profile.toughness(), profile.bounce(),
+                FlailItem.ballOf(this.flailStack()).isEmpty());
+
         if (!profile.isTough()) {
             this.shatter();
             return;

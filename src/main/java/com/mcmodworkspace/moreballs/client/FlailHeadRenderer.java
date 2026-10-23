@@ -84,22 +84,13 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
     @Override
     public void submit(ThrownItemRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
                        CameraRenderState cameraState) {
-        // ===== 先把姿态放大回来，再让父类画锤头本体 =====
+        // ⚠️ 不要在这里加 poseStack.scale（作者 2026-10-23 报「锤头跟金球一样大」）。
         //
-        // ⚠️ 作者 2026-10-19 报「回收的时候锤头消失只剩个绳」。
-        //
-        //    根因不在渲染逻辑，在**实体尺寸**：为了「绳子有体积但只挡方块」，
-        //    `ModEntities.FLAIL_HEAD` 的碰撞箱从 `sized(0.3, 0.3)` 改成了 `sized(0.2, 0.2)`。
-        //    而 `ThrownItemRenderer` 是**按实体尺寸缩放物品模型**的 ——
-        //    0.3 时勉强能看清，0.2 就基本看不见了，于是看起来像「锤头没了、只剩绳」。
-        //
-        //    所以在渲染侧放大回正常观感：物品模型按 2.5 倍画，
-        //    碰撞箱那边保持 0.2（物理判定不受影响）。
-        //    两者本来就是两件事 —— 碰撞箱管「占多大地方」，渲染管「看起来多大」。
-        poseStack.pushPose();
-        poseStack.scale(2.5F, 2.5F, 2.5F);
+        //    我上一版为了让 0.2 的碰撞箱看起来正常，在这里乘了 2.5 倍 ——
+        //    而球自己的碰撞箱是 0.25，锤头 0.2×2.5 = 0.5，**比球整整大一倍**。
+        //    `ThrownItemRenderer` 本来就是按实体尺寸画物品模型的，
+        //    保持 1:1 就对了：锤头 0.2 比球 0.25 略小一点，观感正好。
         super.submit(state, poseStack, collector, cameraState);
-        poseStack.popPose();
 
         if (!(state instanceof FlailHeadRenderState flailState) || !flailState.hasLine) {
             return;

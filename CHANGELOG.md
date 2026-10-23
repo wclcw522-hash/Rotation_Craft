@@ -1,3 +1,56 @@
+## 1.2.0.27 — 修锤头过大 + 旋转抽搐 + 撞方块碎掉的诊断
+
+### ① 锤头跟金球一样大
+
+**根因**：`FlailHeadRenderer.submit` 里乘了 `poseStack.scale(2.5F, 2.5F, 2.5F)`。
+那是 `1.2.0.3` 前后为了让 0.2 的碰撞箱看起来正常加的补丁。
+
+实测对比：球 `sized(0.25F)`，锤头 `sized(0.2F)` × 2.5 = **0.5 格**，比球整整大一倍。
+
+**修法**：删掉那段放大。`ThrownItemRenderer` 本来就按实体尺寸 1:1 画物品模型，
+锤头 0.2 比球 0.25 略小，观感正好。
+
+### ② 旋转时抽搐
+
+**根因**：`tick()` 里 `SPIN` / `RETURNING` 两个分支**只调了自己的 `tickSpin()` / `tickReturning()`**，
+完全跳过 `super.tick()` —— 而 `Entity.tick()` 里负责更新 `xo/yo/zo`（上一刻坐标），
+客户端插值靠它算「这一帧画在哪」。不更新就一直拿旧值插值 ⇒ 抽搐。
+
+**修法**：三个状态一律先 `super.tick()`，再调自己的位置逻辑：
+
+```java
+case SPIN -> { super.tick(); tickSpin(); }
+case RETURNING -> { super.tick(); tickReturning(); }
+case FLYING -> super.tick();
+```
+
+顺序不能反 —— 先 `super.tick()`（可能被物理改位置）再 `setPos` 覆盖。
+
+### ③ 撞方块立马碎掉（待实测确认）
+
+代码上是这条：
+
+```java
+if (!profile.isTough()) {
+    this.shatter();       // 掉一根线 + 流星锤消失
+    return;
+}
+super.onHit(hitResult);   // 坚固才走这里（脉冲/点金/尖刺/弹射）
+```
+
+`shatter()` 掉的是 `Items.STRING`，`discard()` 掉锤头 —— 这条本身符合规格。
+
+但作者反馈「碎掉的同时耐久在正常扣」，而 `profile.isTough()` 为 true 时不该进 `shatter`。
+两者矛盾，说明**实际取值和预期不一致**。本版在 `onHit` 里加了一条诊断日志：
+
+```
+[flail][撞方块] stage=? isTough=? toughness=? bounce=? innerEmpty=?
+```
+
+拿到这组值就能定位是 `profile` 没读到内嵌球、还是 `toughness` 本身是 0。
+**这条日志只用于定位，确认原因后会删掉。**
+
+---
 ## 1.2.0.26 — 修蓄力崩服：`getItem()` 与 `flailStack()` 无限递归
 
 ### 日志
