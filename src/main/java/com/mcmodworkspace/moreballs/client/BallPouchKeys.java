@@ -47,6 +47,28 @@ public final class BallPouchKeys {
     private static final KeyMapping.Category CATEGORY =
             new KeyMapping.Category(Identifier.fromNamespaceAndPath(MoreBalls.MOD_ID, "main"));
 
+    /**
+     * <b>不与其他任何按键冲突的上下文</b>（作者 2026-10-24 要求）。
+     *
+     * <p>NeoForge 的 {@code KeyMapping} 默认用 {@code KeyConflictContext.UNIVERSAL} ——
+     * 那个上下文的 {@code conflicts()} 对谁都说「是」，于是同一按键在按键设置里会被判冲突，
+     * 而且原版在冲突时会只让其中一个生效。</p>
+     *
+     * <p>这里返回 false：游戏认为它<b>不和任何东西冲突</b>，所以同一按键下的其它功能
+     * 照常触发，我们自己也照常触发 —— 也就是「兼容」而不是「独占」。</p>
+     */
+    public static final net.neoforged.neoforge.client.settings.IKeyConflictContext NO_CONFLICT =
+            new net.neoforged.neoforge.client.settings.IKeyConflictContext() {
+                @Override
+                public boolean isActive() {
+                    return true;
+                }
+
+                @Override
+                public boolean conflicts(net.neoforged.neoforge.client.settings.IKeyConflictContext other) {
+                    return false;
+                }
+            };
     /** G 键 —— 打开饰品栏里的收纳袋 */
     public static final KeyMapping OPEN_POUCH = new KeyMapping(
             "key.rotation_craft.open_pouch",
@@ -56,9 +78,10 @@ public final class BallPouchKeys {
     /** R 键 —— 长按展开径向菜单 */
     public static final KeyMapping RADIAL_MENU = new KeyMapping(
             "key.rotation_craft.radial_menu",
+            NO_CONFLICT,   // 不独占：相同按键下的其它功能照常生效（作者 2026-10-24）
+            com.mojang.blaze3d.platform.InputConstants.Type.KEYSYM,
             com.mojang.blaze3d.platform.InputConstants.KEY_R,
             CATEGORY);
-
     /** 长按判定门槛（毫秒）—— 作者 2026-10-16 从 0.2 秒改为 **3 刻** */
     private static final long HOLD_MILLIS = 150L;   // 3 刻 × 50ms = 150ms
 

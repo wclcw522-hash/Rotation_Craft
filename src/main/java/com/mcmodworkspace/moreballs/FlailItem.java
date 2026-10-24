@@ -277,18 +277,41 @@ public class FlailItem extends Item {
      *       「铁-铜-木-石球」），所以走另一个格式串把末尾的「球」换掉</li>
      * </ul>
      */
+    /**
+     * 把球名字结尾的「球」/「 Ball」去掉 —— 流星锤的名字里不带「球」字（作者 2026-10-24）。
+     *
+     * <p>例：「铁球」→「铁」、「Iron Ball」→「Iron」、「铁-铜-木-石球」→「铁-铜-木-石」。</p>
+     */
+    private static String stripBallSuffix(String name) {
+        if (name == null || name.isEmpty()) {
+            return "";
+        }
+        String s = name.trim();
+        if (s.endsWith(" Ball")) {
+            return s.substring(0, s.length() - 5).trim();
+        }
+        if (s.toLowerCase(java.util.Locale.ROOT).endsWith("ball")) {
+            return s.substring(0, s.length() - 4).trim();
+        }
+        if (s.endsWith("球")) {
+            return s.substring(0, s.length() - 1);
+        }
+        return s;
+    }
+
     @Override
     public Component getName(ItemStack stack) {
         ItemStack inner = ballOf(stack);
         if (inner.isEmpty()) {
             return super.getName(stack);
         }
+        // ⚠️ 内嵌球的名字结尾带「球」（铁球 / Iron Ball），直接拼会变成「铁球流星锤」。
+        //    这里剥掉结尾的「球」/「 Ball」，只留材质部分。
+        String bare = stripBallSuffix(inner.getHoverName().getString());
         if (inner.getItem() instanceof ComboBallItem) {
-            // 组合球的名字形如「铁-铜-木-石球」，这里把结尾的「球」换成「流星锤」的效果
-            // 由语言文件里的格式串负责，代码只负责把内嵌球名字整体当参数传进去。
-            return Component.translatable("item.rotation_craft.flail.combo.format", inner.getHoverName());
+            return Component.translatable("item.rotation_craft.flail.combo.format", bare);
         }
-        return Component.translatable("item.rotation_craft.flail.format", inner.getHoverName());
+        return Component.translatable("item.rotation_craft.flail.format", bare);
     }
 
     /**

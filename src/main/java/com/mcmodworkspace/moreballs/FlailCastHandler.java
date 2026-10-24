@@ -101,9 +101,11 @@ public final class FlailCastHandler {
             inventory.setSelectedSlot(origin);
         }
 
-        // 同时禁止「换手」：副手拿着另一把流星锤时按 F 会把主手换过去
-        if (player.getOffhandItem() != held && FlailItem.isFlail(player.getOffhandItem())) {
-            player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
-        }
+        // ⚠️⚠️ 原来这里会**把副手的流星锤直接清空**（作者 2026-10-24：
+        //   「还会导致其他的流星锤拿到手里就消失，无法使用」）。
+        //
+        //   那是把玩家的物品凭空销毁 —— 绝对不能这么干。换手本身也不会破坏状态：
+        //   玩家一换手，主手就不再是 FlailItem，上面那个 `isFlail(held)` 会提前返回，
+        //   `FLAIL_CASTING` 标记自然被清掉，锤头该回收回收。不需要额外干预。
     }
 }

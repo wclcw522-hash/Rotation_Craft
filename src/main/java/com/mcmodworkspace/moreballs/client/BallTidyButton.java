@@ -83,6 +83,7 @@ public final class BallTidyButton {
      */
     public static final KeyMapping TIDY_KEY = new KeyMapping(
             "key.rotation_craft.tidy",
+            com.mcmodworkspace.moreballs.client.BallPouchKeys.NO_CONFLICT,   // 不独占（作者 2026-10-24）
             com.mojang.blaze3d.platform.InputConstants.Type.MOUSE,
             org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_MIDDLE,
             CATEGORY);

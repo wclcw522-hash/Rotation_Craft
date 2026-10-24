@@ -130,6 +130,8 @@ public class FlailHeadEntity extends BallProjectile {
     private double launchSpeed;
     /** 本次 FLYING 是否已为「到线长上限」扣过耐久（避免每 tick 反复扣） */
     private boolean lineCapConsumed;
+    /** 上一次扣耐久所在的 tickCount —— 同 tick 重复碰撞不重复扣 */
+    private int flailLastDamageTick = Integer.MIN_VALUE;
 
     public FlailHeadEntity(EntityType<? extends FlailHeadEntity> type, Level level) {
         super(type, level);
@@ -776,6 +778,16 @@ public class FlailHeadEntity extends BallProjectile {
         if (max == BallBehavior.TOUGH_FOREVER || max <= BallBehavior.NOT_TOUGH) {
             return;   // 永久坚固 / 不坚固 ⇒ 没有耐久可扣
         }
+        // ⚠️⚠️ **同一个 tick 只能扣一次**（作者 2026-10-24：「落地一次扣好几十耐久」）。
+        //
+        //   落地/贴墙时 onHit 会**每 tick 触发一次**（实体一直嵌在方块表面），
+        //   没有这道闸就是 20 点/秒 —— 看起来像"一次落地扣几十"。
+        //   球的 consumeDurability 本来就有同样的 lastDamageTick 检查，锤头这边漏了。
+        if (this.tickCount == this.flailLastDamageTick) {
+            return;
+        }
+        this.flailLastDamageTick = this.tickCount;
+
 
         // ⚠️⚠️ **耐久必须写在玩家物品栏那一把上**（作者 2026-10-19：「耐久是根本不扣」）。
         //
@@ -873,9 +885,21 @@ public class FlailHeadEntity extends BallProjectile {
         level.addFreshEntity(string);
 
         // ===== 销毁手上那把流星锤（这才是「碎了」的真正含义）=====
-        ItemStack live = this.findLiveFlail();
-        if (!live.isEmpty()) {
-            live.shrink(1);
+        // ===== 销毁**这一把**流星锤（这才是「碎了」的真正含义）=====
+        //
+        // ⚠️⚠️ 不能用 findLiveFlail() 满背包搜（作者 2026-10-24：
+        //   「耐久耗尽破碎后…还会导致其他的流星锤拿到手里就消失」）——
+        //   那把锤已经没了的时候，满背包搜会**抓到另一把**并把它 shrink 掉。
+        //   这里只认 originSlot 那一格；找不到就什么都不销毁（宁可少销毁也不错杀）。
+        if (owner instanceof Player player) {
+            int slot = this.originSlot >= 0 ? this.originSlot
+                    : player.getInventory().getSelectedSlot();
+            if (slot >= 0 && slot < player.getInventory().getContainerSize()) {
+                ItemStack at = player.getInventory().getItem(slot);
+                if (FlailItem.isFlail(at)) {
+                    at.shrink(1);
+                }
+            }
         }
 
         this.level().broadcastEntityEvent(this, (byte) 3);

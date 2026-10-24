@@ -1,3 +1,60 @@
+## 1.2.0.30 — 耐久扣除 / 破碎误杀 / 命名 / 快捷键（作者 2026-10-24 四条）
+
+### ① 落地一次扣几十耐久
+
+**根因**：`consumeOneToughness` 没有同 tick 防重。
+
+锤头落地或贴墙时，实体一直嵌在方块表面 ⇒ `onHit` **每 tick 触发一次** ⇒ 每秒扣 20 点，
+看起来就是「一次落地扣好几十」。球的 `consumeDurability` 本来就有 `lastDamageTick` 检查，
+锤头这份漏了。
+
+**修法**：加 `flailLastDamageTick` 字段，同 `tickCount` 只允许扣一次。
+
+### ② 破碎后别的流星锤拿到手里就消失
+
+**根因在 `FlailCastHandler`**：
+
+```java
+if (player.getOffhandItem() != held && FlailItem.isFlail(player.getOffhandItem())) {
+    player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);   // ← 把副手物品凭空清空
+}
+```
+
+扔出锤头期间（`casting == true`）这段**每 tick** 跑，副手那把流星锤被反复清空 ——
+这就是「其它流星锤拿到手里就消失、无法使用」。
+
+**修法**：整段删掉。换手本身不会破坏状态：一换手主手就不是 `FlailItem`，
+上面那个 `isFlail(held)` 会提前返回，`FLAIL_CASTING` 自然被清。
+
+**另一处误杀**：`shatter()` 原来用 `findLiveFlail()` **满背包搜**第一把流星锤来销毁 ——
+当原格那把已经不在了，它就会抓到**另一把**并 shrink 掉。现在只认 `originSlot` 那一格，
+找不到就什么都不销毁。
+
+### ③ 名字带「球」
+
+`getName` 把内嵌球的名字（「铁球」/「Iron Ball」）直接当参数拼进 `%s流星锤`，
+得到「铁球流星锤」。
+
+**修法**：新增 `stripBallSuffix()`，剥掉结尾的「球」/「 Ball」/「ball」。
+现在得到「铁流星锤」「Iron Flail」，组合球同理（「铁-铜-木-石流星锤」）。
+
+### ④ 快捷键从独占改成兼容
+
+NeoForge 的 `KeyMapping` 默认用 `KeyConflictContext.UNIVERSAL`，它的 `conflicts()` 对谁都说「是」，
+同一按键会被判冲突、只让其中一个生效。
+
+新增 `BallPouchKeys.NO_CONFLICT`（`isActive()=true`、`conflicts()=false`），
+应用到两个快捷键：
+
+| 快捷键 | 键 | 处理 |
+|---|---|---|
+| `OPEN_POUCH` 打开收纳袋 | G | **按作者要求保持原样** |
+| `RADIAL_MENU` 径向菜单 | R | 改为 `NO_CONFLICT` |
+| `TIDY_KEY` 整理 | 鼠标中键 | 改为 `NO_CONFLICT` |
+
+现在按 R 或中键，使用同一按键的其它功能照常生效，我们自己也照常生效。
+
+---
 ## 1.2.0.29 — 耐久不掉 / 一撞就碎 / 重球飞得远：三个现象同一个根
 
 ### 真因：锤头创建时没把球的数值灌进实体同步字段
