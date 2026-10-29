@@ -126,6 +126,14 @@ public class FlailHeadEntity extends BallProjectile {
      * <p>只影响「越过线长之后」的表现：值太大会把锤头暴力拽回来像弹簧，
      * 太小则绷紧感不足。0.06 配合径向分量被完全吃掉，观感是锤头贴着球面绕着人转。</p>
      */
+    /**
+     * 两次「撞方块扣耐久」之间的**最小间隔**（tick）。
+     *
+     * <p>锤头卡在方块里时 onHit 每 tick 都触发，只靠「同一 tick 去重」拦不住 ——
+     * 铁球 99 耐 5 秒就会被磨光。4 tick = 0.2 秒，保留碰撞掉耐久的语义又不至于瞬爆。</p>
+     */
+    private static final int TOUGHNESS_MIN_INTERVAL_TICKS = 4;
+
     private static final double ROPE_TENSION = 0.06D;
 
     /** 环绕角度（弧度） */
@@ -883,7 +891,14 @@ public class FlailHeadEntity extends BallProjectile {
         //   落地/贴墙时 onHit 会**每 tick 触发一次**（实体一直嵌在方块表面），
         //   没有这道闸就是 20 点/秒 —— 看起来像"一次落地扣几十"。
         //   球的 consumeDurability 本来就有同样的 lastDamageTick 检查，锤头这边漏了。
-        if (this.tickCount == this.flailLastDamageTick) {
+        // ⚠️ 只防「同一 tick 重复」不够（作者 2026-10-30：「扔出会沉到方块里然后迅速消耗耐久碎掉」）。
+        //
+        //   锤头一旦嵌进方块，`onHit` 会**每 tick 都触发一次**，而 tickCount 每 tick 都在变，
+        //   原来那道「同 tick 才跳过」的闸根本拦不住 —— 铁球 99 耐久 5 秒就没了。
+        //
+        //   改成**最小间隔 4 tick**：每 0.2 秒最多扣 1 点。既保留「连续撞墙掉耐久」的语义，
+        //   又不会让「卡进方块」这种异常情况瞬间把锤头烧光。
+        if (this.tickCount - this.flailLastDamageTick < TOUGHNESS_MIN_INTERVAL_TICKS) {
             return;
         }
         this.flailLastDamageTick = this.tickCount;

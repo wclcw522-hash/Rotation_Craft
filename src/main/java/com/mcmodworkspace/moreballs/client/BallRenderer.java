@@ -29,6 +29,8 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
     /** 视觉滚动（作者 2026-10-29）—— 按位移反算旋转，见 {@link BallRollVisual} */
     private final BallRollVisual rollVisual = new BallRollVisual();
 
+    private static boolean DIAGNOSED = false;
+
     /** 【潮涌】的环绕模型 —— 层定义直接用原版注册好的那个，懒 bake 一次 */
     private TidalSurgeModel surgeModel;
 
@@ -89,6 +91,22 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         String key = (state instanceof BallRenderState ballState) ? ballState.ball3dKey : null;
 
         BlockStateModelPart part = (key == null) ? null : Ball3DModels.part(key);
+
+        // 一次性自检（作者 2026-10-30：球「也没有转动」——需要先确认 3D 到底生效没有）
+        if (!DIAGNOSED) {
+            DIAGNOSED = true;
+            String diag = "?";
+            if (state instanceof BallRenderState rs) {
+                // 姿态用四元数存；w < 1 说明已经转过（identity 时 w 恰好 = 1）
+                diag = String.format("w=%.4f pivot=%.4f radius=%.4f",
+                        rs.rollOrientation.w, rs.rollPivotY, rs.rollRadius);
+            }
+            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                    "[渲染自检] 球 key={} part={} 姿态 {}",
+                    key,
+                    part == null ? "null（走 2D）" : part.getClass().getSimpleName(),
+                    diag);
+        }
 
         // ===== 没有 3D 模型（组合球以外的情况 / 模型还没烘焙好）：走原版 2D 物品图标 =====
         if (part == null) {
