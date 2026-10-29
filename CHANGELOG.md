@@ -1,3 +1,53 @@
+## 1.2.0.43 — 3D 贴图全部重做（材质型改回原版方块图）
+
+### 问题的根因
+
+`textures/block/ball3d/` 里 14 个材质型球的贴图，之前是从 `textures/item/<key>_ball.png`
+复制的 —— 那是**圆形物品图标**，**56% 像素是透明的**。
+
+空间投影 UV 下，每个面都会采样到贴图的任意位置，包括那些透明角 ⇒
+球面出现大片空洞。这就是作者说的「贴图要全部重绘」。
+
+### 重做
+
+| 类型 | 球 | 贴图来源 | 透明 |
+|---|---|---|---|
+| 材质型 | 木、圆石、铁、金、紫水晶、铜、红石、钻石、青金石、绿宝石、滴水石、回响 | **原版方块贴图** | **0%** |
+| 材质型（镂空） | 空心铁、空心铜 | `iron_bars` / `copper_bars` | 54.7%（**镂空是设计**） |
+| 图案型 | 潮汐、蜜饯、符箓 | `*_ball_full.png`（之前生成的填满版） | 0% |
+
+具体映射：
+
+| 球 | 贴图 |
+|---|---|
+| 木 | `oak_planks` |
+| 圆石 | `cobblestone` |
+| 铁 | `iron_block` |
+| 金 | `gold_block` |
+| 空心铁 | `iron_bars` |
+| 紫水晶 | `amethyst_block` |
+| 铜 | `copper_block` |
+| 空心铜 | `copper_bars` |
+| 红石 | `redstone_block` |
+| 钻石 | `diamond_block` |
+| 青金石 | `lapis_block` |
+| 绿宝石 | `emerald_block` |
+| 滴水石 | `dripstone_block` |
+| 回响 | `sculk`（16×64 已裁第一帧） |
+| 潮汐 / 蜜饯 / 符箓 | `tidal_ball_full` / `preserve_ball_full` / `talisman_ball_full` |
+
+### 校验结果
+
+```
+amethyst  0%    cobblestone 0%    copper  0%    diamond 0%
+dripstone 0%    echo        0%    emerald 0%    gold    0%
+iron      0%    lapis       0%    preserve 0%   redstone 0%
+talisman  0%    tidal       0%    wooden  0%
+hollow_copper 54.7%（镂空设计 ✓）
+hollow_iron   54.7%（镂空设计 ✓）
+```
+
+---
 ## 1.2.0.42 — 球模型换成作者重绘版（0.5 格）+ UV 重做 + 碰撞箱同步
 
 ### 换模型
