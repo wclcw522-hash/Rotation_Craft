@@ -1,3 +1,65 @@
+## 1.2.0.38 — 恢复 display.translation 为 [8,8,8]（上一版我读漏了源码）
+
+### 我错在哪
+
+`1.2.0.37` 我把 `display.translation` 改成 `[0,0,0]`，依据是「读了 `ItemTransform.apply`，
+发现只有 NO_TRANSFORM 分支才有 `translate(-0.5,-0.5,-0.5)` 居中」。
+
+**我漏了 else 分支的最后一行。** 完整实现是：
+
+```java
+public void apply(boolean applyLeftHandFix, PoseStack.Pose pose) {
+    if (this == NO_TRANSFORM) {
+        pose.translate(-0.5F, -0.5F, -0.5F);
+    } else {
+        pose.translate(tx, ty, tz);
+        pose.rotate(rotation);
+        pose.scale(scale);
+        pose.rotate(rightRotation);
+        pose.translate(-0.5F, -0.5F, -0.5F);   // ← 两个分支都有居中，我上次读漏了
+    }
+}
+```
+
+也就是说 `translation` 是**叠加在居中平移之上的额外偏移**，单位 1/16 格。
+
+### 正确的坐标链
+
+```
+几何 y 0~4 单位
+  --(display.translation.y = +8 单位 = +0.5 格)-->  8~12 单位
+  --(居中 translate(-0.5 格) = -8 单位)-->           0~4 单位
+  = 0 ~ 0.25 格                                       ← 正好套住 0.25 的碰撞箱
+```
+
+几何中心落在 **y = 2 单位 = 0.125 格**，和 `BallRollVisual.RADIUS` 完全一致。
+
+改成 `[0,0,0]` 的话净变换变成 **−0.5 格** —— 球被埋进地下半格，这才是作者看到「乱飞」的原因。
+
+### 保留的真正修复
+
+`1.2.0.37` 里**四元数逐帧累积**那部分是对的，保留：
+
+```java
+scratch.rotationAxis(delta, ax, 0, az);   // 这一帧的增量
+acc.premul(scratch);                       // 左乘到累积姿态
+acc.normalize();
+```
+
+原来「累积角度 + 每帧换轴」的写法会让球一转向就姿态错乱，这个必须用四元数。
+
+### 现状
+
+| 项 | 值 |
+|---|---|
+| `display.translation` | `[8,8,8]`（17 整球 + 4 象限模板 + 80 分片） |
+| 几何包围盒 | `x/z: -2~2`, `y: 0~4` 单位 = 0.25 格 |
+| 落地位置 | `y: 0 ~ 0.25 格`（底贴碰撞箱） |
+| 旋转中心 | `y = 0.125 格`（球心） |
+| 旋转累积 | 四元数 |
+| 旋转轴 | `(dz, 0, -dx)`（前进方向 × 上方向） |
+
+---
 # 版本号更正
 
 `1.2.1.0 / 1.2.1.1 / 1.2.1.2` 这三个号是我乱升的 —— 按规则 **C 位只在新增大类内容时才动**，
