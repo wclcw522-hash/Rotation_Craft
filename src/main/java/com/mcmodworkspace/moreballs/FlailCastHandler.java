@@ -73,7 +73,12 @@ public final class FlailCastHandler {
         //  现在把清理提到最前面：**只要场上没有锤头，就把整包流星锤的标记清干净**，
         //  完全不依赖主手是什么。
         if (FlailItem.findHead(player.level(), player) == null) {
-            FlailItem.clearCastingFlags(player);
+            // 只在真有残留标记时才清 + 同步，避免每 tick 无条件广播容器
+            if (FlailItem.hasCastingFlag(player)) {
+                FlailItem.clearCastingFlags(player);
+                player.containerMenu.broadcastChanges();
+                player.getInventory().setChanged();
+            }
         }
 
         ItemStack held = player.getMainHandItem();

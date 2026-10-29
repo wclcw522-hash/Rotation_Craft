@@ -202,6 +202,21 @@ public class FlailItem extends Item {
     }
 
     /** 设置「已扔出」状态；传 false 恢复成带球的图标 */
+    /**
+     * 玩家身上**有没有任何一把流星锤还带着 {@code FLAIL_CASTING} 标记**。
+     *
+     * <p>给 {@code FlailCastHandler} 做守卫用：只在真有残留时才清 + 广播容器，
+     * 避免每 tick 无条件同步造成无谓发包。</p>
+     */
+    public static boolean hasCastingFlag(net.minecraft.world.entity.player.Player player) {
+        var inv = player.getInventory();
+        for (int slot = 0; slot < inv.getContainerSize(); slot++) {
+            if (isCasting(inv.getItem(slot))) {
+                return true;
+            }
+        }
+        return isCasting(player.getOffhandItem());
+    }
     public static void setCasting(ItemStack stack, boolean casting) {
         if (!isFlail(stack)) {
             return;

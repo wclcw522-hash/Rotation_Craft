@@ -557,7 +557,14 @@ public class FlailHeadEntity extends BallProjectile {
             Vec3 anchor = handAnchor(ropeOwner);
             Vec3 delta = this.position().subtract(anchor);
             double distance = delta.length();
-            if (distance > MAX_LINE && distance > 1.0E-4D) {
+            // ⚠️ 只在**明显**超出线长时才约束（作者 2026-10-30：「收到脚边时会变得非常费劲，还会卡在方块上」）。
+            //
+            //   原来阈值正好卡在 MAX_LINE 上，锤头一到边界就被反复拉回 + 施加向内张力，
+            //   表现为「越靠近越费力」，还会被硬 setPos 塞进方块里卡住。
+            //
+            //   现在：① 阈值放宽到 1.15 × MAX_LINE，正常回收全程不触发；
+            //        ② **不再加向内张力** —— 「绳子不可拉伸」只用「砍掉朝外的径向分量」表达。
+            if (distance > MAX_LINE * 1.15D && distance > 1.0E-4D) {
                 Vec3 out = delta.scale(1.0D / distance);          // 掷出者 → 锤头
                 Vec3 clamped = anchor.add(out.scale(MAX_LINE));
                 this.setPos(clamped.x, clamped.y, clamped.z);
@@ -565,10 +572,8 @@ public class FlailHeadEntity extends BallProjectile {
                 Vec3 velocity = this.getDeltaMovement();
                 double radialOut = velocity.dot(out);
                 if (radialOut > 0.0D) {
-                    velocity = velocity.subtract(out.scale(radialOut));   // 绳子吃掉向外的速度
+                    velocity = velocity.subtract(out.scale(radialOut));   // 只砍向外的分量
                 }
-                // 再补一点朝内的张力，让「绷紧」有手感，而不是纯硬钳位
-                velocity = velocity.add(out.scale(-ROPE_TENSION));
                 this.setDeltaMovement(velocity);
             }
         }
@@ -807,6 +812,18 @@ public class FlailHeadEntity extends BallProjectile {
         }
         if (!touched) {
             FlailItem.clearCastingFlags(p);
+        }
+        // ⚠️⚠️ **必须主动同步到客户端**（作者 2026-10-30 报「回收后物品贴图只剩线、无法再扔」）。
+        //
+        //   前面那些 `stack.remove(FLAIL_CASTING)` 只改了服务端的 ItemStack ——
+        //   MC 的物品栏同步按「整格内容变化」触发，而这里改的是**物品的一个组件**，
+        //   服务端不会因此给客户端发包。客户端于是继续按旧的 FLAIL_CASTING=true 渲染
+        //   `flail_string_only`（纯线），右键蓄力也被客户端的旧状态挡着。
+        //
+        //   broadcastChanges() 会把整个容器同步下去，组件变化也就一起过去了。
+        if (p instanceof net.minecraft.server.level.ServerPlayer sp) {
+            sp.containerMenu.broadcastChanges();
+            sp.getInventory().setChanged();
         }
     }
 
