@@ -97,8 +97,18 @@ public final class FlailCastHandler {
 
         FlailHeadEntity head = FlailItem.findHead(player.level(), player);
         boolean casting = head != null;
-        if (FlailItem.isCasting(held) != casting) {
+        boolean was = FlailItem.isCasting(held);
+        if (was != casting) {
             FlailItem.setCasting(held, casting);
+            // 诊断日志（作者 2026-10-29 报「回收后锤头消失」反复出现）：
+            // 形态切换的每一处都留痕，跑一次就能看出是「该清没清」还是「清错了对象」。
+            MoreBalls.LOGGER.info("[flail] 形态切换：casting {} → {}  head={}  slot={}（场上锤头数 {}）",
+                    was, casting,
+                    head == null ? "null" : ("#" + head.getId() + " stage=" + head.stage()),
+                    player.getInventory().getSelectedSlot(),
+                    player.level().getEntitiesOfClass(FlailHeadEntity.class,
+                            player.getBoundingBox().inflate(FlailItem.MAX_LINE_LENGTH + 8.0D),
+                            h -> h.getOwner() == player && !h.isRemoved()).size());
         }
 
         if (!casting) {

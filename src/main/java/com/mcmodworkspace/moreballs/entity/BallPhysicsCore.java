@@ -1010,6 +1010,25 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * <p>那 5 秒窗口本来就是要让玩家看清楚「猪灵被吸引过来」，球在这段时间里
      * 原地不动才符合设计意图 —— 而且窗口一过就恢复可推。</p>
      */
+    /**
+     * <b>碰撞箱随 entityScale 缩放</b>（作者 2026-10-29：「金球的碰撞箱你忘了跟着模型一起放大」）。
+     *
+     * <p>模型直径是 0.5 格（8 单位），但金球那类"大个头"在渲染时会再乘一个
+     * {@code entityScale}。原来碰撞箱写死在 EntityType 上（0.5），渲染放大后
+     * 球就比判定盒大一圈，滚动旋转的轴心也跟着偏。</p>
+     *
+     * <p>所以改成**动态算**：基准 0.5 格 × 当前物品的 entityScale。</p>
+     */
+    @Override
+    public net.minecraft.world.entity.EntityDimensions getDimensions(
+            net.minecraft.world.entity.Pose pose) {
+        float scale = BallBehavior.profileFor(this.getItem()).entityScale();
+        if (scale <= 0.0F) {
+            scale = 1.0F;
+        }
+        return net.minecraft.world.entity.EntityDimensions.scalable(0.5F * scale, 0.5F * scale);
+    }
+
     @Override
     public boolean isPushable() {
         if (this.level() instanceof ServerLevel server

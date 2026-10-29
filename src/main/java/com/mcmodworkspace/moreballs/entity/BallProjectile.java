@@ -30,6 +30,18 @@ import net.minecraft.world.level.Level;
  * <p>{@code instanceof BallProjectile} 对锤头恒为 false，反之亦然。</p>
  */
 public class BallProjectile extends BallPhysicsCore {
+    /**
+     * 物品变了 ⇒ 碰撞箱要重算（作者 2026-10-29）。
+     *
+     * <p>碰撞箱现在是 {@code 0.5 格 × entityScale}，而 {@code entityScale} 来自当前物品
+     * 的行为表。实体的 {@code dimensions} 字段只在构造和 {@code refreshDimensions()}
+     * 时更新，所以换球（金球 ↔ 普通球）必须主动刷一次，否则碰撞箱会停在上一个球的尺寸。</p>
+     */
+    @Override
+    public void setItem(ItemStack stack) {
+        super.setItem(stack);
+        this.refreshDimensions();
+    }
 
     public BallProjectile(EntityType<? extends BallProjectile> type, Level level) {
         super(type, level);

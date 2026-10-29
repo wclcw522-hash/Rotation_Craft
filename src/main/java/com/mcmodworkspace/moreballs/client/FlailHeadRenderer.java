@@ -35,6 +35,9 @@ import net.minecraft.world.phys.Vec3;
  */
 public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
 
+    /** 光照兜底：`state.lightCoords` 为 0 时用全亮，避免整颗锤头全黑 */
+    private static final int LIGHT_FULL = 0x00F000F0;
+
     public FlailHeadRenderer(EntityRendererProvider.Context context) {
         // 缩放参数用 1.0：锤头的「球」大小由物品图标本身决定，
         // 与球的实体缩放（金球那套 entityScale）无关。
@@ -94,16 +97,37 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
         //    而球自己的碰撞箱是 0.25，锤头 0.2×2.5 = 0.5，**比球整整大一倍**。
         //    `ThrownItemRenderer` 本来就是按实体尺寸画物品模型的，
         //    保持 1:1 就对了：锤头 0.2 比球 0.25 略小一点，观感正好。
-        // ===== 锤头**不用 3D 模型**，一律走原版物品图标（作者 2026-10-29 实测后回退）=====
+        // ===== 锤头也用 3D 模型（作者 2026-10-29：「锤头又又又变成旧版了」）=====
         //
-        // 1.2.0.31 我给锤头也接了 3D 模型，结果作者反馈「回收后锤头消失、无法再次掷出」——
-        // 逻辑侧（FlailCastHandler / shatter / finishReturn）全都没动过，是渲染这条支路引入的。
+        // 之前退回 2D 是因为「回收后锤头消失」怀疑是 3D 分支引入的 —— 但逻辑侧
+        // （FlailCastHandler / shatter / finishReturn / returnFlailToOwner / isCasting）
+        // 逐条查过都没问题，且 2D 版同样报这个现象，所以不是 3D 的锅。
         //
-        // 而锤头本身只有 0.2 格（3.2 单位），3D 化在屏幕上根本看不出差别，
-        // 却要承担「渲染分支写错就影响可玩性」的风险。**不值得**，退回 2D。
-        //
-        // 球实体（BallRenderer）那边才是真正需要 3D 的地方，那里保持不动。
-        super.submit(state, poseStack, collector, cameraState);
+        // 这里做成「3D 优先、失败退回 2D」：
+        //   · part != null → 画 3D（和球实体同一个模型，贴图一致）
+        //   · part == null（模型没烘焙好 / 找不到 key）→ 走 super.submit 的 2D 图标，
+        //     绝不整帧不画 —— 那才会真的"消失"
+        String key = (state instanceof FlailHeadRenderState flailState) ? flailState.ball3dKey : null;
+        BlockStateModelPart part = (key == null) ? null : Ball3DModels.part(key);
+
+        if (part != null) {
+            poseStack.pushPose();
+            // 球模型是 0.5 格，锤头碰撞箱是 0.2 格 ⇒ 缩到 0.4 保持原尺寸
+            final float shrink = 0.4F;
+            poseStack.scale(shrink, shrink, shrink);
+            int light = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
+            collector.submitBlockModel(
+                    poseStack,
+                    Ball3DModels.renderType(key),
+                    java.util.List.of(part),
+                    new int[] { -1 },
+                    light,
+                    net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
+                    0);
+            poseStack.popPose();
+        } else {
+            super.submit(state, poseStack, collector, cameraState);
+        }
 
         if (!(state instanceof FlailHeadRenderState flailState) || !flailState.hasLine) {
             return;

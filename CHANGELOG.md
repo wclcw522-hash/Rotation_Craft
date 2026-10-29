@@ -1,3 +1,75 @@
+## 1.2.0.44 — 组合球退回 2D、锤头改回 3D、金球碰撞箱跟随缩放
+
+### ① 组合球拼接混乱 / 缺损 / 偏移
+
+查证结果：分片贴图 `<key>_ball_quarter_<q>` 是按 **UV 象限**划分的
+
+```
+quarter_1 = 左上 (u 0~8, v 0~8)
+quarter_2 = 右上 (u 8~16, v 0~8)
+quarter_3 = 左下 (u 0~8, v 8~16)
+quarter_4 = 右下 (u 8~16, v 8~16)
+```
+
+而 3D 象限几何只能按**空间位置**分。新模型里贯穿板的面 UV 跨度有 `v 0~16`（横跨两个象限），
+**一个面无法拆给两个象限模型** ⇒ 拼出来必然缺损 + 接缝错位。
+
+2D 的四层 composite 本来就是「按 UV 象限」工作的，天然正确。
+
+**处理**：`items/combo_ball.json` 退回纯 2D composite（4 层 × 19 case）。
+3D 化这条路需要运行时合成贴图（动态纹理），超出静态模型的表达范围。
+
+### ② 锤头又变回旧版
+
+`FlailHeadRenderer` 之前退回 2D（用 `entity.getItem()` 的球图标）⇒ 看起来是旧版。
+
+改成 **3D 优先 + 2D 兜底**：
+
+```java
+BlockStateModelPart part = (key == null) ? null : Ball3DModels.part(key);
+if (part != null) { 画 3D（scale 0.4 保持 0.2 格锤头尺寸） }
+else { super.submit(...); }   // 绝不整帧不画
+```
+
+### ③ 金球碰撞箱没跟着放大
+
+碰撞箱原来写死在 `EntityType` 上（0.5），但 `entityScale` 只在渲染时生效
+⇒ 金球渲染放大后比判定盒大一圈，滚动轴心也跟着偏。
+
+改成动态：
+
+```java
+@Override
+public EntityDimensions getDimensions(Pose pose) {
+    float scale = BallBehavior.profileFor(this.getItem()).entityScale();
+    return EntityDimensions.scalable(0.5F * scale, 0.5F * scale);
+}
+```
+
+`BallProjectile.setItem` 覆写后调 `refreshDimensions()`，换球时碰撞箱立即重算。
+
+### ④ 锤头消失：加了诊断日志
+
+逐条遍历了相关代码，全部正常：
+
+| 检查项 | 结果 |
+|---|---|
+| `items/flail.json` 形态链 | `flail_bare=true` → 无绳球；`flail_casting=true` → **纯线**；否则球+绳 |
+| `FlailItem.isCasting/setCasting` | `setCasting(false)` 会 `stack.remove(FLAIL_CASTING)` ✓ |
+| `FlailHeadEntity.getItem()` | 返回内嵌球；`flailStack()` 返回流星锤本身 ✓ |
+| `returnFlailToOwner` | 原格是流星锤 ⇒ 不动；空 ⇒ 放回；主手是锤 ⇒ 不动 ✓ |
+| `finishReturn` / `returnFlailAndDiscard` | 都调 `clearFlailFlags(p)` ✓ |
+| `clearFlailFlags` | 扫全背包 + 副手，`isFlail && isCasting` 才清 ✓ |
+
+代码层面找不到缺口，所以在 `FlailCastHandler` 加了**形态切换日志**：
+
+```
+[flail] 形态切换：casting true → false  head=null  slot=0（场上锤头数 0）
+```
+
+让作者复现一次，日志能直接指出是「该清没清」还是「清错了对象」。
+
+---
 ## 1.2.0.43 — 3D 贴图全部重做（材质型改回原版方块图）
 
 ### 问题的根因
