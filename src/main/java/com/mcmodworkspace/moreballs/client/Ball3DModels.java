@@ -12,10 +12,6 @@ import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ModelEvent;
-import net.neoforged.neoforge.client.model.standalone.SimpleUnbakedStandaloneModel;
 import net.neoforged.neoforge.client.model.standalone.StandaloneModelKey;
 
 /**
@@ -37,7 +33,6 @@ import net.neoforged.neoforge.client.model.standalone.StandaloneModelKey;
  * <p>几何完全一样（Blockbench 里那 44 个立方体），只有贴图不同 —— 所以生成 17 个
  * {@code models/item/ball3d_<key>.json}，一个个注册。加新球只要加一份 json + 这里加一个 key。</p>
  */
-@EventBusSubscriber(modid = com.mcmodworkspace.moreballs.MoreBalls.MOD_ID, value = net.neoforged.api.distmarker.Dist.CLIENT)
 public final class Ball3DModels {
 
     /** 全部有 3D 模型的球（顺序无所谓，但要和 models/item/ball3d_<key>.json 对得上） */
@@ -66,13 +61,6 @@ public final class Ball3DModels {
     private Ball3DModels() {
     }
 
-    @SubscribeEvent
-    public static void onRegisterStandalone(ModelEvent.RegisterStandalone event) {
-        for (String k : KEYS) {
-            event.register(MODELS.get(k), SimpleUnbakedStandaloneModel.simpleModelWrapper(
-                    Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + k)));
-        }
-    }
 
     /**
      * 从球实体身上推导该用哪份 3D 模型。

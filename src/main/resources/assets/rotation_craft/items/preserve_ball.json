@@ -1,6 +1,26 @@
 {
-  "model": {
-    "type": "minecraft:model",
-    "model": "rotation_craft:item/preserve_ball"
-  }
+	"model": {
+		"type": "minecraft:select",
+		"property": "minecraft:display_context",
+		"cases": [
+			{
+				"when": "ground",
+				"model": {
+					"type": "minecraft:model",
+					"model": "rotation_craft:item/ball3d_preserve"
+				}
+			},
+			{
+				"when": "fixed",
+				"model": {
+					"type": "minecraft:model",
+					"model": "rotation_craft:item/ball3d_preserve"
+				}
+			}
+		],
+		"fallback": {
+			"type": "minecraft:model",
+			"model": "rotation_craft:item/preserve_ball"
+		}
+	}
 }

@@ -1,3 +1,64 @@
+## 1.2.0.33 — 球的 3D 模型改走物品模型管线（修「黑漆漆」+ 锤头贴图一致）
+
+### 问题
+
+`1.2.0.32` 把 RenderType 从 `entityCutout` 换成 `itemCutout`，球**仍然发黑**。
+说明问题不在 RenderType，而在 `submitBlockModel` 这条路上**拿不到正确的光照上下文**。
+
+另外为了修锤头 bug 退回 2D 后，锤头贴图变回旧版，和球实体不一致。
+
+### 换方案：不再用 standalone 模型
+
+改为走**物品模型定义**的 `display_context` 分流 —— 和组合球用的是同一套机制：
+
+```json
+// items/<key>_ball.json
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:display_context",
+    "cases": [
+      { "when": "ground", "model": { "model": "rotation_craft:item/ball3d_<key>" } },
+      { "when": "fixed",  "model": { "model": "rotation_craft:item/ball3d_<key>" } }
+    ],
+    "fallback": { "model": "rotation_craft:item/<key>_ball" }
+  }
+}
+```
+
+`ThrownItemRenderer` 用的正是 **GROUND** 上下文（源码里 `updateForNonLiving(..., ItemDisplayContext.GROUND, ...)`），
+所以球实体自动拿到 3D 模型；而 `gui` / 手持不在 cases 里 → 走 fallback 的 2D 图标。
+
+### 这个方案顺带解决了三件事
+
+1. **光照**：完全由原版 `ItemStackRenderState` 接管，不可能偏暗
+2. **锤头贴图**：`FlailHeadEntity.getItem()` 返回的是内嵌球 ⇒ 锤头也走 GROUND ⇒ 自动 3D、贴图和球一致
+3. **不再需要 standalone 注册**：`Ball3DModels.onRegisterStandalone` 已移除，17 个模型不会重复烘焙
+
+### 修的一个隐形坑：display 缩放
+
+`1.2.0.31` 生成的 `ball3d_*.json` 里 `display.ground` 带了 `scale: [0.25, 0.25, 0.25]` ——
+但模型几何本身已经是 **4 单位 = 0.25 格**，再缩 0.25 会变成 **0.0625 格**，几乎看不见。
+
+17 个模型的 display 全部重写为 1:1（`scale: [1,1,1]`、`translation: [0,0,0]`）。
+
+### 现状
+
+| 对象 | 渲染 | 上下文 |
+|---|---|---|
+| 球实体（飞出 / 地上） | 3D | `ground` |
+| 流星锤锤头 | 3D + 绳子 | `ground`（经内嵌球） |
+| 展示框 | 3D | `fixed` |
+| 物品栏 / 手持 / 头顶 | 2D | fallback |
+| 组合球（实体） | 3D 四象限 composite | `ground` |
+
+### 待作者实测
+
+- 球在游戏里颜色是否正常（不再发黑）
+- 锤头贴图是否和球一致
+- 球的大小是否合适（display 改过，可能偏大或偏小）
+
+---
 ## 1.2.0.32 — 球渲染偏暗 + 锤头退回 2D
 
 ### ① 球看起来黑漆漆

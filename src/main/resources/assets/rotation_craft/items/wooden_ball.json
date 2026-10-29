@@ -1,6 +1,26 @@
 {
-  "model": {
-    "type": "minecraft:model",
-    "model": "rotation_craft:item/wooden_ball"
-  }
+	"model": {
+		"type": "minecraft:select",
+		"property": "minecraft:display_context",
+		"cases": [
+			{
+				"when": "ground",
+				"model": {
+					"type": "minecraft:model",
+					"model": "rotation_craft:item/ball3d_wooden"
+				}
+			},
+			{
+				"when": "fixed",
+				"model": {
+					"type": "minecraft:model",
+					"model": "rotation_craft:item/ball3d_wooden"
+				}
+			}
+		],
+		"fallback": {
+			"type": "minecraft:model",
+			"model": "rotation_craft:item/wooden_ball"
+		}
+	}
 }

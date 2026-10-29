@@ -71,48 +71,32 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
     @Override
     public void submit(ThrownItemRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
                        CameraRenderState cameraState) {
+        // ===== 3D 模型由**物品模型定义**接管，这里只负责缩放和潮涌环绕 =====
+        //
+        // 演变过程（作者 2026-10-29 两轮反馈）：
+        //   ① 一开始走 NeoForge standalone 模型 + submitBlockModel，
+        //      结果球「黑漆漆的看不出来是啥球」—— 那条路拿不到正确的光照上下文。
+        //   ② 现在改成：`items/<key>_ball.json` 按 `display_context` 分流，
+        //      `ground`（正是 ThrownItemRenderer 用的上下文）指向 3D 模型，
+        //      其余上下文保持 2D 图标。
+        //
+        // 好处：
+        //   · 光照 / 遮罩 / 附魔光效全部由原版 `ItemStackRenderState` 接管，不可能偏暗
+        //   · 锤头（FlailHeadEntity）的 getItem() 返回内嵌球 ⇒ 自动也是 3D，贴图和球一致
+        //   · 物品栏仍然是 2D 图标，因为 gui 上下文没被 cases 覆盖 → 走 fallback
         float scale = (state instanceof BallRenderState ballState) ? ballState.ballScale : 1.0F;
-        String key = (state instanceof BallRenderState ballState) ? ballState.ball3dKey : null;
 
-        // ===== 没有 3D 模型（组合球等）：走原来的 2D 物品图标路径 =====
-        if (key == null) {
-            if (scale == 1.0F) {
-                super.submit(state, poseStack, collector, cameraState);
-                this.submitSurge(state, poseStack, collector, LIGHT_FULL);
-                return;
-            }
-            poseStack.pushPose();
-            poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
-            poseStack.scale(scale, scale, scale);
+        if (scale == 1.0F) {
             super.submit(state, poseStack, collector, cameraState);
             this.submitSurge(state, poseStack, collector, LIGHT_FULL);
-            poseStack.popPose();
             return;
         }
 
-        // ===== 有 3D 模型：画 Blockbench 建的那套几何 =====
-        //
-        // 模型坐标就是 4 单位（0.25 格），和碰撞箱一致 —— 不需要额外缩放。
-        // 唯一的缩放来自 ballScale（金球那种「一格内切球」要大一圈）。
-        BlockStateModelPart part = Ball3DModels.part(key);
-        if (part == null) {
-            // 模型没烘焙好（资源重载中途）→ 这一帧先不画，别让玩家看到紫黑方块
-            return;
-        }
         poseStack.pushPose();
-        if (scale != 1.0F) {
-            poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
-            poseStack.scale(scale, scale, scale);
-        }
-        collector.submitBlockModel(
-                poseStack,
-                Ball3DModels.renderType(key),
-                java.util.List.of(part),
-                new int[] { -1 },              // tintLayers：不染色
-                state.lightCoords,
-                net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
-                0);
-        // 潮涌环绕照旧套在外面
+        // 放大是围绕实体原点（脚下）做的，所以往上抬一点，免得大球有半个身子陷进地面
+        poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
+        poseStack.scale(scale, scale, scale);
+        super.submit(state, poseStack, collector, cameraState);
         this.submitSurge(state, poseStack, collector, LIGHT_FULL);
         poseStack.popPose();
     }
