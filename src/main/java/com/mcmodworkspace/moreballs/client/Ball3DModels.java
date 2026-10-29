@@ -1,6 +1,10 @@
 package com.mcmodworkspace.moreballs.client;
 
 import java.util.HashMap;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ModelEvent;
+import net.neoforged.neoforge.client.model.standalone.SimpleUnbakedStandaloneModel;
 import java.util.Map;
 import java.util.Set;
 
@@ -33,6 +37,7 @@ import net.neoforged.neoforge.client.model.standalone.StandaloneModelKey;
  * <p>几何完全一样（Blockbench 里那 44 个立方体），只有贴图不同 —— 所以生成 17 个
  * {@code models/item/ball3d_<key>.json}，一个个注册。加新球只要加一份 json + 这里加一个 key。</p>
  */
+@EventBusSubscriber(modid = com.mcmodworkspace.moreballs.MoreBalls.MOD_ID, value = net.neoforged.api.distmarker.Dist.CLIENT)
 public final class Ball3DModels {
 
     /** 全部有 3D 模型的球（顺序无所谓，但要和 models/item/ball3d_<key>.json 对得上） */
@@ -59,6 +64,23 @@ public final class Ball3DModels {
     }
 
     private Ball3DModels() {
+    }
+
+    /**
+     * 注册 17 个独立模型。
+     *
+     * <p>⚠️ 为什么不是「物品模型 + display_context 分流」那条路：
+     * 那条路要走 {@code ItemTransform.apply}，它里面有一层硬编码的 {@code translate(-0.5)}
+     * 居中（为占满 0~16 空间的模型准备），而我们的几何只占其中一小块 ——
+     * 补偿来补偿去始终有偏差，作者实测「静止时就看得出和碰撞箱中心不重合」。
+     * standalone 模型没有这一层：模型坐标写什么，世界坐标就是什么。</p>
+     */
+    @SubscribeEvent
+    public static void onRegisterStandalone(ModelEvent.RegisterStandalone event) {
+        for (String k : KEYS) {
+            event.register(MODELS.get(k), SimpleUnbakedStandaloneModel.simpleModelWrapper(
+                    Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + k)));
+        }
     }
 
 

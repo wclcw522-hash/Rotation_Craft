@@ -80,35 +80,52 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
     @Override
     public void submit(ThrownItemRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
                        CameraRenderState cameraState) {
-        // ===== 3D 模型由**物品模型定义**接管，这里只负责缩放和潮涌环绕 =====
-        //
-        // 演变过程（作者 2026-10-29 两轮反馈）：
-        //   ① 一开始走 NeoForge standalone 模型 + submitBlockModel，
-        //      结果球「黑漆漆的看不出来是啥球」—— 那条路拿不到正确的光照上下文。
-        //   ② 现在改成：`items/<key>_ball.json` 按 `display_context` 分流，
-        //      `ground`（正是 ThrownItemRenderer 用的上下文）指向 3D 模型，
-        //      其余上下文保持 2D 图标。
-        //
-        // 好处：
-        //   · 光照 / 遮罩 / 附魔光效全部由原版 `ItemStackRenderState` 接管，不可能偏暗
-        //   · 锤头（FlailHeadEntity）的 getItem() 返回内嵌球 ⇒ 自动也是 3D，贴图和球一致
-        //   · 物品栏仍然是 2D 图标，因为 gui 上下文没被 cases 覆盖 → 走 fallback
         float scale = (state instanceof BallRenderState ballState) ? ballState.ballScale : 1.0F;
+        String key = (state instanceof BallRenderState ballState) ? ballState.ball3dKey : null;
 
-        // 视觉滚动：先套上累积旋转（绕球心），再画模型 / 画潮涌
+        BlockStateModelPart part = (key == null) ? null : Ball3DModels.part(key);
+
+        // ===== 没有 3D 模型（组合球以外的情况 / 模型还没烘焙好）：走原版 2D 物品图标 =====
+        if (part == null) {
+            if (scale == 1.0F) {
+                super.submit(state, poseStack, collector, cameraState);
+            } else {
+                poseStack.pushPose();
+                poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
+                poseStack.scale(scale, scale, scale);
+                super.submit(state, poseStack, collector, cameraState);
+                poseStack.popPose();
+            }
+            this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+            return;
+        }
+
+        // ===== 3D 模型 =====
+        //
+        // 坐标链只有一层：模型 json 里写的就是世界坐标（x/z -2~2、y 0~4 单位 = 0~0.25 格），
+        // 几何中心正好在 y = 2 单位 = 0.125 格 = 碰撞箱中心。
+        // 不走 ItemTransform、没有 -0.5 格的居中夹层 —— 位置和旋转中心都不会再漂。
         poseStack.pushPose();
+
+        // 视觉滚动：绕碰撞箱中心转
         if (state instanceof BallRenderState rollState) {
             this.rollVisual.applyRoll(rollState.rollOrientation, rollState.rollPivotY, poseStack);
         }
 
-        if (scale == 1.0F) {
-            super.submit(state, poseStack, collector, cameraState);
-        } else {
+        if (scale != 1.0F) {
             poseStack.pushPose();
-            // 放大是围绕实体原点（脚下）做的，所以往上抬一点，免得大球有半个身子陷进地面
             poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
             poseStack.scale(scale, scale, scale);
-            super.submit(state, poseStack, collector, cameraState);
+        }
+        collector.submitBlockModel(
+                poseStack,
+                Ball3DModels.renderType(key),
+                java.util.List.of(part),
+                null,                                   // tintLayers：不染色
+                state.lightCoords,
+                net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
+                0);
+        if (scale != 1.0F) {
             poseStack.popPose();
         }
         this.submitSurge(state, poseStack, collector, LIGHT_FULL);

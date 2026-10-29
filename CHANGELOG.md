@@ -1,3 +1,50 @@
+## 1.2.0.40 — 绕开 ItemTransform：球模型改回 standalone 渲染
+
+### 转了一圈终于定位到夹层
+
+作者 2026-10-29 的判断是对的：
+
+> 「是不是模型的坐标中心不是模型的几何中心……感觉你用的是在球一个角上的坐标系原点」
+
+`1.2.0.33 ~ 1.2.0.39` 走的都是「物品模型 + `display_context` 分流」这条路，
+而那条路上有一层**不归我控制**的变换：
+
+```java
+// ItemTransform.apply —— 非 NO_TRANSFORM 分支，最后一行固定执行
+pose.translate(-0.5F, -0.5F, -0.5F);
+```
+
+这个 `-0.5` 格是为**占满 `0~16` 空间的模型**设计的（它假设几何中心在 `(8,8,8)`）。
+我们的几何只有 `4×4×4` 单位、中心在 `(0, 2, 0)` —— 不在那个假设上。
+于是我只能用 `display.translation` 去补偿，补偿永远差一点，表现就是作者说的
+「静止时就看得出和碰撞箱中心不重合」「滚动时偏心」。
+
+我核过 `translation` 的单位（源码 `mul(0.0625F)`，确实除以 16）、
+核过 `localTransform`（identity）、核过碰撞箱（`ThrowableProjectile` 默认 0.25）——
+全对，那个偏差就是这层 `-0.5` 与模型实际中心不匹配造成的。
+
+### 改法：独立烘焙模型，坐标只有一层
+
+改回 `ModelEvent.RegisterStandalone` + `submitBlockModel`：
+
+- 模型 json 坐标就是世界坐标：`x/z -2~2`、`y 0~4` 单位（= `0~0.25` 格）
+- 几何中心 `y = 2 单位 = 0.125 格` = 碰撞箱中心
+- **不经过 `ItemTransform`，没有 `-0.5` 夹层**
+- 旋转绕碰撞箱中心（`getBbHeight()/2`），与几何中心严格重合
+
+之前 standalone 那版「发黑」，这次把 `tintLayers` 从 `new int[]{-1}` 改成 `null`，
+RenderType 用 `itemCutout`。
+
+### 同步回退
+
+| 项 | 状态 |
+|---|---|
+| `models/item/ball3d_*.json` | 坐标回到 `-2~2 / 0~4`，**无 `display` 字段** |
+| `items/*_ball.json` | 恢复为纯 2D 图标（3D 只由渲染器画，不再走 `display_context`） |
+| `BallRenderer` | `submitBlockModel`，坐标一层 |
+| `Ball3DModels.onRegisterStandalone` | 恢复注册 |
+
+---
 ## 1.2.0.39 — 滚动中心改为直接从碰撞箱计算
 
 ### 按作者要求

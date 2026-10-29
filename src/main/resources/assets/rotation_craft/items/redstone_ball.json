@@ -1,26 +1,6 @@
 {
 	"model": {
-		"type": "minecraft:select",
-		"property": "minecraft:display_context",
-		"cases": [
-			{
-				"when": "ground",
-				"model": {
-					"type": "minecraft:model",
-					"model": "rotation_craft:item/ball3d_redstone"
-				}
-			},
-			{
-				"when": "fixed",
-				"model": {
-					"type": "minecraft:model",
-					"model": "rotation_craft:item/ball3d_redstone"
-				}
-			}
-		],
-		"fallback": {
-			"type": "minecraft:model",
-			"model": "rotation_craft:item/redstone_ball"
-		}
+		"type": "minecraft:model",
+		"model": "rotation_craft:item/redstone_ball"
 	}
 }
