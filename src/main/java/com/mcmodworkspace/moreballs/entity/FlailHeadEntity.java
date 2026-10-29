@@ -1028,7 +1028,6 @@ public class FlailHeadEntity extends BallProjectile {
                 -away.x / horizontal, -away.z / horizontal, source, this.profile().damage());
     }
 
-    @Override
     /**
      * 撞方块 —— <b>直接用球那一套</b>。
      *
@@ -1086,8 +1085,39 @@ public class FlailHeadEntity extends BallProjectile {
      *
      * <p>所以顺序固定为：<b>先按物品账本扣 → 再让球跑词条 → 最后把实体字段按物品账本重置</b>。</p>
      */
+    /**
+     * 蓄力（SPIN）期间不结算【尖啸】—— 作者 2026-10-29 报「回响流星锤蓄力期间一直触发特效并掉落尖啸球」。
+     *
+     * <p>根因：SPIN 状态下锤头位置每 tick 由 {@code spinPosition()} 算出再 {@code setPos}，
+     * 等于不停瞬移。而【尖啸】在球那边是「投出后第一刻就结算」——锤头照样跑 {@code super.tick()}，
+     * 于是每刻都从当前球心重新打一条 256 格的射线，特效和落点掉落物就刷屏了。</p>
+     */
+    @Override
+    protected boolean shriekAllowed() {
+        return this.stage() != Stage.SPIN;
+    }
+
+
+    @Override
     protected void onHit(HitResult hitResult) {
-        if (this.stage() == Stage.SPIN || this.stage() == Stage.RETURNING) {
+        if (this.stage() == Stage.SPIN) {
+            // ===== 蓄力中：只放行「碰生物」，方块碰撞整段跳过（作者 2026-10-29）=====
+            //
+            //   · 碰撞方块 —— 不结算弹射、不扣耐久、不触发尖啸。
+            //     蓄力时锤头绕人转，位置是公式算出来的，路径上的方块会被当成一次次撞击。
+            //   · 碰撞生物（掷出者除外）—— 照常生效，扫到怪一样能打。
+            //
+            // 之前这里是「SPIN 直接 return」，连打生物也一起关了，不符合作者要求。
+            if (hitResult instanceof net.minecraft.world.phys.EntityHitResult entityHit) {
+                net.minecraft.world.entity.Entity target = entityHit.getEntity();
+                if (target != this.getOwner()
+                        && target instanceof net.minecraft.world.entity.LivingEntity) {
+                    this.onHitEntity(entityHit);
+                }
+            }
+            return;
+        }
+        if (this.stage() == Stage.RETURNING) {
             return;
         }
         if (!(this.level() instanceof ServerLevel)) {

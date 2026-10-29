@@ -1,3 +1,64 @@
+## 1.2.0.41 — 修 3D 模型发黑 + 回响流星锤蓄力期间的【尖啸】
+
+### ① 3D 模型发黑
+
+`1.2.0.40` 切回 `submitBlockModel` 后球又黑了。原因有两个，都修了：
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| RenderType | `RenderTypes.itemCutout(tex)` —— 物品模型管线 | **`Sheets.cutoutBlockItemSheet()`** —— 方块模型管线 |
+| tintLayers | `null` | `new int[]{-1}`（`-1` = 不染色；`null` 会被当成 0 = 黑） |
+| lightCoords | 直接传 `state.lightCoords` | 传 0 时兜底成全亮 `0x00F000F0` |
+
+`BlockStateModelPart` 的 quads 是**方块格式**，必须配方块的 RenderType（读 block atlas），
+套物品/实体那两条管线颜色会被压成黑色 —— 这就是两版发黑的根因。
+
+### ② 回响流星锤蓄力期间触发【尖啸】
+
+作者反馈：蓄力时一直放特效、一直掉尖啸球。
+
+**根因**在 `BallPhysicsCore.ballTickPre()`：
+
+```java
+if (this.traitFired(TRAIT_SHRIEK) && this.level() instanceof ServerLevel shriekLevel) {
+    if (!this.shriekFired) {
+        this.shriekFired = true;
+        this.shriekWaveFrames = BallExtraTraits.shriek(this, shriekLevel, ...);
+    } ...
+}
+```
+
+【尖啸】是「投出后**第一刻**就结算」的设计。而 SPI​N（蓄力绕圈）状态下锤头照样跑 `super.tick()`，
+位置又是每 tick 由 `spinPosition()` 算出再 `setPos` —— 等于不停瞬移。
+于是尖啸每刻都从当前球心重新打一条 256 格的射线，特效和落点掉落物自然刷屏。
+
+**修法**：`BallPhysicsCore` 加一个钩子
+
+```java
+protected boolean shriekAllowed() { return true; }   // 球恒 true，行为不变
+```
+
+锤头覆写：
+
+```java
+@Override
+protected boolean shriekAllowed() {
+    return this.stage() != Stage.SPIN;   // 蓄力期间不结算尖啸
+}
+```
+
+### ③ 按作者要求调整 `onHit` 的 SPIN 分支
+
+之前是「SPIN 直接 return」—— 连打生物也一起关了。现在分开处理：
+
+| 命中类型 | 蓄力（SPIN）期间 |
+|---|---|
+| 碰撞**方块** | **整段跳过** —— 不结算弹射、不扣耐久、不触发尖啸 |
+| 碰撞**生物**（掷出者除外） | **照常生效**，扫到怪一样能打 |
+
+RETURNING 保持原来的全早退不变。
+
+---
 ## 1.2.0.40 — 绕开 ItemTransform：球模型改回 standalone 渲染
 
 ### 转了一圈终于定位到夹层

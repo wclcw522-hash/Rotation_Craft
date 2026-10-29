@@ -117,12 +117,15 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
             poseStack.scale(scale, scale, scale);
         }
+        // 光照兜底：state.lightCoords 在某些时机是 0（比如刚生成、区块光照还没算好），
+        // 传 0 进去整颗球会全黑。0 时退回全亮，宁可亮一点也不要点不着。
+        int light = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
         collector.submitBlockModel(
                 poseStack,
                 Ball3DModels.renderType(key),
                 java.util.List.of(part),
-                null,                                   // tintLayers：不染色
-                state.lightCoords,
+                new int[] { -1 },                       // tintLayers：-1 = 不染色（null 会被当成 0 = 黑）
+                light,
                 net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
                 0);
         if (scale != 1.0F) {

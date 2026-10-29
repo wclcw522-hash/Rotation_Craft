@@ -128,6 +128,9 @@ public final class Ball3DModels {
      * 套上去整体偏暗，贴图颜色出不来。{@code itemCutout} 才是给物品/方块模型用的那条管线。</p>
      */
     public static net.minecraft.client.renderer.rendertype.RenderType renderType(String key) {
-        return RenderTypes.itemCutout(TEXTURES.getOrDefault(key, TEXTURES.get("iron")));
+        // ⚠️ 方块模型必须用方块那套 RenderType（读 block atlas），不能用 entityCutout / itemCutout。
+        //    之前两版发黑就是选错了：那两条管线要求的是「实体模型 / 物品模型」的顶点格式与光照，
+        //    套到 BlockStateModelPart 的 quads 上颜色直接被压成黑。
+        return net.minecraft.client.renderer.Sheets.cutoutBlockItemSheet();
     }
 }

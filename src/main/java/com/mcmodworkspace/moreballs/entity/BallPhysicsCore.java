@@ -1440,6 +1440,15 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     /** 【尖啸】是否已经炸过 —— 一只球只炸一次（回收后再放出不该重复触发） */
     protected boolean shriekFired;
 
+    /**
+     * 本刻是否允许结算【尖啸】（球恒 true，锤头蓄力时覆写为 false）。
+     *
+     * @see #ballTickPre()
+     */
+    protected boolean shriekAllowed() {
+        return true;
+    }
+
     /** 【尖啸】落点扩散动画的剩余帧数；<= 0 表示不在播 */
     private int shriekWaveFrames;
 
@@ -1637,7 +1646,11 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         // 投出后的**第一刻**就结算：射线找终点 → 路径与落点两轮效果 → 球瞬移过去并停下。
         // 之后若干刻由球自己把落点那三道扩散音波逐帧画完。
         // 详细规格见 BallExtraTraits 的【尖啸】段。
-        if (this.traitFired(TRAIT_SHRIEK)
+        // ⚠️ `shriekAllowed()` 是给流星锤锤头留的开关（作者 2026-10-29）：
+        //    锤头蓄力时位置每 tick 由公式算出再 setPos，等于不停瞬移，
+        //    尖啸的轨迹射线会每刻重算一遍 ⇒ 特效刷屏 + 落点反复生成掉落物。
+        //    球永远返回 true，行为一个字不变。
+        if (this.shriekAllowed() && this.traitFired(TRAIT_SHRIEK)
                 && this.level() instanceof ServerLevel shriekLevel) {
             if (!this.shriekFired) {
                 this.shriekFired = true;
