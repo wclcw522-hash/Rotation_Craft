@@ -57,13 +57,8 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             ballState.ballScale = BallBehavior.profileFor(entity.getItem()).entityScale();
             // 这个球有没有 3D 模型（作者 2026-10-29）。null = 退回原版 2D 物品图标路径。
             ballState.ball3dKey = Ball3DModels.keyOf(entity);
-            // 视觉滚动：按这一帧的位移反算累积旋转角
-            float[] roll = this.rollVisual.update(entity);
-            if (roll != null) {
-                ballState.rollAngle = roll[0];
-                ballState.rollAxisX = roll[1];
-                ballState.rollAxisZ = roll[2];
-            }
+            // 视觉滚动：按这一帧的位移把增量旋转左乘到累积姿态上
+            this.rollVisual.update(entity, ballState.rollOrientation);
             ballState.tidalSurge = entity.isTidalSurge();
             ballState.surgeTicks = entity.tickCount;
             // 【潮涌】环绕要朝向**速度方向**（作者 2026-10-13 第三轮反馈：
@@ -99,8 +94,7 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         // 视觉滚动：先套上累积旋转（绕球心），再画模型 / 画潮涌
         poseStack.pushPose();
         if (state instanceof BallRenderState rollState) {
-            this.rollVisual.applyRoll(rollState.rollAngle, rollState.rollAxisX, rollState.rollAxisZ,
-                    poseStack);
+            this.rollVisual.applyRoll(rollState.rollOrientation, poseStack);
         }
 
         if (scale == 1.0F) {

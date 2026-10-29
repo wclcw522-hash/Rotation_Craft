@@ -11,14 +11,14 @@ import net.minecraft.client.renderer.entity.state.ThrownItemRenderState;
  */
 public class BallRenderState extends ThrownItemRenderState {
 
-    /** 视觉滚动 —— 累积旋转角（弧度），由 {@link BallRollVisual} 每帧更新 */
-    public float rollAngle = 0.0F;
-
-    /** 视觉滚动 —— 旋转轴的水平分量 x（轴始终在水平面内） */
-    public float rollAxisX = 0.0F;
-
-    /** 视觉滚动 —— 旋转轴的水平分量 z */
-    public float rollAxisZ = 1.0F;
+    /**
+     * 视觉滚动 —— 累积姿态（四元数），由 {@link BallRollVisual} 每帧更新。
+     *
+     * <p>为什么是四元数而不是「角度 + 轴」：球转向时滚动轴会变，
+     * 而旋转的复合不满足交换律 —— 用「最新的轴 + 累积的角度」去还原姿态，
+     * 一转向就彻底乱掉（作者 2026-10-29 报「轴乱到天上去了」）。</p>
+     */
+    public final org.joml.Quaternionf rollOrientation = new org.joml.Quaternionf();
 
     /** 这个球的渲染尺寸倍率；1.0 就是普通球 */
     public float ballScale = 1.0F;
