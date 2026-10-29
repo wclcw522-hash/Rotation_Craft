@@ -26,6 +26,9 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
     /** 环绕层用全亮 —— 它在水下，不该被头顶的方块阴影压暗 */
     private static final int LIGHT_FULL = 0x00F000F0;
 
+    /** 视觉滚动（作者 2026-10-29）—— 按位移反算旋转，见 {@link BallRollVisual} */
+    private final BallRollVisual rollVisual = new BallRollVisual();
+
     /** 【潮涌】的环绕模型 —— 层定义直接用原版注册好的那个，懒 bake 一次 */
     private TidalSurgeModel surgeModel;
 
@@ -54,6 +57,13 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             ballState.ballScale = BallBehavior.profileFor(entity.getItem()).entityScale();
             // 这个球有没有 3D 模型（作者 2026-10-29）。null = 退回原版 2D 物品图标路径。
             ballState.ball3dKey = Ball3DModels.keyOf(entity);
+            // 视觉滚动：按这一帧的位移反算累积旋转角
+            float[] roll = this.rollVisual.update(entity);
+            if (roll != null) {
+                ballState.rollAngle = roll[0];
+                ballState.rollAxisX = roll[1];
+                ballState.rollAxisZ = roll[2];
+            }
             ballState.tidalSurge = entity.isTidalSurge();
             ballState.surgeTicks = entity.tickCount;
             // 【潮涌】环绕要朝向**速度方向**（作者 2026-10-13 第三轮反馈：
@@ -86,17 +96,23 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         //   · 物品栏仍然是 2D 图标，因为 gui 上下文没被 cases 覆盖 → 走 fallback
         float scale = (state instanceof BallRenderState ballState) ? ballState.ballScale : 1.0F;
 
-        if (scale == 1.0F) {
-            super.submit(state, poseStack, collector, cameraState);
-            this.submitSurge(state, poseStack, collector, LIGHT_FULL);
-            return;
+        // 视觉滚动：先套上累积旋转（绕球心），再画模型 / 画潮涌
+        poseStack.pushPose();
+        if (state instanceof BallRenderState rollState) {
+            this.rollVisual.applyRoll(rollState.rollAngle, rollState.rollAxisX, rollState.rollAxisZ,
+                    poseStack);
         }
 
-        poseStack.pushPose();
-        // 放大是围绕实体原点（脚下）做的，所以往上抬一点，免得大球有半个身子陷进地面
-        poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
-        poseStack.scale(scale, scale, scale);
-        super.submit(state, poseStack, collector, cameraState);
+        if (scale == 1.0F) {
+            super.submit(state, poseStack, collector, cameraState);
+        } else {
+            poseStack.pushPose();
+            // 放大是围绕实体原点（脚下）做的，所以往上抬一点，免得大球有半个身子陷进地面
+            poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
+            poseStack.scale(scale, scale, scale);
+            super.submit(state, poseStack, collector, cameraState);
+            poseStack.popPose();
+        }
         this.submitSurge(state, poseStack, collector, LIGHT_FULL);
         poseStack.popPose();
     }

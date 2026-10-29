@@ -11,6 +11,15 @@ import net.minecraft.client.renderer.entity.state.ThrownItemRenderState;
  */
 public class BallRenderState extends ThrownItemRenderState {
 
+    /** 视觉滚动 —— 累积旋转角（弧度），由 {@link BallRollVisual} 每帧更新 */
+    public float rollAngle = 0.0F;
+
+    /** 视觉滚动 —— 旋转轴的水平分量 x（轴始终在水平面内） */
+    public float rollAxisX = 0.0F;
+
+    /** 视觉滚动 —— 旋转轴的水平分量 z */
+    public float rollAxisZ = 1.0F;
+
     /** 这个球的渲染尺寸倍率；1.0 就是普通球 */
     public float ballScale = 1.0F;
 

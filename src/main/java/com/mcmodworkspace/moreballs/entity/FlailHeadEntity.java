@@ -120,6 +120,14 @@ public class FlailHeadEntity extends BallProjectile {
     /** 到线长上限时给的回弹速度 */
     private static final double SNAP_BACK_SPEED = 0.35D;
 
+    /**
+     * 绳子绷紧时朝掷出者施加的张力（每 tick 的速度增量，格/刻）。
+     *
+     * <p>只影响「越过线长之后」的表现：值太大会把锤头暴力拽回来像弹簧，
+     * 太小则绷紧感不足。0.06 配合径向分量被完全吃掉，观感是锤头贴着球面绕着人转。</p>
+     */
+    private static final double ROPE_TENSION = 0.06D;
+
     /** 环绕角度（弧度） */
     private float spinAngle;
 
@@ -352,7 +360,13 @@ public class FlailHeadEntity extends BallProjectile {
                 super.tick();
                 tickReturning();
             }
-            case FLYING -> super.tick();   // 球的完整 tick
+            case FLYING -> {
+                super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）
+                // ⚠️ tickFlying() 之前**从来没被调用过**（只有定义，是死代码）——
+                //    所以 lineLength 在飞行阶段不更新、线长上限和自动收线全都不生效。
+                //    作者 2026-10-29 要做绳索物理时才发现。
+                tickFlying();
+            }
         }
     }
 
@@ -528,6 +542,35 @@ public class FlailHeadEntity extends BallProjectile {
         if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
             this.beginReturning((net.minecraft.world.entity.LivingEntity) this.getOwner());
             this.setRetrieving(true);
+        }
+
+        // ===== ③ 绳子的物理约束（作者 2026-10-29：「要有被绳子拽着的物理效果」）=====
+        //
+        // 绳子**不可拉伸**。锤头一旦飞到线长之外，真实的反应是：
+        //   · 位置被拽回到「以掷出者为球心、半径 = 线长」的球面上
+        //   · 速度里「朝外」的分量被绳子吃掉（否则等于绳子被拉长）
+        //   · 「切向」分量保留 ⇒ 锤头自然开始绕着掷出者摆动（链球）
+        //
+        // 不这么做的后果就是原来那样：绳子只是渲染时画的一根线，
+        // 锤头可以无视它一直往外飞，看起来像线在跟着瞬移。
+        if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity ropeOwner) {
+            Vec3 anchor = handAnchor(ropeOwner);
+            Vec3 delta = this.position().subtract(anchor);
+            double distance = delta.length();
+            if (distance > MAX_LINE && distance > 1.0E-4D) {
+                Vec3 out = delta.scale(1.0D / distance);          // 掷出者 → 锤头
+                Vec3 clamped = anchor.add(out.scale(MAX_LINE));
+                this.setPos(clamped.x, clamped.y, clamped.z);
+
+                Vec3 velocity = this.getDeltaMovement();
+                double radialOut = velocity.dot(out);
+                if (radialOut > 0.0D) {
+                    velocity = velocity.subtract(out.scale(radialOut));   // 绳子吃掉向外的速度
+                }
+                // 再补一点朝内的张力，让「绷紧」有手感，而不是纯硬钳位
+                velocity = velocity.add(out.scale(-ROPE_TENSION));
+                this.setDeltaMovement(velocity);
+            }
         }
     }
 
