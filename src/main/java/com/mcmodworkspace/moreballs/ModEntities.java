@@ -71,7 +71,7 @@ public final class ModEntities {
     public static final DeferredHolder<EntityType<?>, EntityType<BallProjectile>> BALL =
             ENTITIES.register("ball", () -> EntityType.Builder
                     .<BallProjectile>of(BallProjectile::new, MobCategory.MISC)
-                    .sized(0.25F, 0.25F)
+                    .sized(0.5F, 0.5F)
                     .clientTrackingRange(4)
                     .updateInterval(10)
                     .build(ResourceKey.create(Registries.ENTITY_TYPE,

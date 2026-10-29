@@ -40,6 +40,18 @@ import net.neoforged.neoforge.client.model.standalone.StandaloneModelKey;
 @EventBusSubscriber(modid = com.mcmodworkspace.moreballs.MoreBalls.MOD_ID, value = net.neoforged.api.distmarker.Dist.CLIENT)
 public final class Ball3DModels {
 
+    /**
+     * <b>模型几何的半高（格）</b> —— 滚动旋转的轴心。
+     *
+     * <p>模型画在 <b>0~8 单位</b>（0.5 格直径）的盒子里，几何中心在 `y = 4 单位 = 0.25 格`。
+     * ⚠️ 这个值**不等于碰撞箱中心**（碰撞箱仍是 0.25 格高，中心 0.125）——
+     * 旋转必须绕模型自己的中心，否则球会绕它下方的点甩。</p>
+     */
+    public static final float MODEL_HALF_HEIGHT = 0.25F;
+
+    /** 模型几何的半宽（格）= 滚动半径，用于把位移换算成滚动角度 `Δθ = Δs / r` */
+    public static final float MODEL_HALF_WIDTH = 0.25F;
+
     /** 全部有 3D 模型的球（顺序无所谓，但要和 models/item/ball3d_<key>.json 对得上） */
     public static final String[] KEYS = {
             "wooden", "cobblestone", "iron", "gold", "hollow_iron", "amethyst",

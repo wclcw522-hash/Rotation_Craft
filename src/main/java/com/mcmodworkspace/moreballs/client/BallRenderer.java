@@ -57,11 +57,16 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             ballState.ballScale = BallBehavior.profileFor(entity.getItem()).entityScale();
             // 这个球有没有 3D 模型（作者 2026-10-29）。null = 退回原版 2D 物品图标路径。
             ballState.ball3dKey = Ball3DModels.keyOf(entity);
-            // 视觉滚动：旋转中心和半径都直接取碰撞箱的几何量
-            //   中心 = 碰撞箱高 / 2（作者要求「滚动中心和碰撞箱中心重合」）
-            //   半径 = 碰撞箱宽 / 2（用于 Δθ = Δs / r）
-            ballState.rollPivotY = (float) (entity.getBbHeight() * 0.5D);
-            ballState.rollRadius = (float) (entity.getBbWidth() * 0.5D);
+            // 视觉滚动：中心/半径取**模型几何**的尺寸，不是碰撞箱。
+            //
+            // 作者 2026-10-29 重绘模型后，球直径是 0.5 格（8 单位），
+            // 而碰撞箱仍是 0.25 格 —— 两者不再相等。旋转必须绕**模型几何中心**，
+            // 否则球会绕自己下方 0.125 格那个点甩，看起来就是偏心。
+            //
+            //   模型 y: 0~8 单位 ⇒ 几何中心 y = 4 单位 = 0.25 格
+            //   模型直径 8 单位 ⇒ 滚动半径 = 4 单位 = 0.25 格
+            ballState.rollPivotY = Ball3DModels.MODEL_HALF_HEIGHT;
+            ballState.rollRadius = Ball3DModels.MODEL_HALF_WIDTH;
             this.rollVisual.update(entity, ballState.rollRadius, ballState.rollOrientation);
             ballState.tidalSurge = entity.isTidalSurge();
             ballState.surgeTicks = entity.tickCount;
