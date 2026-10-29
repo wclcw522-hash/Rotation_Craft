@@ -94,24 +94,16 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
         //    而球自己的碰撞箱是 0.25，锤头 0.2×2.5 = 0.5，**比球整整大一倍**。
         //    `ThrownItemRenderer` 本来就是按实体尺寸画物品模型的，
         //    保持 1:1 就对了：锤头 0.2 比球 0.25 略小一点，观感正好。
-        String key = (state instanceof FlailHeadRenderState flailState) ? flailState.ball3dKey : null;
-        if (key != null) {
-            // ===== 有 3D 模型：画 Blockbench 那套几何（和球实体用的是同一份）=====
-            BlockStateModelPart part = Ball3DModels.part(key);
-            if (part != null) {
-                collector.submitBlockModel(
-                        poseStack,
-                        Ball3DModels.renderType(key),
-                        java.util.List.of(part),
-                        new int[] { -1 },
-                        state.lightCoords,
-                        net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
-                        0);
-            }
-        } else {
-            // 没有 3D 模型（组合球等）→ 退回原版 2D 物品图标
-            super.submit(state, poseStack, collector, cameraState);
-        }
+        // ===== 锤头**不用 3D 模型**，一律走原版物品图标（作者 2026-10-29 实测后回退）=====
+        //
+        // 1.2.0.31 我给锤头也接了 3D 模型，结果作者反馈「回收后锤头消失、无法再次掷出」——
+        // 逻辑侧（FlailCastHandler / shatter / finishReturn）全都没动过，是渲染这条支路引入的。
+        //
+        // 而锤头本身只有 0.2 格（3.2 单位），3D 化在屏幕上根本看不出差别，
+        // 却要承担「渲染分支写错就影响可玩性」的风险。**不值得**，退回 2D。
+        //
+        // 球实体（BallRenderer）那边才是真正需要 3D 的地方，那里保持不动。
+        super.submit(state, poseStack, collector, cameraState);
 
         if (!(state instanceof FlailHeadRenderState flailState) || !flailState.hasLine) {
             return;

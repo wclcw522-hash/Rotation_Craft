@@ -109,8 +109,15 @@ public final class Ball3DModels {
         return Minecraft.getInstance().getModelManager().getStandaloneModel(k);
     }
 
-    /** 该球 3D 模型用的 RenderType（按贴图建，带 alpha 裁剪） */
+    /**
+     * 该球 3D 模型用的 RenderType（带 alpha 裁剪，空心球要看得出镂空）。
+     *
+     * <p>⚠️ 用 {@code itemCutout} 而不是 {@code entityCutout}（作者 2026-10-29：「黑漆漆的看不出来是啥球」）。
+     * 我们的几何是「方块模型那一套 quads」（{@link BlockStateModelPart}），
+     * 而 {@code entityCutout} 是按**实体模型的法线**做漫反射的 —— 两者不是同一套光照，
+     * 套上去整体偏暗，贴图颜色出不来。{@code itemCutout} 才是给物品/方块模型用的那条管线。</p>
+     */
     public static net.minecraft.client.renderer.rendertype.RenderType renderType(String key) {
-        return RenderTypes.entityCutout(TEXTURES.getOrDefault(key, TEXTURES.get("iron")));
+        return RenderTypes.itemCutout(TEXTURES.getOrDefault(key, TEXTURES.get("iron")));
     }
 }
