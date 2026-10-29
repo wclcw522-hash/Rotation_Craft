@@ -351,20 +351,30 @@ public class FlailHeadEntity extends BallProjectile {
         //   客户端插值靠它算「这一帧该画在哪」。不更新就一直拿旧值插值，画面表现就是抽搐。
         //
         //   顺序也重要：先 `super.tick()` 再 `setPos` 覆盖位置 —— 反过来会被物理改掉。
+        // ⚠️⚠️ **SPIN / RETURNING 两段必须关掉方块碰撞**（作者 2026-10-30：
+        //   「收到脚边时会变得非常费劲，还会卡在方块上」）。
+        //
+        //   这两段的位置本来是每 tick 用公式/setPos 直接摆放的，但 super.tick() 里
+        //   跑的是球的完整物理 —— 会先做一遍方块碰撞解算把锤头推到方块表面，
+        //   再由 tickReturning 的 setPos 拽回来，两者每 tick 对着拉一次：
+        //   表现就是「越靠近人越吃力」+「贴着方块抖动/卡住」。
+        //
+        //   noPhysics 只跳过方块碰撞，xo/yo/zo 的更新照旧（客户端插值不受影响）。
+        //   FLYING 阶段必须恢复物理 —— 那是真正的投掷弹道，要撞墙要打生物。
         switch (this.stage()) {
             case SPIN -> {
+                this.noPhysics = true;
                 super.tick();
                 tickSpin();
             }
             case RETURNING -> {
+                this.noPhysics = true;
                 super.tick();
                 tickReturning();
             }
             case FLYING -> {
+                this.noPhysics = false;
                 super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）
-                // ⚠️ tickFlying() 之前**从来没被调用过**（只有定义，是死代码）——
-                //    所以 lineLength 在飞行阶段不更新、线长上限和自动收线全都不生效。
-                //    作者 2026-10-29 要做绳索物理时才发现。
                 tickFlying();
             }
         }
@@ -798,7 +808,7 @@ public class FlailHeadEntity extends BallProjectile {
             ItemStack h = inventory.getItem(slot);
             if (FlailItem.isFlail(h) && FlailItem.isCasting(h)) {
                 FlailItem.markRetrieving(h, false);
-                FlailItem.markRecovered(h, true);
+                FlailItem.markRecovered(h, false);
                 FlailItem.setCasting(h, false);
                 touched = true;
             }
@@ -806,7 +816,7 @@ public class FlailHeadEntity extends BallProjectile {
         ItemStack off = p.getOffhandItem();
         if (FlailItem.isFlail(off) && FlailItem.isCasting(off)) {
             FlailItem.markRetrieving(off, false);
-            FlailItem.markRecovered(off, true);
+            FlailItem.markRecovered(off, false);
             FlailItem.setCasting(off, false);
             touched = true;
         }

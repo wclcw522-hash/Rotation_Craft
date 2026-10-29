@@ -1,3 +1,94 @@
+## 1.2.0.47 — 完整代码遍历后重做三个 bug
+
+这版是逐行读完全部相关文件后改的，不再靠推断。遍历范围：
+`FlailItem`（667 行）、`FlailCastHandler`（155 行）、`FlailHeadEntity`（1193 行）、
+`BallPhysicsCore` 的 tick/onHit、`items/flail.json`、全部 `flail_*` 模型、两个渲染器。
+
+### ① 流星锤回收后「只剩线 + 没法再扔」
+
+查到了**两个各自独立**的原因。
+
+**原因 A：`RECOVERED` 标记被设反了**
+
+`FlailHeadEntity.clearFlailFlags`（L811 / L819）：
+
+```java
+FlailItem.markRecovered(h, true);     // ← 设成 true
+```
+
+而 `FlailItem.clearCastingFlags`（L656）是：
+
+```java
+markRecovered(s, false);              // ← 清除
+```
+
+两个「清理」方法行为相反。`clearFlailFlags` 每次跑都把 `RECOVERED` 置 true，
+于是 `FlailItem.use()` 里这一行：
+
+```java
+if (isRecovered(stack) && player.isUsingItem()) {
+    return InteractionResult.CONSUME;      // 直接吞掉这次右键
+}
+```
+
+在玩家还按着右键时把蓄力请求吃掉 ⇒ **「没法再扔出去」**。
+
+**修**：两处 `markRecovered(..., true)` 全部改成 `false`。
+
+**原因 B：组件改了但客户端不知道**
+
+`stack.remove(FLAIL_CASTING)` 改的是**物品组件**，而 MC 的物品栏同步按「整格内容变化」触发，
+服务端不会因此发包 ⇒ 客户端继续按旧的 `FLAIL_CASTING=true` 渲染 `flail_string_only`
+（纯线）⇒ **「只剩线」**。
+
+**修**：`clearFlailFlags` 末尾强制同步
+
+```java
+if (p instanceof ServerPlayer sp) {
+    sp.containerMenu.broadcastChanges();
+    sp.getInventory().setChanged();
+}
+```
+
+`FlailCastHandler` 那条兜底清理也加同步，并用 `FlailItem.hasCastingFlag(player)` 守卫，
+只在真有残留时才清 + 广播。
+
+### ② 锤头「收到脚边很费劲、卡在方块上」
+
+`FlailHeadEntity.tick()` 的三态分支：
+
+```java
+case RETURNING -> {
+    super.tick();          // ← 球的完整物理，含方块碰撞解算
+    tickReturning();       // ← 然后 setPos 覆盖位置
+}
+```
+
+`super.tick()` 先把锤头推到方块表面，`tickReturning()` 的 `setPos` 又把它拽回原位，
+两者每 tick 对着拉一次 —— 表现就是**越靠近人越吃力**，以及**贴着方块抖动/卡住**。
+
+**修**：SPIN / RETURNING 两段设 `noPhysics = true`（只跳过方块碰撞，`xo/yo/zo` 更新照旧，
+不影响客户端插值）；FLYING 恢复 `noPhysics = false`，那边是真弹道，要撞墙要打生物。
+
+### ③ 组合球「偏心 + 乱」
+
+**偏心**：分片模型 `ball3d_<key>_q<q>` 走的是**物品模型的 composite**，会经过
+
+```java
+ItemTransform.apply → 最后一行固定 translate(-0.5F, -0.5F, -0.5F)   // 减 8 单位
+```
+
+而几何是 `x/z -4~4、y 0~8`，不补 `+8` 就被整体挪到 `(-12~-4, -8~0)` ⇒ 偏心。
+
+整球模型走 standalone（不经过 `ItemTransform`），所以它们不需要 display —— 这就是
+为什么球没问题、组合球有问题。
+
+**修**：80 个分片模型全部补 `display.translation [8,8,8]`。
+
+**「乱」**：上一版让跨象限的面同时进入多层几何 ⇒ 同一位置画两遍。已改为按面 UV 中心
+归属唯一象限（180 面全部分配、无复制）。
+
+---
 ## 1.2.0.46 — 流星锤客户端同步、绳索物理、组合球象限归属
 
 ### ① 流星锤回收后「只剩线 + 无法再扔」的真正原因

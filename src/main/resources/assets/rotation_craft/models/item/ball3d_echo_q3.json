@@ -496,5 +496,143 @@
 				}
 			}
 		}
-	]
+	],
+	"display": {
+		"gui": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"ground": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"fixed": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"head": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"thirdperson_righthand": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"thirdperson_lefthand": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"firstperson_righthand": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		},
+		"firstperson_lefthand": {
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"translation": [
+				8,
+				8,
+				8
+			],
+			"scale": [
+				1,
+				1,
+				1
+			]
+		}
+	}
 }
