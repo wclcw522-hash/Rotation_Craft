@@ -20,6 +20,17 @@ public class BallRenderState extends ThrownItemRenderState {
      */
     public final org.joml.Quaternionf rollOrientation = new org.joml.Quaternionf();
 
+    /**
+     * 滚动旋转中心（格）—— **碰撞箱中心**，即 {@code 碰撞箱高度 / 2}。
+     *
+     * <p>作者 2026-10-29：「直接让滚动中心和碰撞箱中心重合」。所以这个值不写死，
+     * 每次抽取渲染状态时按实体当前碰撞箱重算 —— 碰撞箱将来改了，旋转中心自动跟着改。</p>
+     */
+    public float rollPivotY = 0.125F;
+
+    /** 滚动半径（格）= 碰撞箱宽 / 2，用于把位移换算成滚动角度 */
+    public float rollRadius = 0.125F;
+
     /** 这个球的渲染尺寸倍率；1.0 就是普通球 */
     public float ballScale = 1.0F;
 

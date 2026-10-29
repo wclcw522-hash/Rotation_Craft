@@ -57,8 +57,12 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             ballState.ballScale = BallBehavior.profileFor(entity.getItem()).entityScale();
             // 这个球有没有 3D 模型（作者 2026-10-29）。null = 退回原版 2D 物品图标路径。
             ballState.ball3dKey = Ball3DModels.keyOf(entity);
-            // 视觉滚动：按这一帧的位移把增量旋转左乘到累积姿态上
-            this.rollVisual.update(entity, ballState.rollOrientation);
+            // 视觉滚动：旋转中心和半径都直接取碰撞箱的几何量
+            //   中心 = 碰撞箱高 / 2（作者要求「滚动中心和碰撞箱中心重合」）
+            //   半径 = 碰撞箱宽 / 2（用于 Δθ = Δs / r）
+            ballState.rollPivotY = (float) (entity.getBbHeight() * 0.5D);
+            ballState.rollRadius = (float) (entity.getBbWidth() * 0.5D);
+            this.rollVisual.update(entity, ballState.rollRadius, ballState.rollOrientation);
             ballState.tidalSurge = entity.isTidalSurge();
             ballState.surgeTicks = entity.tickCount;
             // 【潮涌】环绕要朝向**速度方向**（作者 2026-10-13 第三轮反馈：
@@ -94,7 +98,7 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         // 视觉滚动：先套上累积旋转（绕球心），再画模型 / 画潮涌
         poseStack.pushPose();
         if (state instanceof BallRenderState rollState) {
-            this.rollVisual.applyRoll(rollState.rollOrientation, poseStack);
+            this.rollVisual.applyRoll(rollState.rollOrientation, rollState.rollPivotY, poseStack);
         }
 
         if (scale == 1.0F) {

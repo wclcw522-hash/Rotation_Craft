@@ -48,8 +48,14 @@ import org.joml.Quaternionf;
  */
 final class BallRollVisual {
 
-    /** 球半径（格）—— 碰撞箱 0.25，半径取一半 */
-    static final float RADIUS = 0.125F;
+    /**
+     * 兜底半径（格）—— 正常路径一律用「碰撞箱高的一半」，这个值只在拿不到实体尺寸时用。
+     *
+     * <p>⚠️ 别把旋转中心/半径硬编码成常量：作者 2026-10-29 明确要求
+     * 「直接让滚动中心和碰撞箱中心重合」—— 那就得**从碰撞箱算**，
+     * 而不是从一个我以为对的数字推。</p>
+     */
+    static final float FALLBACK_RADIUS = 0.125F;
 
     /** 一帧位移小于这个值就当没动（避免静止时抖动累积成缓慢自转） */
     private static final double MOVE_EPSILON = 1.0E-4D;
@@ -66,7 +72,7 @@ final class BallRollVisual {
     /**
      * 每帧更新一次累积姿态，结果写进 {@code out}。
      */
-    void update(BallProjectile entity, Quaternionf out) {
+    void update(BallProjectile entity, float radius, Quaternionf out) {
         int id = entity.getId();
         Vec3 now = entity.position();
         Vec3 last = this.lastPositions.put(id, now);
@@ -94,7 +100,7 @@ final class BallRollVisual {
         ax /= len;
         az /= len;
 
-        float delta = (float) (horizontal / RADIUS);   // 这一帧转过的弧角
+        float delta = (float) (horizontal / Math.max(1.0E-4F, radius));   // 这一帧转过的弧角
 
         // 关键：只把「这一帧的增量」左乘上去，而不是替换轴
         this.scratch.rotationAxis(delta, ax, 0.0F, az);
@@ -109,10 +115,10 @@ final class BallRollVisual {
      * <p>⚠️ 旋转必须绕<b>球心</b>做，而实体的渲染原点在<b>脚下</b> —— 所以先抬到球心、
      * 转、再落回去。少了这两下，球会绕着脚底打转（像被钉在地上转的风车）。</p>
      */
-    void applyRoll(Quaternionf orientation, PoseStack poseStack) {
-        poseStack.translate(0.0F, RADIUS, 0.0F);
+    void applyRoll(Quaternionf orientation, float pivotY, PoseStack poseStack) {
+        poseStack.translate(0.0F, pivotY, 0.0F);
         poseStack.mulPose(orientation);
-        poseStack.translate(0.0F, -RADIUS, 0.0F);
+        poseStack.translate(0.0F, -pivotY, 0.0F);
     }
 
     /** 实体没了就清掉，别让表无限长 */
