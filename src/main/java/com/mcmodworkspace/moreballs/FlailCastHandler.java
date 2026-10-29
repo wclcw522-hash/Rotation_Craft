@@ -63,6 +63,19 @@ public final class FlailCastHandler {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
+
+        // ===== ① 先做与"手上拿什么"无关的清理（作者 2026-10-29 报「回收后锤头消失」）=====
+        //
+        //  原来的顺序是「先判 isFlail(held)，不是流星锤就 return」—— 于是主手一旦不是锤
+        //  （换手、被别的物品替换、把锤挪到背包），`FLAIL_CASTING` 就再也没人同步，
+        //  那把锤永久停在 `flail_string_only` 形态（纯线、没有球）。
+        //
+        //  现在把清理提到最前面：**只要场上没有锤头，就把整包流星锤的标记清干净**，
+        //  完全不依赖主手是什么。
+        if (FlailItem.findHead(player.level(), player) == null) {
+            FlailItem.clearCastingFlags(player);
+        }
+
         ItemStack held = player.getMainHandItem();
 
         // ===== 手里不是流星锤 =====
