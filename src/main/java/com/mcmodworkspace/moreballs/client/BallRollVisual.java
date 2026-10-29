@@ -84,10 +84,14 @@ final class BallRollVisual {
             return acc;
         }
 
-        // 滚动轴 = 上方向 × 前进方向 = (0,1,0) × (dx,0,dz) = (dz, 0, -dx)
-        // 取反成 (-dz, 0, dx) 是为了让前进方向与旋转方向符合右手法则（球朝前翻滚）
-        float ax = (float) -dz;
-        float az = (float) dx;
+        // 滚动轴 = 前进方向 × 上方向 = (dx,0,dz) × (0,1,0) = (-dz, 0, dx)
+        // 这样正向角速度对应的就是「球朝前进方向翻滚」。
+        //
+        // ⚠️ 这里我一开始把两个方向搞反了（写成 dz, 0, -dx），结果是球**倒着滚**：
+        //    位置往前、表面往后转，视觉上像在打滑，作者 2026-10-29 反馈「旋转中心偏了」
+        //    —— 其实中心是对的，是转向反了造成的错觉。
+        float ax = (float) dz;
+        float az = (float) -dx;
         float len = (float) Math.sqrt(ax * ax + az * az);
         ax /= len;
         az /= len;

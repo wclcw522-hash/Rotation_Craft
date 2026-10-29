@@ -710,17 +710,7 @@ public class FlailHeadEntity extends BallProjectile {
         // 注意这里取的是**主手**：回收完成时物品还在原格（扔出时它就没离开过），
         // 所以主手那把就是被回收的这把。
         if (owner instanceof Player p) {
-            for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
-                ItemStack h = p.getItemInHand(hand);
-                if (FlailItem.isFlail(h)) {
-                    FlailItem.markRetrieving(h, false);
-                    FlailItem.markRecovered(h, true);
-                    // ⚠️ 还要主动清 `FLAIL_CASTING`（作者 2026-10-19 报「第二次扔出绳子」）。
-                    //    那个标记本该由 `FlailCastHandler` 下一 tick 按 findHead 同步，
-                    //    但这一 tick 内它还残留 true ⇒ 贴图仍是纯线形态 ⇒ 看起来"又扔出一根绳"。
-                    FlailItem.setCasting(h, false);
-                }
-            }
+            clearFlailFlags(p);
         }
         this.discard();
     }
@@ -786,10 +776,50 @@ public class FlailHeadEntity extends BallProjectile {
         }
     }
 
+    /**
+     * <b>把玩家背包里所有流星锤的「扔出中 / 回收中」标记清干净</b>。
+     *
+     * <p>回收完成（{@link #finishReturn}）和超时归还（{@link #returnFlailAndDiscard}）
+     * 都必须调它。少调一次的表现就是作者反复报的那个：**手里那把锤只剩一根线、
+     * 看不到球，而且右键蓄力被拦、扔不出去**。</p>
+     *
+     * <p>扫**整个背包**而不是只查主副手 —— 玩家在飞行途中把锤挪到别的格子是很常见的操作，
+     * 只查手持位置会漏掉，那把锤就永久卡在纯线形态。</p>
+     */
+    private static void clearFlailFlags(Player p) {
+        var inventory = p.getInventory();
+        boolean touched = false;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack h = inventory.getItem(slot);
+            if (FlailItem.isFlail(h) && FlailItem.isCasting(h)) {
+                FlailItem.markRetrieving(h, false);
+                FlailItem.markRecovered(h, true);
+                FlailItem.setCasting(h, false);
+                touched = true;
+            }
+        }
+        ItemStack off = p.getOffhandItem();
+        if (FlailItem.isFlail(off) && FlailItem.isCasting(off)) {
+            FlailItem.markRetrieving(off, false);
+            FlailItem.markRecovered(off, true);
+            FlailItem.setCasting(off, false);
+            touched = true;
+        }
+        if (!touched) {
+            FlailItem.clearCastingFlags(p);
+        }
+    }
+
     private void returnFlailAndDiscard() {
         Entity owner = this.getOwner();
         if (owner instanceof LivingEntity living) {
             returnFlailToOwner(living);
+            // ⚠️ 超时/锤主没了这条路径原来**不清标记**（作者 2026-10-29 报「回收后锤头消失」）。
+            //    锤头被 discard 之后 findHead 返回 null，看似下一 tick 会自愈 ——
+            //    但那只在「主手正好是流星锤」时才成立；锤被挪走就永久停在纯线形态。
+            if (living instanceof Player p) {
+                clearFlailFlags(p);
+            }
         } else {
             ItemStack flail = this.flailStack().copy();
             if (!flail.isEmpty() && this.level() instanceof ServerLevel level) {

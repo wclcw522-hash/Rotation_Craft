@@ -65,8 +65,24 @@ public final class FlailCastHandler {
         }
         ItemStack held = player.getMainHandItem();
 
-        // ===== 手里不是流星锤：如果它还残留着「扔出中」标记，清掉 =====
+        // ===== 手里不是流星锤 =====
+        //
+        // ⚠️⚠️ 这里原来直接 `return`，于是有个死角（作者 2026-10-29 报「回收后锤头消失、
+        //   无法再次掷出」，和他早期报的「其他流星锤拿到手里就消失」是同一个根因）：
+        //
+        //   玩家扔出流星锤后**把另一把锤挪到手上 / 或把扔出的那把挪走** ⇒ 主手不再是
+        //   FlailItem ⇒ 这里提前返回 ⇒ `FLAIL_CASTING` 标记**永远不再被同步**。
+        //   于是那把锤永久停在「只有线、没有球」的形态，也就是玩家眼里的「锤头消失了」；
+        //   而且它还留着扔出中标记，右键蓄力被拦，表现为「无法再次掷出」。
+        //
+        //   修法：主手不是锤时，只要场上已经没有锤头，就把**整个背包**里所有流星锤的
+        //   三个状态标记清一遍。`clearCastingFlags` 只是 36 次 getItem + 标记比较，
+        //   而且只在「没有锤头」时走到，开销可以忽略。
         if (!FlailItem.isFlail(held)) {
+            FlailHeadEntity orphan = FlailItem.findHead(player.level(), player);
+            if (orphan == null) {
+                FlailItem.clearCastingFlags(player);
+            }
             return;
         }
 
