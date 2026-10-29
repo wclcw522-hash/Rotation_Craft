@@ -13,6 +13,16 @@ import net.minecraft.client.renderer.entity.state.ThrownItemRenderState;
  */
 public class FlailHeadRenderState extends ThrownItemRenderState {
 
+    /**
+     * 锤头该用的 3D 模型 key（作者 2026-10-29）。
+     *
+     * <p>锤头渲染的是「内嵌那颗球」的外观，所以 key 是从 {@code entity.getItem()} 推的
+     * —— {@code FlailHeadEntity} 覆写了 {@code getItem()} 让它返回内嵌球，正好对上。</p>
+     *
+     * <p>{@code null} 表示退回原版 2D 物品图标路径。</p>
+     */
+    public String ball3dKey = null;
+
     /** 是否该画线（掷出者不在了就不画） */
     public boolean hasLine;
 

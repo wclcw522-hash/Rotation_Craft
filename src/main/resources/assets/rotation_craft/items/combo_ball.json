@@ -1,583 +1,1173 @@
 {
-  "model": {
-    "type": "minecraft:composite",
-    "models": [
-      {
-        "type": "minecraft:select",
-        "property": "minecraft:component",
-        "component": "rotation_craft:combo_slot_1",
-        "cases": [
-          {
-            "when": 0,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_0_1"
-            }
-          },
-          {
-            "when": 1,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_1_1"
-            }
-          },
-          {
-            "when": 2,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_2_1"
-            }
-          },
-          {
-            "when": 3,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_3_1"
-            }
-          },
-          {
-            "when": 4,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_4_1"
-            }
-          },
-          {
-            "when": 5,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_5_1"
-            }
-          },
-          {
-            "when": 6,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_6_1"
-            }
-          },
-          {
-            "when": 7,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_7_1"
-            }
-          },
-          {
-            "when": 8,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_8_1"
-            }
-          },
-          {
-            "when": 9,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_9_1"
-            }
-          },
-          {
-            "when": 10,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_10_1"
-            }
-          },
-          {
-            "when": 11,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_11_1"
-            }
-          },
-          {
-            "when": 12,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_12_1"
-            }
-          },
-          {
-            "when": 13,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_13_1"
-            }
-          },
-          {
-            "when": 14,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_14_1"
-            }
-          },
-          {
-            "when": 15,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_15_1"
-            }
-          },
-          {
-            "when": 16,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_16_1"
-            }
-          },
-          {
-            "when": 17,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_17_1"
-            }
-          },
-          {
-            "when": 18,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_18_1"
-            }
-          }
-        ],
-        "fallback": {
-          "type": "minecraft:model",
-          "model": "rotation_craft:item/combo_piece_0_1"
-        }
-      },
-      {
-        "type": "minecraft:select",
-        "property": "minecraft:component",
-        "component": "rotation_craft:combo_slot_2",
-        "cases": [
-          {
-            "when": 0,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_0_2"
-            }
-          },
-          {
-            "when": 1,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_1_2"
-            }
-          },
-          {
-            "when": 2,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_2_2"
-            }
-          },
-          {
-            "when": 3,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_3_2"
-            }
-          },
-          {
-            "when": 4,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_4_2"
-            }
-          },
-          {
-            "when": 5,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_5_2"
-            }
-          },
-          {
-            "when": 6,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_6_2"
-            }
-          },
-          {
-            "when": 7,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_7_2"
-            }
-          },
-          {
-            "when": 8,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_8_2"
-            }
-          },
-          {
-            "when": 9,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_9_2"
-            }
-          },
-          {
-            "when": 10,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_10_2"
-            }
-          },
-          {
-            "when": 11,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_11_2"
-            }
-          },
-          {
-            "when": 12,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_12_2"
-            }
-          },
-          {
-            "when": 13,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_13_2"
-            }
-          },
-          {
-            "when": 14,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_14_2"
-            }
-          },
-          {
-            "when": 15,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_15_2"
-            }
-          },
-          {
-            "when": 16,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_16_2"
-            }
-          },
-          {
-            "when": 17,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_17_2"
-            }
-          },
-          {
-            "when": 18,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_18_2"
-            }
-          }
-        ],
-        "fallback": {
-          "type": "minecraft:model",
-          "model": "rotation_craft:item/combo_piece_0_2"
-        }
-      },
-      {
-        "type": "minecraft:select",
-        "property": "minecraft:component",
-        "component": "rotation_craft:combo_slot_3",
-        "cases": [
-          {
-            "when": 0,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_0_3"
-            }
-          },
-          {
-            "when": 1,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_1_3"
-            }
-          },
-          {
-            "when": 2,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_2_3"
-            }
-          },
-          {
-            "when": 3,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_3_3"
-            }
-          },
-          {
-            "when": 4,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_4_3"
-            }
-          },
-          {
-            "when": 5,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_5_3"
-            }
-          },
-          {
-            "when": 6,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_6_3"
-            }
-          },
-          {
-            "when": 7,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_7_3"
-            }
-          },
-          {
-            "when": 8,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_8_3"
-            }
-          },
-          {
-            "when": 9,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_9_3"
-            }
-          },
-          {
-            "when": 10,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_10_3"
-            }
-          },
-          {
-            "when": 11,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_11_3"
-            }
-          },
-          {
-            "when": 12,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_12_3"
-            }
-          },
-          {
-            "when": 13,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_13_3"
-            }
-          },
-          {
-            "when": 14,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_14_3"
-            }
-          },
-          {
-            "when": 15,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_15_3"
-            }
-          },
-          {
-            "when": 16,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_16_3"
-            }
-          },
-          {
-            "when": 17,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_17_3"
-            }
-          },
-          {
-            "when": 18,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_18_3"
-            }
-          }
-        ],
-        "fallback": {
-          "type": "minecraft:model",
-          "model": "rotation_craft:item/combo_piece_0_3"
-        }
-      },
-      {
-        "type": "minecraft:select",
-        "property": "minecraft:component",
-        "component": "rotation_craft:combo_slot_4",
-        "cases": [
-          {
-            "when": 0,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_0_4"
-            }
-          },
-          {
-            "when": 1,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_1_4"
-            }
-          },
-          {
-            "when": 2,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_2_4"
-            }
-          },
-          {
-            "when": 3,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_3_4"
-            }
-          },
-          {
-            "when": 4,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_4_4"
-            }
-          },
-          {
-            "when": 5,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_5_4"
-            }
-          },
-          {
-            "when": 6,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_6_4"
-            }
-          },
-          {
-            "when": 7,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_7_4"
-            }
-          },
-          {
-            "when": 8,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_8_4"
-            }
-          },
-          {
-            "when": 9,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_9_4"
-            }
-          },
-          {
-            "when": 10,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_10_4"
-            }
-          },
-          {
-            "when": 11,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_11_4"
-            }
-          },
-          {
-            "when": 12,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_12_4"
-            }
-          },
-          {
-            "when": 13,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_13_4"
-            }
-          },
-          {
-            "when": 14,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_14_4"
-            }
-          },
-          {
-            "when": 15,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_15_4"
-            }
-          },
-          {
-            "when": 16,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_16_4"
-            }
-          },
-          {
-            "when": 17,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_17_4"
-            }
-          },
-          {
-            "when": 18,
-            "model": {
-              "type": "minecraft:model",
-              "model": "rotation_craft:item/combo_piece_18_4"
-            }
-          }
-        ],
-        "fallback": {
-          "type": "minecraft:model",
-          "model": "rotation_craft:item/combo_piece_0_4"
-        }
-      }
-    ]
-  }
+	"model": {
+		"type": "minecraft:select",
+		"property": "minecraft:display_context",
+		"cases": [
+			{
+				"when": "gui",
+				"model": {
+					"type": "minecraft:composite",
+					"models": [
+						{
+							"type": "minecraft:select",
+							"property": "minecraft:component",
+							"component": "rotation_craft:combo_slot_1",
+							"cases": [
+								{
+									"when": 0,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_0_1"
+									}
+								},
+								{
+									"when": 1,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_1_1"
+									}
+								},
+								{
+									"when": 2,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_2_1"
+									}
+								},
+								{
+									"when": 3,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_3_1"
+									}
+								},
+								{
+									"when": 4,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_4_1"
+									}
+								},
+								{
+									"when": 5,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_5_1"
+									}
+								},
+								{
+									"when": 6,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_6_1"
+									}
+								},
+								{
+									"when": 7,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_7_1"
+									}
+								},
+								{
+									"when": 8,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_8_1"
+									}
+								},
+								{
+									"when": 9,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_9_1"
+									}
+								},
+								{
+									"when": 10,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_10_1"
+									}
+								},
+								{
+									"when": 11,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_11_1"
+									}
+								},
+								{
+									"when": 12,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_12_1"
+									}
+								},
+								{
+									"when": 13,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_13_1"
+									}
+								},
+								{
+									"when": 14,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_14_1"
+									}
+								},
+								{
+									"when": 15,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_15_1"
+									}
+								},
+								{
+									"when": 16,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_16_1"
+									}
+								},
+								{
+									"when": 17,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_17_1"
+									}
+								},
+								{
+									"when": 18,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_18_1"
+									}
+								}
+							],
+							"fallback": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/combo_piece_0_1"
+							}
+						},
+						{
+							"type": "minecraft:select",
+							"property": "minecraft:component",
+							"component": "rotation_craft:combo_slot_2",
+							"cases": [
+								{
+									"when": 0,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_0_2"
+									}
+								},
+								{
+									"when": 1,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_1_2"
+									}
+								},
+								{
+									"when": 2,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_2_2"
+									}
+								},
+								{
+									"when": 3,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_3_2"
+									}
+								},
+								{
+									"when": 4,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_4_2"
+									}
+								},
+								{
+									"when": 5,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_5_2"
+									}
+								},
+								{
+									"when": 6,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_6_2"
+									}
+								},
+								{
+									"when": 7,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_7_2"
+									}
+								},
+								{
+									"when": 8,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_8_2"
+									}
+								},
+								{
+									"when": 9,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_9_2"
+									}
+								},
+								{
+									"when": 10,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_10_2"
+									}
+								},
+								{
+									"when": 11,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_11_2"
+									}
+								},
+								{
+									"when": 12,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_12_2"
+									}
+								},
+								{
+									"when": 13,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_13_2"
+									}
+								},
+								{
+									"when": 14,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_14_2"
+									}
+								},
+								{
+									"when": 15,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_15_2"
+									}
+								},
+								{
+									"when": 16,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_16_2"
+									}
+								},
+								{
+									"when": 17,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_17_2"
+									}
+								},
+								{
+									"when": 18,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_18_2"
+									}
+								}
+							],
+							"fallback": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/combo_piece_0_2"
+							}
+						},
+						{
+							"type": "minecraft:select",
+							"property": "minecraft:component",
+							"component": "rotation_craft:combo_slot_3",
+							"cases": [
+								{
+									"when": 0,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_0_3"
+									}
+								},
+								{
+									"when": 1,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_1_3"
+									}
+								},
+								{
+									"when": 2,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_2_3"
+									}
+								},
+								{
+									"when": 3,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_3_3"
+									}
+								},
+								{
+									"when": 4,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_4_3"
+									}
+								},
+								{
+									"when": 5,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_5_3"
+									}
+								},
+								{
+									"when": 6,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_6_3"
+									}
+								},
+								{
+									"when": 7,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_7_3"
+									}
+								},
+								{
+									"when": 8,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_8_3"
+									}
+								},
+								{
+									"when": 9,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_9_3"
+									}
+								},
+								{
+									"when": 10,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_10_3"
+									}
+								},
+								{
+									"when": 11,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_11_3"
+									}
+								},
+								{
+									"when": 12,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_12_3"
+									}
+								},
+								{
+									"when": 13,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_13_3"
+									}
+								},
+								{
+									"when": 14,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_14_3"
+									}
+								},
+								{
+									"when": 15,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_15_3"
+									}
+								},
+								{
+									"when": 16,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_16_3"
+									}
+								},
+								{
+									"when": 17,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_17_3"
+									}
+								},
+								{
+									"when": 18,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_18_3"
+									}
+								}
+							],
+							"fallback": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/combo_piece_0_3"
+							}
+						},
+						{
+							"type": "minecraft:select",
+							"property": "minecraft:component",
+							"component": "rotation_craft:combo_slot_4",
+							"cases": [
+								{
+									"when": 0,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_0_4"
+									}
+								},
+								{
+									"when": 1,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_1_4"
+									}
+								},
+								{
+									"when": 2,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_2_4"
+									}
+								},
+								{
+									"when": 3,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_3_4"
+									}
+								},
+								{
+									"when": 4,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_4_4"
+									}
+								},
+								{
+									"when": 5,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_5_4"
+									}
+								},
+								{
+									"when": 6,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_6_4"
+									}
+								},
+								{
+									"when": 7,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_7_4"
+									}
+								},
+								{
+									"when": 8,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_8_4"
+									}
+								},
+								{
+									"when": 9,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_9_4"
+									}
+								},
+								{
+									"when": 10,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_10_4"
+									}
+								},
+								{
+									"when": 11,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_11_4"
+									}
+								},
+								{
+									"when": 12,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_12_4"
+									}
+								},
+								{
+									"when": 13,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_13_4"
+									}
+								},
+								{
+									"when": 14,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_14_4"
+									}
+								},
+								{
+									"when": 15,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_15_4"
+									}
+								},
+								{
+									"when": 16,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_16_4"
+									}
+								},
+								{
+									"when": 17,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_17_4"
+									}
+								},
+								{
+									"when": 18,
+									"model": {
+										"type": "minecraft:model",
+										"model": "rotation_craft:item/combo_piece_18_4"
+									}
+								}
+							],
+							"fallback": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/combo_piece_0_4"
+							}
+						}
+					]
+				}
+			}
+		],
+		"fallback": {
+			"type": "minecraft:composite",
+			"models": [
+				{
+					"type": "minecraft:select",
+					"property": "minecraft:component",
+					"component": "rotation_craft:combo_slot_1",
+					"cases": [
+						{
+							"when": 0,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_wooden_q1"
+							}
+						},
+						{
+							"when": 1,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_cobblestone_q1"
+							}
+						},
+						{
+							"when": 2,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_iron_q1"
+							}
+						},
+						{
+							"when": 3,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_gold_q1"
+							}
+						},
+						{
+							"when": 4,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_iron_q1"
+							}
+						},
+						{
+							"when": 5,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_amethyst_q1"
+							}
+						},
+						{
+							"when": 6,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_copper_q1"
+							}
+						},
+						{
+							"when": 7,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_copper_q1"
+							}
+						},
+						{
+							"when": 8,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_redstone_q1"
+							}
+						},
+						{
+							"when": 9,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_diamond_q1"
+							}
+						},
+						{
+							"when": 10,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_lapis_q1"
+							}
+						},
+						{
+							"when": 11,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_ender_pearl_q1"
+							}
+						},
+						{
+							"when": 12,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_tidal_q1"
+							}
+						},
+						{
+							"when": 13,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_slime_q1"
+							}
+						},
+						{
+							"when": 14,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_emerald_q1"
+							}
+						},
+						{
+							"when": 15,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_dripstone_q1"
+							}
+						},
+						{
+							"when": 16,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_preserve_q1"
+							}
+						},
+						{
+							"when": 17,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_talisman_q1"
+							}
+						},
+						{
+							"when": 18,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_echo_q1"
+							}
+						}
+					],
+					"fallback": {
+						"type": "minecraft:model",
+						"model": "rotation_craft:item/combo_piece_0_1"
+					}
+				},
+				{
+					"type": "minecraft:select",
+					"property": "minecraft:component",
+					"component": "rotation_craft:combo_slot_2",
+					"cases": [
+						{
+							"when": 0,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_wooden_q2"
+							}
+						},
+						{
+							"when": 1,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_cobblestone_q2"
+							}
+						},
+						{
+							"when": 2,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_iron_q2"
+							}
+						},
+						{
+							"when": 3,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_gold_q2"
+							}
+						},
+						{
+							"when": 4,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_iron_q2"
+							}
+						},
+						{
+							"when": 5,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_amethyst_q2"
+							}
+						},
+						{
+							"when": 6,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_copper_q2"
+							}
+						},
+						{
+							"when": 7,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_copper_q2"
+							}
+						},
+						{
+							"when": 8,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_redstone_q2"
+							}
+						},
+						{
+							"when": 9,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_diamond_q2"
+							}
+						},
+						{
+							"when": 10,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_lapis_q2"
+							}
+						},
+						{
+							"when": 11,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_ender_pearl_q2"
+							}
+						},
+						{
+							"when": 12,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_tidal_q2"
+							}
+						},
+						{
+							"when": 13,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_slime_q2"
+							}
+						},
+						{
+							"when": 14,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_emerald_q2"
+							}
+						},
+						{
+							"when": 15,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_dripstone_q2"
+							}
+						},
+						{
+							"when": 16,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_preserve_q2"
+							}
+						},
+						{
+							"when": 17,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_talisman_q2"
+							}
+						},
+						{
+							"when": 18,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_echo_q2"
+							}
+						}
+					],
+					"fallback": {
+						"type": "minecraft:model",
+						"model": "rotation_craft:item/combo_piece_0_2"
+					}
+				},
+				{
+					"type": "minecraft:select",
+					"property": "minecraft:component",
+					"component": "rotation_craft:combo_slot_3",
+					"cases": [
+						{
+							"when": 0,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_wooden_q3"
+							}
+						},
+						{
+							"when": 1,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_cobblestone_q3"
+							}
+						},
+						{
+							"when": 2,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_iron_q3"
+							}
+						},
+						{
+							"when": 3,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_gold_q3"
+							}
+						},
+						{
+							"when": 4,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_iron_q3"
+							}
+						},
+						{
+							"when": 5,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_amethyst_q3"
+							}
+						},
+						{
+							"when": 6,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_copper_q3"
+							}
+						},
+						{
+							"when": 7,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_copper_q3"
+							}
+						},
+						{
+							"when": 8,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_redstone_q3"
+							}
+						},
+						{
+							"when": 9,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_diamond_q3"
+							}
+						},
+						{
+							"when": 10,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_lapis_q3"
+							}
+						},
+						{
+							"when": 11,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_ender_pearl_q3"
+							}
+						},
+						{
+							"when": 12,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_tidal_q3"
+							}
+						},
+						{
+							"when": 13,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_slime_q3"
+							}
+						},
+						{
+							"when": 14,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_emerald_q3"
+							}
+						},
+						{
+							"when": 15,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_dripstone_q3"
+							}
+						},
+						{
+							"when": 16,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_preserve_q3"
+							}
+						},
+						{
+							"when": 17,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_talisman_q3"
+							}
+						},
+						{
+							"when": 18,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_echo_q3"
+							}
+						}
+					],
+					"fallback": {
+						"type": "minecraft:model",
+						"model": "rotation_craft:item/combo_piece_0_3"
+					}
+				},
+				{
+					"type": "minecraft:select",
+					"property": "minecraft:component",
+					"component": "rotation_craft:combo_slot_4",
+					"cases": [
+						{
+							"when": 0,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_wooden_q4"
+							}
+						},
+						{
+							"when": 1,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_cobblestone_q4"
+							}
+						},
+						{
+							"when": 2,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_iron_q4"
+							}
+						},
+						{
+							"when": 3,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_gold_q4"
+							}
+						},
+						{
+							"when": 4,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_iron_q4"
+							}
+						},
+						{
+							"when": 5,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_amethyst_q4"
+							}
+						},
+						{
+							"when": 6,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_copper_q4"
+							}
+						},
+						{
+							"when": 7,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_hollow_copper_q4"
+							}
+						},
+						{
+							"when": 8,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_redstone_q4"
+							}
+						},
+						{
+							"when": 9,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_diamond_q4"
+							}
+						},
+						{
+							"when": 10,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_lapis_q4"
+							}
+						},
+						{
+							"when": 11,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_ender_pearl_q4"
+							}
+						},
+						{
+							"when": 12,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_tidal_q4"
+							}
+						},
+						{
+							"when": 13,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_slime_q4"
+							}
+						},
+						{
+							"when": 14,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_emerald_q4"
+							}
+						},
+						{
+							"when": 15,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_dripstone_q4"
+							}
+						},
+						{
+							"when": 16,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_preserve_q4"
+							}
+						},
+						{
+							"when": 17,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_talisman_q4"
+							}
+						},
+						{
+							"when": 18,
+							"model": {
+								"type": "minecraft:model",
+								"model": "rotation_craft:item/ball3d_echo_q4"
+							}
+						}
+					],
+					"fallback": {
+						"type": "minecraft:model",
+						"model": "rotation_craft:item/combo_piece_0_4"
+					}
+				}
+			]
+		}
+	}
 }

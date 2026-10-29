@@ -1,3 +1,73 @@
+## 1.2.0.31 — 球在世界里的 3D 模型（含组合球）
+
+### 做了什么
+
+用作者在 Blockbench 里建的球模型（44 个立方体，4×4×4 单位 = 0.25 格）替换球实体在世界里的外观。
+
+**物品栏 / 手持 / 掉落物仍然是原来的 2D 图标** —— 只有扔出去、躺在地上的实体用 3D。
+
+| 项 | 之前 | 现在 |
+|---|---|---|
+| 球实体（飞出去 / 地上） | `ThrownItemRenderer` 渲染 2D 物品图标 | **3D 模型** |
+| 流星锤锤头 | 同上 | **3D 模型** + 绳子 |
+| 物品栏图标 | 2D | 不变 |
+| 组合球 | 2D 四层 composite | **3D 四象限 composite**（gui 仍是 2D） |
+
+### 技术路线
+
+26.2 的渲染管线里已经没有 `BakedModel` 了，走的是 NeoForge 的 **standalone 模型**：
+
+1. Blockbench 导出的模型转成 `models/item/ball3d_<key>.json` × 17
+2. `ModelEvent.RegisterStandalone` + `SimpleUnbakedStandaloneModel.simpleModelWrapper(...)` 注册烘焙
+3. 渲染器里 `ModelManager.getStandaloneModel(key)` 取到 `BlockStateModelPart`
+4. `OrderedSubmitNodeCollector.submitBlockModel(poseStack, renderType, List.of(part), ...)` 画出来
+
+### 踩的坑：图集不匹配
+
+第一次自测全部模型被拒：
+
+```
+Rejecting block model rotation_craft:item/ball3d_iron, since it contains sprites
+from outside of supported atlas: {minecraft:textures/atlas/items.png=[...]}
+```
+
+`simpleModelWrapper` 烘焙时绑的是**方块图集**（block atlas），而球贴图原本在**物品图集**（items.png）里 —— 图集对不上直接拒收。
+
+修法：把 17 张球贴图复制到 `textures/block/ball3d/`（方块图集会自动扫描这个目录），模型和 `renderType` 全部改引用那边。
+
+### 组合球
+
+组合球没有单张完整贴图（外观是 4 张 1/4 分片运行时拼的），所以按**四象限拆几何 + composite 叠 4 层**：
+
+- 把 44 个立方体按 x/z 的正负分成 4 组（10 / 16 / 8 / 10 个）
+- 每个球 × 每个象限生成一份模型：`ball3d_<key>_q<q>.json`，共 **19 球 × 4 = 76 份**
+  - 19 而不是 17：`combo_slot_N` 的取值范围是 `BallFragments.sources()` 的 19 个下标，
+    包含原版物品 `ender_pearl`（贴图叫 `ender_pearl_quarter_N`，少了 `_ball`）和 `slime`
+- `items/combo_ball.json` 按 `minecraft:display_context` 分流：
+  - `gui` → 原来的 2D composite（物品栏不变）
+  - 其它（含实体渲染用的 `ground`）→ 3D composite，4 层 `select` 各按 `combo_slot_N` 选象限模型
+
+### 新增/改动文件
+
+| 文件 | 说明 |
+|---|---|
+| `client/Ball3DModels.java` | 新增。17 个 standalone 模型 key 的注册与查询 |
+| `client/BallRenderer.java` | `submit` 改为「有 3D 模型就画 3D，否则退回 2D」 |
+| `client/FlailHeadRenderer.java` | 同上，锤头也走 3D |
+| `client/BallRenderState.java` | 加 `ball3dKey` 字段 |
+| `client/FlailHeadRenderState.java` | 同上 |
+| `models/item/ball3d_*.json` | 97 个（17 整球 + 76 分片 + 4 象限模板） |
+| `textures/block/ball3d/*.png` | 17 张（方块图集） |
+| `items/combo_ball.json` | 重构为 display_context 分流 |
+
+### 验证
+
+- 编译通过
+- `runClient` 启动 0 ERROR，17 个模型全部烘焙成功（无 `Rejecting block model` 警告）
+- **进游戏的实际观感需要作者实测**：物品栏图标是否仍是 2D、扔出去的球是不是 3D、
+  锤头是否跟着变 3D、组合球拼起来对不对
+
+---
 ## 1.2.0.30 — 耐久扣除 / 破碎误杀 / 命名 / 快捷键（作者 2026-10-24 四条）
 
 ### ① 落地一次扣几十耐久

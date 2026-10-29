@@ -4,6 +4,7 @@ import com.mcmodworkspace.moreballs.BallBehavior;
 import com.mcmodworkspace.moreballs.entity.BallProjectile;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
 import net.minecraft.client.renderer.entity.state.ThrownItemRenderState;
@@ -51,6 +52,8 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         super.extractRenderState(entity, state, partialTick);
         if (state instanceof BallRenderState ballState) {
             ballState.ballScale = BallBehavior.profileFor(entity.getItem()).entityScale();
+            // 这个球有没有 3D 模型（作者 2026-10-29）。null = 退回原版 2D 物品图标路径。
+            ballState.ball3dKey = Ball3DModels.keyOf(entity);
             ballState.tidalSurge = entity.isTidalSurge();
             ballState.surgeTicks = entity.tickCount;
             // 【潮涌】环绕要朝向**速度方向**（作者 2026-10-13 第三轮反馈：
@@ -69,19 +72,47 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
     public void submit(ThrownItemRenderState state, PoseStack poseStack, SubmitNodeCollector collector,
                        CameraRenderState cameraState) {
         float scale = (state instanceof BallRenderState ballState) ? ballState.ballScale : 1.0F;
+        String key = (state instanceof BallRenderState ballState) ? ballState.ball3dKey : null;
 
-        if (scale == 1.0F) {
+        // ===== 没有 3D 模型（组合球等）：走原来的 2D 物品图标路径 =====
+        if (key == null) {
+            if (scale == 1.0F) {
+                super.submit(state, poseStack, collector, cameraState);
+                this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+                return;
+            }
+            poseStack.pushPose();
+            poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
+            poseStack.scale(scale, scale, scale);
             super.submit(state, poseStack, collector, cameraState);
             this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+            poseStack.popPose();
             return;
         }
 
+        // ===== 有 3D 模型：画 Blockbench 建的那套几何 =====
+        //
+        // 模型坐标就是 4 单位（0.25 格），和碰撞箱一致 —— 不需要额外缩放。
+        // 唯一的缩放来自 ballScale（金球那种「一格内切球」要大一圈）。
+        BlockStateModelPart part = Ball3DModels.part(key);
+        if (part == null) {
+            // 模型没烘焙好（资源重载中途）→ 这一帧先不画，别让玩家看到紫黑方块
+            return;
+        }
         poseStack.pushPose();
-        // 放大是围绕实体原点（脚下）做的，所以往上抬一点，免得大球有半个身子陷进地面
-        poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
-        poseStack.scale(scale, scale, scale);
-        super.submit(state, poseStack, collector, cameraState);
-        // 缩放分支同样要画环绕层（否则只有普通球的潮涌看得见，金球那种就漏了）
+        if (scale != 1.0F) {
+            poseStack.translate(0.0F, (scale - 1.0F) * 0.125F, 0.0F);
+            poseStack.scale(scale, scale, scale);
+        }
+        collector.submitBlockModel(
+                poseStack,
+                Ball3DModels.renderType(key),
+                java.util.List.of(part),
+                new int[] { -1 },              // tintLayers：不染色
+                state.lightCoords,
+                net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
+                0);
+        // 潮涌环绕照旧套在外面
         this.submitSurge(state, poseStack, collector, LIGHT_FULL);
         poseStack.popPose();
     }
