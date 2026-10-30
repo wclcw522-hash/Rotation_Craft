@@ -412,6 +412,27 @@ public class FlailHeadEntity extends BallProjectile {
         this.setLineLength(distanceToOwner(living));
 
         this.getEntityData().set(LINE_LENGTH, (int) Math.round(this.lineLength() * 100.0D));
+
+        // ===== 蓄力期间**手动**结算实体碰撞（作者 2026-10-30：「还是没有生物碰撞判定」）=====
+        //
+        // 为什么 onHit 里那段 SPIN 分支从来没生效：
+        //   · SPIN 的位置是上面的 `setPos(...)` 直接摆出来的；
+        //   · 而 `onHit` 只在 `Entity.move()` 内部检测碰撞时才触发；
+        //   · 再加上 SPIN 阶段 `noPhysics = true`，`move()` 连方块都不碰。
+        // 三者叠加 ⇒ 那条分支是**死代码**，蓄力扫到怪永远不掉血。
+        //
+        // 所以在这里主动做一次碰撞查询：碰撞箱相交的活体（掷出者除外）逐个结算。
+        if (!this.level().isClientSide()) {
+            for (net.minecraft.world.entity.LivingEntity target : this.level().getEntitiesOfClass(
+                    net.minecraft.world.entity.LivingEntity.class,
+                    this.getBoundingBox().inflate(0.05D),
+                    e -> e != living
+                            && e.isAlive()
+                            && !e.isSpectator()
+                            && !e.isInvulnerable())) {
+                this.onHitEntity(new net.minecraft.world.phys.EntityHitResult(target));
+            }
+        }
     }
 
     /**
@@ -774,7 +795,12 @@ public class FlailHeadEntity extends BallProjectile {
         }
         Vec3 target = handAnchor(living);
         double distance = target.distanceTo(this.position());
-        if (distance < ARRIVE_DISTANCE) {
+        // 作者 2026-10-30：「让锤头的碰撞箱与玩家碰撞箱相接触后即可完成回收」。
+        //
+        // 原来是「中心距 < ARRIVE_DISTANCE(0.7)」—— 两个 0.5 格的盒子贴在一起时中心距就已经是 0.5，
+        // 那个阈值对现在的碰撞箱来说偏大，视觉上还差一截就被判到了。改成真正的**盒相交**，
+        // 另留一个极小的心距兜底（防止两个盒子完全重合时因为浮点误差永不触发）。
+        if (this.getBoundingBox().intersects(living.getBoundingBox()) || distance < 0.05D) {
             this.finishReturn(living);
             return;
         }

@@ -1,3 +1,78 @@
+## 1.2.0.52 — 蓄力伤害、蓄力/回收底层分离、怪掉落球、回收判据
+
+### ① 蓄力旋转期间对生物没有伤害
+
+**根因**：`onHit` 里那段「SPIN 时只放行碰生物」的分支是**死代码**，永远进不去。三个前提叠在一起：
+
+- `tickSpin()` 的位置是 `this.setPos(pos.x, pos.y, pos.z)` 直接摆出来的；
+- 而 `onHit` 只在 `Entity.move()` 内部做碰撞检测时才触发；
+- SPIN 阶段还设了 `noPhysics = true`，`move()` 连方块都不碰。
+
+也就是说这条路径上根本没有任何一处会调 `onHit`。
+
+**修**：在 `tickSpin()` 末尾主动做一次实体查询
+
+```java
+if (!this.level().isClientSide()) {
+    for (LivingEntity target : this.level().getEntitiesOfClass(
+            LivingEntity.class, this.getBoundingBox().inflate(0.05D),
+            e -> e != living && e.isAlive() && !e.isSpectator() && !e.isInvulnerable())) {
+        this.onHitEntity(new EntityHitResult(target));
+    }
+}
+```
+
+碰撞箱相交就结算，掷出者本人排除。伤害值仍走 `impactDamage()`（SPIN 时是 `effectiveSpeed()` 给的环绕线速度）。
+
+### ② 蓄力与回收的**底层分离**（重点）
+
+之前两者共用同一套原版 use 系统：`use()` 里无论蓄力还是回收都调 `player.startUsingItem(hand)`，
+于是 `isUsingItem()` 一直为真，`use_effects` 的 0.2 移速惩罚对**两者同时**生效。
+上一版把组件改成 1.0，等于把蓄力的惩罚也一起去掉了 —— 不符合要求。
+
+**修：回收完全不走 use 系统。**
+
+| | 触发方式 | 进不进 use 状态 | 移速 |
+|---|---|---|---|
+| **蓄力** | `startUsingItem(hand)` + `onUseTick` + `releaseUsing` | ✅ 进 | 原版 0.2（保留） |
+| **回收** | 点一下右键开关（`use()` 情况 A），**不调 `startUsingItem`** | ❌ 不进 | 无惩罚 |
+
+回收改成开关式：点一下开始拉、再点一下停止。按住右键时原版会每 tick 调 `use()`，
+所以加了 6 tick 的物品冷却（`RECOVER_TOGGLE_COOLDOWN_TICKS = 6`）防止疯狂开关。
+
+物品级 `use_effects` 组件已撤销（回到原版默认），蓄力惩罚恢复。
+另外在 `LocalPlayerMixin` 里补了一条保险：`isRetrieving(stack)` 为真时移速返回 1.0
+（`itemUseSpeedMultiplier` 的 RETURN 注入，带 `require = 0`）。
+
+### ③ 怪被锤击杀时掉出「没拿在手上的多余球」
+
+两个来源都堵住了：
+
+- **主手的球** —— 原版会按装备掉落概率掉出来；
+- **暂存里的球** —— `equipBall` 把「捡新球时手上原有的东西」收进 `stashMainHand`，
+  而那一步**没有排除 `previous` 本身就是球**（「顶加装填」那条只对烈焰人生效）。
+  于是怪可能「主手一颗 + 暂存一颗」，一死两份全掉 = 多出来的那颗。
+
+**修**：`onMobDeath` 里对所有 Mob 生效——主手是球就清空 + 碎裂音（不留掉落物，照原版物品破损）；
+遍历 stash 时跳过球。
+
+### ④ 回收完成判据改成碰撞箱相交
+
+原来是「中心距 < `ARRIVE_DISTANCE`(0.7)」。两个 0.5 格的盒子贴在一起时中心距就已经是 0.5，
+这个阈值对现在的碰撞箱偏大，视觉上还差一截就被判到了。
+
+**修**：
+
+```java
+if (this.getBoundingBox().intersects(living.getBoundingBox()) || distance < 0.05D) {
+    this.finishReturn(living);
+    return;
+}
+```
+
+真正的盒相交，另留 0.05 的心距兜底防止完全重合时浮点误差导致永不触发。
+
+---
 ## 1.2.0.51 — 回响球掉出、锤头模型尺寸、回收移速惩罚
 
 上一轮（1.2.0.50）的三个 bug，这次按「修 bug 四步」重查了一遍：

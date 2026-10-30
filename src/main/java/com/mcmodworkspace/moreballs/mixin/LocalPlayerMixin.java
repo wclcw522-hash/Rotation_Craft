@@ -58,7 +58,21 @@ public abstract class LocalPlayerMixin {
     private void moreBalls$repeaterReloadSpeed(CallbackInfoReturnable<Float> cir) {
         LocalPlayer self = (LocalPlayer) (Object) this;
         ItemStack useItem = self.getUseItem();
-        if (useItem.isEmpty() || !(useItem.getItem() instanceof CrossbowItem)) {
+        if (useItem.isEmpty()) {
+            return;
+        }
+        // 【流星锤 · 回收】作者 2026-10-30：「我只要取消回收过程的」移速惩罚。
+        //
+        // 蓄力（SPIN）继续按原版 0.2 减速 —— 那是「正在做一件需要站定的事」的自然反馈；
+        // 只有**回收**（FLAIL_RETRIEVING）期间放开到 1.0，方便边走边把锤头拽回来。
+        //
+        // 判据用物品组件 FLAIL_RETRIEVING：它随物品栈同步，客户端拿得到。
+        if (useItem.getItem() instanceof com.mcmodworkspace.moreballs.FlailItem
+                && com.mcmodworkspace.moreballs.FlailItem.isRetrieving(useItem)) {
+            cir.setReturnValue(1.0F);
+            return;
+        }
+        if (!(useItem.getItem() instanceof CrossbowItem)) {
             return;
         }
         int level = ModEnchantments.repeaterCrossbowLevel(self.level(), useItem);

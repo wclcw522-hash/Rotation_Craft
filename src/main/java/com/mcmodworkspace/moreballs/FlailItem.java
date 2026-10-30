@@ -84,6 +84,13 @@ public class FlailItem extends Item {
      * 我原先写的是 50 刻，到点原版就自动 {@code releaseUsing} ⇒ 表现为「自动扔出」。
      * 球那边用 72000（约 1 小时），按住多久都不会自己松手。</p>
      */
+    /**
+     * 回收开关的最短间隔（tick）。
+     *
+     * <p>按住右键时原版每刻都会调 {@code Item.use}，没有这道闸的话回收会疯狂开关。</p>
+     */
+    public static final int RECOVER_TOGGLE_COOLDOWN_TICKS = 6;
+
     public static final int MAX_USE_TICKS = BallCharge.USE_DURATION;
 
     public FlailItem(Properties properties) {
@@ -487,17 +494,37 @@ public class FlailItem extends Item {
 
         var head = findHead(level, player);
 
-        // ===== 情况 A：手里这把锤已经扔出去了 ⇒ 这一下是「按住回收」 =====
+        // ===== 情况 A：锤头已经扔出去了 ⇒ 这一下是「回收开关」 =====
+        //
+        // ⚠️⚠️ **回收与蓄力在这里彻底分家**（作者 2026-10-30：
+        //    「看起来就是你蓄力和回收用的同一个底层代码……我现在要求回收用另外的代码不要触发蓄力」）。
+        //
+        //   旧写法是 `player.startUsingItem(hand)` —— 借用原版的「使用中」状态来检测松手，
+        //   代价是它也一并套用了 use_effects 的移速惩罚（UseEffects.DEFAULT 的 0.2），
+        //   于是「回收时走不动路」。
+        //
+        //   现在回收**完全不进 use 系统**：
+        //     · 点一下右键 = 开始回收；再点一下 = 停止（开关式）；
+        //     · 不复用 startUsingItem，isUsingItem() 始终为 false ⇒ 没有任何移速惩罚；
+        //     · 蓄力那条路（情况 B）照旧走 startUsingItem，移速惩罚原样保留。
+        //
+        //   按住右键时原版会反复调 use()，所以这里用物品冷却挡一下（0.3 秒），
+        //   否则会变成每刻疯狂开关。
         if (head != null
                 && head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
-            if (!level.isClientSide()) {
-                if (head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING) {
-                    head.beginReturning(player);    // 首次按住 ⇒ 进入回收并扣 1 耐久
+            if (!level.isClientSide() && !player.getCooldowns().isOnCooldown(stack)) {
+                player.getCooldowns().addCooldown(stack, RECOVER_TOGGLE_COOLDOWN_TICKS);
+                if (head.isRetrieving()) {
+                    head.setRetrieving(false);        // 再点一下 ⇒ 停止回收
+                    markRetrieving(stack, false);
+                } else {
+                    if (head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING) {
+                        head.beginReturning(player);  // 首次 ⇒ 进入回收并扣 1 耐久
+                    }
+                    head.setRetrieving(true);
+                    markRetrieving(stack, true);
                 }
-                head.setRetrieving(true);           // 按住才拉
-                markRetrieving(stack, true);        // 动画变 NONE，不做蓄力动作
             }
-            player.startUsingItem(hand);            // 借用「使用中」状态来检测松开
             return InteractionResult.CONSUME;
         }
 

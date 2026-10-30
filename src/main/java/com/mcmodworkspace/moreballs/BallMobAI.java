@@ -1324,7 +1324,17 @@ public final class BallMobAI {
         // 【敌对球 · 史莱姆】作者指定：死亡时它持有的球**破碎且无掉落物**。
         // 球的「破碎」照原版物品破损那一套：放碎裂音效 + 不留任何东西。
         // ⚠️ 必须**主动清空主手** —— 否则它会按原版的装备掉落概率掉出来。
-        if (mob instanceof Slime && BallAmmo.isBall(mob.getMainHandItem())) {
+        // 作者 2026-10-30：「怪被流星锤击杀时会错误的掉落没有拿在手上的多出来的球」。
+        //
+        // 两个来源都要堵住：
+        //   · 主手的球 —— 原版会按「装备掉落概率」掉出来；
+        //   · 暂存里的球 —— equipBall 会把「捡新球时手上原有的东西」收进 stash，
+        //     而那一步**没有排除 previous 本身就是球**（顶加装填只对烈焰人生效），
+        //     于是怪可能「主手一颗 + 暂存一颗」，一死两份全掉出来 = 多出来的那颗。
+        //
+        // 处理方式照原版物品破损：清空 + 碎裂音，不留任何掉落物。
+        // （原来是只对 Slime 生效，现在对所有 Mob 一视同仁。）
+        if (BallAmmo.isBall(mob.getMainHandItem()) || BallClusterItem.isCluster(mob.getMainHandItem())) {
             mob.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
             if (mob.level() instanceof ServerLevel level) {
                 level.playSound(null, mob.getX(), mob.getY(), mob.getZ(),
@@ -1339,6 +1349,10 @@ public final class BallMobAI {
         mob.setData(ModAttachments.STASHED_MAINHAND.get(), List.of());
         if (mob.level() instanceof ServerLevel level) {
             for (ItemStack item : stash) {
+                // 暂存里的**球**不掉（同上：那不是它「手里拿着」的东西）
+                if (BallAmmo.isBall(item) || BallClusterItem.isCluster(item)) {
+                    continue;
+                }
                 mob.spawnAtLocation(level, item.copy(), 0.0F);
             }
         }

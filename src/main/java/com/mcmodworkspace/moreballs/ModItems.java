@@ -84,11 +84,7 @@ public final class ModItems {
      * <p>这里设成 {@code speedMultiplier = 1.0} 且允许疾跑，蓄力和回收期间移动速度不受影响。</p>
      */
     public static final DeferredItem<Item> FLAIL = ITEMS.registerItem(
-            "flail", props -> new FlailItem(props
-                    .stacksTo(1)
-                    .enchantable(14)
-                    .component(net.minecraft.core.component.DataComponents.USE_EFFECTS,
-                            new net.minecraft.world.item.component.UseEffects(true, true, 1.0F))));
+            "flail", props -> new FlailItem(props.stacksTo(1).enchantable(14)));
     public static final DeferredItem<Item> COMBO_BALL = ITEMS.registerItem(
             "combo_ball", props -> new ComboBallItem(props.stacksTo(BALL_STACK_SIZE)));
 
