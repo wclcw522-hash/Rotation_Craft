@@ -75,7 +75,7 @@ public final class FlailCastHandler {
         if (FlailItem.findHead(player.level(), player) == null) {
             // 只在真有残留标记时才清 + 同步，避免每 tick 无条件广播容器
             if (FlailItem.hasCastingFlag(player)) {
-                FlailItem.clearCastingFlags(player);
+                FlailItem.clearCastingOnly(player);
                 player.containerMenu.broadcastChanges();
                 player.getInventory().setChanged();
             }
@@ -99,7 +99,7 @@ public final class FlailCastHandler {
         if (!FlailItem.isFlail(held)) {
             FlailHeadEntity orphan = FlailItem.findHead(player.level(), player);
             if (orphan == null) {
-                FlailItem.clearCastingFlags(player);
+                FlailItem.clearCastingOnly(player);
             }
             return;
         }
@@ -140,9 +140,23 @@ public final class FlailCastHandler {
         // 这正是作者要的：锁的是**这把锤在手上的这段时间**，不是永久锁人。
         int origin = head.originSlot();
         Inventory inventory = player.getInventory();
-        if (origin >= 0 && origin < Inventory.getSelectionSize()
-                && inventory.getSelectedSlot() != origin) {
+        // ⚠️ 兜底：originSlot 是普通字段（不走同步），非正常创建路径下会是 -1 ——
+        //    那种情况原来整段都被跳过 ⇒ 完全不锁物品栏（作者 2026-10-30：「未实现」）。
+        //    这里退回「背包快捷栏里那把流星锤所在的格」。
+        if (origin < 0 || origin >= Inventory.getSelectionSize()) {
+            origin = -1;
+            for (int s = 0; s < Inventory.getSelectionSize(); s++) {
+                if (FlailItem.isFlail(inventory.getItem(s))) {
+                    origin = s;
+                    break;
+                }
+            }
+        }
+        if (origin >= 0 && inventory.getSelectedSlot() != origin) {
             inventory.setSelectedSlot(origin);
+            // 诊断（作者 2026-10-30：「无法切换物品栏的功能未实现」——先确认这段到底有没有跑）
+            MoreBalls.LOGGER.info("[flail] 锁定物品栏：{} → {}（锤头 stage={}）",
+                    inventory.getSelectedSlot(), origin, head.stage());
         }
 
         // ⚠️⚠️ 原来这里会**把副手的流星锤直接清空**（作者 2026-10-24：

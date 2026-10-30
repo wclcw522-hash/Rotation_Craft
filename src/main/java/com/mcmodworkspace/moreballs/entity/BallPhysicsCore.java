@@ -758,7 +758,13 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         if (base <= 1.0E-4D) {
             return this.damage;
         }
-        double hitSpeed = this.getDeltaMovement().length();
+        // ⚠️ 用 effectiveSpeed() 而不是 getDeltaMovement()（作者 2026-10-30：
+        //    「蓄力期间，球对生物似乎没有碰撞效果」）。
+        //
+        //   流星锤蓄力（SPIN）时位置由公式摆放、速度被清成 0 ⇒ 原来这里读到 hitSpeed=0
+        //   ⇒ ratio=0 ⇒ 伤害恒为 0，打上去毫无反馈。effectiveSpeed() 是给「等效速度」
+        //   留的钩子（尖啸那套也在用），锤头可以覆写它返回环绕速度。
+        double hitSpeed = this.effectiveSpeed();
         float ratio = (float) (hitSpeed / base);
         float result = this.damage * ratio;
 

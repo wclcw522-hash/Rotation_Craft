@@ -646,6 +646,32 @@ public class FlailItem extends Item {
         return heads.isEmpty() ? null : heads.get(0);
     }
 
+    /**
+     * <b>只清 {@code FLAIL_CASTING}</b>，不动 {@code FLAIL_RECOVERED}（作者 2026-10-30）。
+     *
+     * <p>两者的语义完全不同：</p>
+     * <ul>
+     *   <li>{@code CASTING} —— 决定贴图形态（纯线 / 带球）。回收结束后必须清，否则「只剩线」。</li>
+     *   <li>{@code RECOVERED} —— 决定「必须松开右键才能再蓄力」。回收结束时要<b>置上</b>，
+     *       由玩家松手那一刻才清掉。</li>
+     * </ul>
+     *
+     * <p>把两个一起清掉的后果就是作者报的两个 bug 交替出现：
+     * 只清 CASTING 不清 RECOVERED ⇒ 一清就设 false ⇒ 按住右键能立刻再蓄力；
+     * 反过来两个都设 true ⇒ 松手后仍然蓄不了。</p>
+     */
+    public static void clearCastingOnly(net.minecraft.world.entity.player.Player player) {
+        var inv = player.getInventory();
+        for (int slot = 0; slot < inv.getContainerSize(); slot++) {
+            ItemStack s = inv.getItem(slot);
+            if (isCasting(s)) {
+                setCasting(s, false);
+            }
+        }
+        if (isCasting(player.getOffhandItem())) {
+            setCasting(player.getOffhandItem(), false);
+        }
+    }
     /** 把所有流星锤上的「扔出中」标记清掉（登录兜底用） */
     public static void clearCastingFlags(net.minecraft.world.entity.player.Player player) {
         var inv = player.getInventory();

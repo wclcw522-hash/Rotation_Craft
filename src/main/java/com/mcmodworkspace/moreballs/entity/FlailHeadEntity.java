@@ -524,6 +524,28 @@ public class FlailHeadEntity extends BallProjectile {
                 .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
     }
 
+    /**
+     * <b>蓄力（SPIN）期间的等效速度</b>（作者 2026-10-30：「蓄力期间，球对生物似乎没有碰撞效果」）。
+     *
+     * <p>SPIN 状态下锤头的位置由 {@code spinPosition()} 每 tick 直接摆放，速度被清成
+     * {@code Vec3.ZERO} —— 而 {@code impactDamage()} 是按「击中速度 / 出手速度」缩放的，
+     * 于是伤害恒为 0，扫到怪完全没反应。</p>
+     *
+     * <p>这里给一个**等效的环绕线速度**：转一圈的周长 ÷ 一圈的时长。它与真实的
+     * 「球被甩着扫过去」的体感一致，也不会因为速度是 0 就把伤害算没。</p>
+     */
+    @Override
+    public double effectiveSpeed() {
+        if (this.stage() == Stage.SPIN) {
+            // 周长 = 2πr；每圈 SPIN_STEP / (2π) 个 tick
+            double circumference = 2.0D * Math.PI * SPIN_RADIUS;
+            double ticksPerLoop = (2.0D * Math.PI) / SPIN_STEP;
+            double speed = circumference / Math.max(1.0D, ticksPerLoop);
+            // 兜底：至少让伤害有个下限（否则比值仍然接近 0）
+            return Math.max(speed, this.profile().physicalVelocity() * 0.35D);
+        }
+        return super.effectiveSpeed();
+    }
     /** 这个位置放得下锤头吗？（碰撞箱与方块不相交） */
     private boolean isFreeAt(Vec3 pos) {
         net.minecraft.world.phys.AABB box = this.getDimensions(this.getPose()).makeBoundingBox(pos);
@@ -860,7 +882,7 @@ public class FlailHeadEntity extends BallProjectile {
             ItemStack h = inventory.getItem(slot);
             if (FlailItem.isFlail(h) && FlailItem.isCasting(h)) {
                 FlailItem.markRetrieving(h, false);
-                FlailItem.markRecovered(h, false);
+                FlailItem.markRecovered(h, true);
                 FlailItem.setCasting(h, false);
                 touched = true;
             }
@@ -868,7 +890,7 @@ public class FlailHeadEntity extends BallProjectile {
         ItemStack off = p.getOffhandItem();
         if (FlailItem.isFlail(off) && FlailItem.isCasting(off)) {
             FlailItem.markRetrieving(off, false);
-            FlailItem.markRecovered(off, false);
+            FlailItem.markRecovered(off, true);
             FlailItem.setCasting(off, false);
             touched = true;
         }

@@ -1,3 +1,74 @@
+## 1.2.0.50 — 流星锤四项：松手语义、碰撞箱、蓄力伤害、锁物品栏
+
+### ① 回收后按住右键不应进入蓄力（我上一版改坏的）
+
+`FLAIL_CASTING` 和 `FLAIL_RECOVERED` 是**两个语义完全不同的标记**，我上一版把它们一起清了：
+
+| 标记 | 作用 |
+|---|---|
+| `FLAIL_CASTING` | 决定**贴图形态**（纯线 / 带球）。回收结束必须清，否则「只剩线」 |
+| `FLAIL_RECOVERED` | 决定**必须松开右键才能再蓄力**。回收结束要**置上**，玩家松手那刻才清 |
+
+一起清的后果：`RECOVERED` 被设成 false ⇒ `FlailItem.use()` 里
+`if (isRecovered && isUsingItem) return CONSUME;` 永远不会命中 ⇒ **按住右键立刻又蓄力**，
+正是作者报的「按住不松手不会进入下一次蓄力，这个功能没实现」。
+
+**修**：
+
+- 新增 `FlailItem.clearCastingOnly(player)` —— 只清 `CASTING`，不碰 `RECOVERED`
+- `FlailCastHandler` 的两处兜底清理改用它（回收后形态恢复，但「要松手」的语义保留）
+- `FlailHeadEntity.clearFlailFlags` 里 `markRecovered(...)` 恢复为 **`true`**
+- 登录兜底（`onPlayerLogin`）仍用 `clearCastingFlags` —— 那里就该清干净
+
+### ② 锤头碰撞箱没和球统一
+
+`ModEntities.FLAIL_HEAD` 的 `.sized(0.2F, 0.2F)` → **`.sized(0.5F, 0.5F)`**，
+和球一致（球模型 0.5 格、球碰撞箱 0.5 格）。
+
+### ③ 蓄力期间对生物没有碰撞伤害
+
+`BallPhysicsCore.impactDamage()` 里：
+
+```java
+double hitSpeed = this.getDeltaMovement().length();
+float ratio = (float) (hitSpeed / base);
+float result = this.damage * ratio;
+```
+
+而 SPIN 阶段锤头的位置由公式每 tick 摆放、速度被清成 `Vec3.ZERO`
+⇒ `hitSpeed = 0` ⇒ `ratio = 0` ⇒ **伤害恒为 0**，扫到怪完全没反应。
+
+`FlailHeadEntity` 自己的注释（L47）早就写了「它没有速度，所以 impactDamage 那套按速度缩放在 SPIN 下不适用」——
+但一直没处理。
+
+**修**：
+
+1. `impactDamage()` 改用 `effectiveSpeed()`（原本就是为「等效速度」留的钩子，尖啸那套在用）
+2. `FlailHeadEntity` 覆写 `effectiveSpeed()`：SPIN 时返回**环绕线速度**
+   （周长 `2πr` ÷ 每圈 tick 数），并保底 `physicalVelocity() × 0.35`
+
+### ④ 非初始状态时无法切换物品栏
+
+两处问题：
+
+1. **判据靠 `head != null`** —— 锤头被 `discard` 那一刻就不锁了，但物品可能还是纯线形态
+2. **`originSlot == -1` 时整段被跳过** —— `originSlot` 是普通字段（不走同步），
+   非正常创建路径下是 -1 ⇒ 完全不锁（作者实测「未实现」）
+
+**修**：`originSlot` 无效时退回「快捷栏里那把流星锤所在的格」，并加了一行诊断日志：
+
+```
+[flail] 锁定物品栏：3 → 0（锤头 stage=SPIN）
+```
+
+### 待作者实测
+
+- 回收后按住右键：应当**不能**蓄力，松手再按才行
+- 锤头与球的碰撞箱是否等大
+- 蓄力扫到生物是否掉血
+- 蓄力/飞行期间切物品栏是否被拉回（日志应打出 `[flail] 锁定物品栏`）
+
+---
 ## 1.2.0.49 — 真修锤头沉进方块（上一版只治了耐久，没治沉）
 
 作者指出：「锤头那里不应该修防止锤头卡在方块里吗？你这样修是什么意思？」
