@@ -1334,11 +1334,24 @@ public final class BallMobAI {
         //
         // 处理方式照原版物品破损：清空 + 碎裂音，不留任何掉落物。
         // （原来是只对 Slime 生效，现在对所有 Mob 一视同仁。）
-        if (BallAmmo.isBall(mob.getMainHandItem()) || BallClusterItem.isCluster(mob.getMainHandItem())) {
-            mob.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
-            if (mob.level() instanceof ServerLevel level) {
-                level.playSound(null, mob.getX(), mob.getY(), mob.getZ(),
-                        SoundEvents.ITEM_BREAK, SoundSource.NEUTRAL, 0.8F, 1.0F);
+        // ⚠️ 必须遍历**所有** EquipmentSlot，不能只清主手（作者 2026-10-30：
+        //    「锤头砸死怪还是会异常地掉落球，在怪空手的情况下」）。
+        //
+        //    原版的 `dropAllDeathLoot` → `dropEquipment` 会遍历 `EquipmentSlot.values()`，
+        //    把主手、副手、四个护甲位**全部**按概率掉一遍。只清 MAINHAND 的话，
+        //    副手（或某次装备交换残留）里的球照样会掉出来。
+        //
+        //    时机是安全的：`LivingEntity.die()` 里先发 `LivingDeathEvent`、后调
+        //    `dropAllDeathLoot`（26.2 源码 L1528 的注释明写 "before trying to kill it"，
+        //    而 dropAllDeathLoot 在 L1550），所以在这里清掉就一定赶在掉落之前。
+        for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+            ItemStack inSlot = mob.getItemBySlot(slot);
+            if (BallAmmo.isBall(inSlot) || BallClusterItem.isCluster(inSlot)) {
+                mob.setItemSlot(slot, ItemStack.EMPTY);
+                if (mob.level() instanceof ServerLevel level) {
+                    level.playSound(null, mob.getX(), mob.getY(), mob.getZ(),
+                            SoundEvents.ITEM_BREAK, SoundSource.NEUTRAL, 0.8F, 1.0F);
+                }
             }
         }
 

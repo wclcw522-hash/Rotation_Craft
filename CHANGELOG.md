@@ -1,3 +1,63 @@
+## 1.2.0.56 — 怪死亡掉球、锤头伤害不衰减
+
+### ① 锤头砸死空手怪仍掉球
+
+上一版只清了 `EquipmentSlot.MAINHAND`，而原版 `dropAllDeathLoot` → `dropEquipment`
+会遍历 **`EquipmentSlot.values()`**（主手 / 副手 / 四个护甲位）逐个按概率掉。
+副手或某次装备交换残留里的球照样会掉出来。
+
+时机本身是安全的 —— 我查了 26.2 的 `LivingEntity.die()`：
+
+```
+L1528  // Neo: Fire the LivingDeathEvent ... but before trying to kill it.
+L1550  this.dropAllDeathLoot(serverLevel, source);
+```
+
+死亡事件在前、掉落结算在后，所以在事件里清一定赶得上。
+
+**修**：遍历所有槽位清球
+
+```java
+for (EquipmentSlot slot : EquipmentSlot.values()) {
+    ItemStack inSlot = mob.getItemBySlot(slot);
+    if (BallAmmo.isBall(inSlot) || BallClusterItem.isCluster(inSlot)) {
+        mob.setItemSlot(slot, ItemStack.EMPTY);
+        // 碎裂音，不留掉落物
+    }
+}
+```
+
+> 顺带说明「掉的都是铁球」这个线索：铁球的 `drops` 配的是 `Items.IRON_INGOT`（1~2 个），
+> 不是铁球本身。所以掉出来的是**怪持有的那颗球**，而不是碎裂材料。
+
+### ② 铁流星锤满蓄力伤害不稳（常常 4~5 点、偶尔 11 点）
+
+`BallPhysicsCore.impactDamage()`：
+
+```java
+double base = launchSpeed;                  // 出手速度（满蓄力时记下的）
+double hitSpeed = effectiveSpeed();         // 击中瞬间的速度
+float ratio = hitSpeed / base;
+float result = damage * ratio;              // 铁球 damage = 11
+```
+
+`effectiveSpeed()` 原本返回 `getDeltaMovement().length()` —— **当前速度**。
+球那样设计是对的（弹道球飞越远越慢，伤害自然递减），但**锤头是近战武器**：
+满蓄力甩出去，飞了十几格后受重力与阻力衰减，速度掉到出手速度的 40%，
+伤害就被砍成 4~5 点；贴身命中时 ratio ≈ 1，才有 11。
+
+**修**：`FlailHeadEntity.effectiveSpeed()` 在 FLYING / RETURNING 阶段恒返回 `launchSpeed`
+
+```java
+if (this.launchSpeed > 1.0E-4D) {
+    return this.launchSpeed;
+}
+```
+
+于是 `ratio = launchSpeed / launchSpeed = 1`，伤害恒为基础伤害（铁球 11 点），
+不再随飞行距离变化。蓄力（SPIN）阶段的环绕线速度逻辑保持不变。
+
+---
 ## 1.2.0.55 — 回收手感与隔离回到原版语义
 
 ### 1.2.0.54 错在哪

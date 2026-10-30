@@ -565,6 +565,20 @@ public class FlailHeadEntity extends BallProjectile {
             // 兜底：至少让伤害有个下限（否则比值仍然接近 0）
             return Math.max(speed, this.profile().physicalVelocity() * 0.35D);
         }
+        // ===== 飞行 / 回收阶段：**不按当前速度衰减**（作者 2026-10-30）=====
+        //
+        //   作者实测：「满蓄力打怪只有四五点伤害，偶尔能打出来 11 血」。
+        //
+        //   根因：`impactDamage()` 算的是 `damage × (击中瞬间速度 / 出手速度)`。
+        //   球那样设计是因为弹道球飞得越远越慢、伤害自然该掉；但**锤头是近战武器** ——
+        //   满蓄力甩出去打中谁，伤害就该是满的，不该因为飞了十几格（重力 + 阻力衰减）
+        //   就砍到 40%。
+        //
+        //   这里让 FLYING / RETURNING 阶段的「等效速度」恒等于**出手速度**：
+        //   ratio = launchSpeed / launchSpeed = 1 ⇒ 伤害恒为基础伤害（铁球 = 11）。
+        if (this.launchSpeed > 1.0E-4D) {
+            return this.launchSpeed;
+        }
         return super.effectiveSpeed();
     }
     /**
