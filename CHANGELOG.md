@@ -1,3 +1,79 @@
+## 1.2.0.49 — 真修锤头沉进方块（上一版只治了耐久，没治沉）
+
+作者指出：「锤头那里不应该修防止锤头卡在方块里吗？你这样修是什么意思？」
+
+对。`1.2.0.48` 只加了「碰撞扣耐久的 4 tick 间隔」—— 那只是让锤头不会瞬间烧光，
+**它照样会沉进方块里、照样动不了**。治标没治本。
+
+### 沉进去的两个真实入口
+
+**入口 A：`launch()` 的起手位置不做任何检测**
+
+```java
+Vec3 top = spinTop(shooter);
+this.setPos(top.x, top.y, top.z);      // ← 直接瞬移，不管那里是不是实心
+```
+
+`spinTop`（L504-515）算的是「玩家侧上方一点点」：
+
+```java
+owner.position()
+    .add(right.scale(owner.getBbWidth() * 0.5D))
+    .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
+```
+
+玩家贴着墙、蹲在低矮空间、或头顶压着方块时，这个点可能**整个落在方块内部**。
+锤头从第一 tick 就嵌进去了 ⇒ 每 tick 撞一次 ⇒ 扣耐久 + 卡死。
+
+**修**：起手前先验位
+
+```java
+Vec3 top = spinTop(shooter);
+if (!this.isFreeAt(top)) {
+    Vec3 eye = shooter.getEyePosition();          // 玩家视野处一定不是实心
+    top = this.isFreeAt(eye) ? eye
+        : shooter.position().add(0.0D, shooter.getBbHeight() * 0.5D, 0.0D);
+}
+this.setPos(top.x, top.y, top.z);
+```
+
+**入口 B：FLYING 阶段被推进实心区域后出不来**
+
+高速穿薄墙、被活塞推、墙角爆炸——一旦嵌住就会一直嵌着：
+每 tick 触发 `onHit`、扣耐久、又动不了。
+
+**修**：`tickFlying()` 开头加脱离
+
+```java
+if (this.isInWall()) {
+    Vec3 escape = this.escapeDirection();          // 优先朝掷出者
+    for (int step = 1; step <= 12; step++) {
+        Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
+        if (this.isFreeAt(candidate)) { this.setPos(...); break; }
+    }
+}
+```
+
+两个辅助方法：
+
+```java
+private boolean isFreeAt(Vec3 pos) {
+    AABB box = this.getDimensions(this.getPose()).makeBoundingBox(pos);
+    return this.level().noCollision(box);
+}
+
+private Vec3 escapeDirection() {
+    // 朝掷出者（玩家所在，通常是空的）；拿不到主人就往上
+}
+```
+
+> 注：26.2 的 `Entity` 里**没有** `pushOutOfBlocks`（只有 `isInWall`），所以脱离是自己逐格找空位。
+
+### 上一版的 4 tick 间隔保留
+
+它现在只作为「真卡住时不至于瞬间烧光」的兜底，不再是主要手段。
+
+---
 ## 1.2.0.48 — 组合球改用完整几何 + 分片贴图（不切几何）
 
 ### 上一版的错误

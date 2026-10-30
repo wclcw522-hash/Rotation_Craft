@@ -479,8 +479,18 @@ public class FlailHeadEntity extends BallProjectile {
         this.setStage(Stage.FLYING);
         this.setNoGravity(false);
 
-        // ① 瞬移到蓄力旋转的最高点
+        // ① 瞬移到蓄力旋转的最高点 —— **但必须先确认那个位置不是实心的**（作者 2026-10-30：
+        //    「流星锤扔出会沉到方块里」）。
+        //
+        //    spinTop 是「玩家侧上方一点点」，玩家贴着墙、蹲在低矮空间、或者头顶有方块时，
+        //    这个点可能整个落在方块内部。原来直接 setPos 过去 ⇒ 锤头从第一 tick 就嵌在方块里，
+        //    每 tick 撞一次 ⇒ 扣耐久 + 卡死。
         Vec3 top = spinTop(shooter);
+        if (!this.isFreeAt(top)) {
+            // 退到掷出者眼睛高度 —— 那是玩家视野所在，一定不是实心的
+            Vec3 eye = shooter.getEyePosition();
+            top = this.isFreeAt(eye) ? eye : shooter.position().add(0.0D, shooter.getBbHeight() * 0.5D, 0.0D);
+        }
         this.setPos(top.x, top.y, top.z);
 
         // ② 按球的物理飞出：物理速度 × 蓄力倍率
@@ -514,6 +524,24 @@ public class FlailHeadEntity extends BallProjectile {
                 .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
     }
 
+    /** 这个位置放得下锤头吗？（碰撞箱与方块不相交） */
+    private boolean isFreeAt(Vec3 pos) {
+        net.minecraft.world.phys.AABB box = this.getDimensions(this.getPose()).makeBoundingBox(pos);
+        return this.level().noCollision(box);
+    }
+
+    /** 卡进方块时往哪个方向脱离：优先朝掷出者（那是玩家所在、通常是空的） */
+    private Vec3 escapeDirection() {
+        if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity living) {
+            Vec3 toOwner = living.getEyePosition().subtract(this.position());
+            if (toOwner.lengthSqr() > 1.0E-6D) {
+                return toOwner.normalize();
+            }
+        }
+        return new Vec3(0.0D, 1.0D, 0.0D);   // 兜底往上
+    }
+
+
     /**
      * FLYING 阶段。
      *
@@ -531,6 +559,22 @@ public class FlailHeadEntity extends BallProjectile {
      * </ol>
      */
     private void tickFlying() {
+        // ===== ⓪ 卡进方块时先脱离（作者 2026-10-30：「扔出会沉到方块里」）=====
+        //
+        //   FLYING 阶段 noPhysics=false，正常吃方块碰撞；但如果某一刻被推进实心区域
+        //   （高速度穿过薄墙、被活塞推、或者在墙角爆炸），就会一直嵌在里面 ——
+        //   每 tick 触发 onHit、扣耐久、又动不了。这里主动沿「朝掷出者」的方向挪出来。
+        if (this.isInWall()) {
+            Vec3 escape = this.escapeDirection();
+            for (int step = 1; step <= 12; step++) {
+                Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
+                if (this.isFreeAt(candidate)) {
+                    this.setPos(candidate.x, candidate.y, candidate.z);
+                    break;
+                }
+            }
+        }
+
         this.setLineLength(distanceToOwner());
 
         // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
