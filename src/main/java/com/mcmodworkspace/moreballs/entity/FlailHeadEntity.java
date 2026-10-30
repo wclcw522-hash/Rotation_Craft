@@ -110,6 +110,17 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double ARRIVE_DISTANCE = 0.7D;
 
     /**
+     * 移动回收时，玩家水平位移传递给锤头的比例（作者 2026-10-30 指定 70%）。
+     *
+     * <p>锤头自己每 tick 只走 {@code recoverSpeed / 20}（铁球 ≈ 0.21 格），比玩家疾跑
+     * （0.28 格/tick）慢 ⇒ 原地收线时人一跑就把绳子拉长、永远追不上。
+     * 按这个比例把玩家的位移分给锤头，它就能被「拖着走」，边跑边收得回来。</p>
+     *
+     * <p>拖拽之后仍夹在 {@link #MAX_LINE} 以内，所以绳子不会变长。</p>
+     */
+    private static final double RETURN_DRAG_RATIO = 0.7D;
+
+    /**
      * 锤头最长寿命（刻）= 5 分钟。
      *
      * <p>作者 2026-10-19：存档里有个锤头扔出去再也没回来，导致手里每把流星锤都
@@ -876,8 +887,30 @@ public class FlailHeadEntity extends BallProjectile {
         double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
         perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
 
+        // ===== 移动回收：被掷出者「拖着走」（作者 2026-10-30 指定）=====
+        //
+        //   静态回收时锤头每 tick 只走 `recoverSpeed / 20`（铁球 ≈ 0.21 格），
+        //   而玩家疾跑是 0.28 格/tick —— **锤头追不上人**，绳子只会越拉越长。
+        //
+        //   做法：把玩家这一 tick 的水平位移按 {@link #RETURN_DRAG_RATIO}(70%) 加给锤头，
+        //   于是它一边自己往回飞、一边被拖着走。铁球合起来 ≈ 0.41 格/tick，
+        //   相对玩家仍以 0.13 格/tick 靠近 ⇒ 边跑边收得回来。
+        //
+        //   同时**不让绳子变长**：拖拽之后若距离超过 {@link #MAX_LINE}，
+        //   就沿「朝玩家」的方向夹回上限 —— 这是作者明确要求的。
+        Vec3 ownerMove = living.getDeltaMovement();
+        Vec3 drag = new Vec3(ownerMove.x * RETURN_DRAG_RATIO, 0.0D, ownerMove.z * RETURN_DRAG_RATIO);
+
         Vec3 dir = target.subtract(this.position()).normalize();
-        Vec3 next = this.position().add(dir.scale(perTick));
+        Vec3 next = this.position().add(dir.scale(perTick)).add(drag);
+
+        // 绳子不延长：超出上限就夹回来（沿朝玩家方向），这段不受地形限制的语义不变
+        Vec3 toTarget = target.subtract(next);
+        double afterDrag = toTarget.length();
+        if (afterDrag > MAX_LINE) {
+            next = target.subtract(toTarget.normalize().scale(MAX_LINE));
+        }
+
         this.setPos(next.x, next.y, next.z);
         this.setDeltaMovement(Vec3.ZERO);
         this.hurtMarked = true;

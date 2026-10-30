@@ -1,3 +1,49 @@
+## 1.2.0.60 — 移动回收：锤头被掷出者拖着走
+
+### 问题
+
+`tickReturning` 里锤头每 tick 只走 `recoverSpeed / 20`：
+
+| 球 | recoverSpeed | 每 tick |
+|---|---|---|
+| 铁球（weight 7） | 30 / 7 ≈ 4.29 格/秒 | **0.21 格** |
+| 木球（weight 5） | 30 / 5 = 6 格/秒 | 0.30 格 |
+
+而玩家疾跑是 **0.28 格/tick** —— 拿铁球回收时人一跑，锤头就永远追不上，
+绳子只会越拉越长。
+
+### 修法（按作者指定：70% 拖拽 + 不延长绳子）
+
+```java
+// 玩家这一 tick 的水平位移，按 70% 加给锤头
+Vec3 ownerMove = living.getDeltaMovement();
+Vec3 drag = new Vec3(ownerMove.x * RETURN_DRAG_RATIO, 0.0D,
+                     ownerMove.z * RETURN_DRAG_RATIO);
+
+Vec3 next = this.position().add(dir.scale(perTick)).add(drag);
+
+// 绳子不延长：拖拽后超过上限就沿「朝玩家」方向夹回来
+Vec3 toTarget = target.subtract(next);
+if (toTarget.length() > MAX_LINE) {
+    next = target.subtract(toTarget.normalize().scale(MAX_LINE));
+}
+```
+
+新增常量 `RETURN_DRAG_RATIO = 0.7D`。
+
+**效果**（铁球、玩家疾跑）：
+
+```
+锤头自身   0.21 格/tick
+拖拽       0.28 × 0.7 = 0.196 格/tick
+合计       0.406 格/tick
+玩家       0.28 格/tick
+⇒ 相对靠近 0.126 格/tick  （边跑边收得回来）
+```
+
+「回收不受地形限制」的语义没变 —— 这段仍然不做任何方块检测，只是多了拖拽与长度夹取。
+
+---
 ## 1.2.0.59 — 锤头伤害灌值、走近自动回收、允许疾跑、出手点下调
 
 ### ① 绿宝石流星锤伤害比铁流星锤高
