@@ -691,16 +691,30 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   FLYING 阶段 noPhysics=false，正常吃方块碰撞；但如果某一刻被推进实心区域
         //   （高速度穿过薄墙、被活塞推、或者在墙角爆炸），就会一直嵌在里面 ——
-        //   每 tick 触发 onHit、扣耐久、又动不了。这里主动沿「朝掷出者」的方向挪出来。
+        // ===== 卡进方块时先脱离（落地后下沉、持续扣耐久）=====
+        //
+        // 说明一点：**球没有这个问题，也不该有**。球落地后会被碰撞解算推回方块表面、
+        // 静止待命，那是正常物理表现 —— 球没有耐久账本，贴地看不出任何异常。
+        //
+        // 锤头不同：它沿用球那套物理（noPhysics=false、受重力），但自己在 onHit 里
+        // 撞方块要扣耐久。于是「贴地」在锤头身上变成「卡在方块里持续掉耐久」。
+        //
+        // 两件事一起做：
+        // 1) 逃逸幅度 12 步(0.75 格) 提到 40 步(2.5 格) —— 原来逃不出去就是幅度不够；
+        // 2) 卡住时关掉重力，别再让重力继续往下压；真正脱离后下一次再开回来。
         if (this.isInWall()) {
+            this.setNoGravity(true);
             Vec3 escape = this.escapeDirection();
-            for (int step = 1; step <= 12; step++) {
+            for (int step = 1; step <= 40; step++) {
                 Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
                 if (this.isFreeAt(candidate)) {
                     this.setPos(candidate.x, candidate.y, candidate.z);
+                    this.setDeltaMovement(Vec3.ZERO);
                     break;
                 }
             }
+        } else if (this.getDeltaMovement().lengthSqr() > 1.0E-4D) {
+            this.setNoGravity(false);
         }
 
         this.setLineLength(distanceToOwner());
@@ -754,7 +768,14 @@ public class FlailHeadEntity extends BallProjectile {
             //
             //   现在：① 阈值放宽到 1.15 × MAX_LINE，正常回收全程不触发；
             //        ② **不再加向内张力** —— 「绳子不可拉伸」只用「砍掉朝外的径向分量」表达。
-            if (distance > MAX_LINE * 1.15D && distance > 1.0E-4D) {
+            // 阈值必须是 MAX_LINE 本身，不能是 1.15 倍。
+            //
+            // 原来放宽到 1.15 倍是为了不让回收过程被反复拉回，但回收走 RETURNING 阶段、
+            // 根本不会进这个方法。FLYING 阶段放宽只会让锤头在线外(30~34.5 格)无人约束地停着：
+            // 物品栏显示已扔出，锤头却躺在地上不动，人走远了也不跟过来。
+            //
+            // 现在只要超出线长就每 tick 拽回球面，并砍掉朝外的速度分量。
+            if (distance > MAX_LINE && distance > 1.0E-4D) {
                 Vec3 out = delta.scale(1.0D / distance);          // 掷出者 → 锤头
                 Vec3 clamped = anchor.add(out.scale(MAX_LINE));
                 this.setPos(clamped.x, clamped.y, clamped.z);
@@ -898,7 +919,10 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   同时**不让绳子变长**：拖拽之后若距离超过 {@link #MAX_LINE}，
         //   就沿「朝玩家」的方向夹回上限 —— 这是作者明确要求的。
-        Vec3 ownerMove = living.getDeltaMovement();
+        // 用位置差而不是 getDeltaMovement()：玩家实体的 deltaMovement 由 Player.aiStep()
+        // 每 tick 重算，服务端读到的值不一定等于实际位移(实测拖拽完全没生效就是它)。
+        // xo/yo/zo 是上一 tick 的真实坐标，稳得多。
+        Vec3 ownerMove = living.position().subtract(living.xo, living.yo, living.zo);
         Vec3 drag = new Vec3(ownerMove.x * RETURN_DRAG_RATIO, 0.0D, ownerMove.z * RETURN_DRAG_RATIO);
 
         Vec3 dir = target.subtract(this.position()).normalize();
