@@ -1,3 +1,85 @@
+## 1.2.0.59 — 锤头伤害灌值、走近自动回收、允许疾跑、出手点下调
+
+### ① 绿宝石流星锤伤害比铁流星锤高
+
+`BallPhysicsCore.damage` 是**实体字段**、默认 `3.0F`。而 `FlailItem.onUseTick` 创建锤头时
+只灌了 `toughness` / `weight` / `bounce` / `pierceLevel` 四个字段 —— **漏了 `damage`**。
+
+于是每把锤头的基础伤害都是 3，伤害差异只剩「速度比」那一点：铁球 `physicalVelocity` 1.05、
+绿宝石 1.2，比值只差 14%，完全压不住绿宝石「飞得更快、命中更稳」的优势 ⇒
+体感上就是「绿宝石伤害更高」。
+
+**修**：
+
+```java
+head.setDamage(startProfile.damage());
+```
+
+补上之后铁球 `3 → 11`、绿宝石 `3 → 2`，直觉就对了。
+原有的「按速度缩放」逻辑一行没动。
+
+### ② 掷出者走近锤头自动回收（新增）
+
+不必按住右键：人走到锤头旁边（碰撞箱相交，`inflate(0.2)`）就自动收线。
+
+```java
+case FLYING -> {
+    ...
+    if (this.getOwner() instanceof LivingEntity autoOwner
+            && this.getBoundingBox().inflate(0.2D).intersects(autoOwner.getBoundingBox())) {
+        this.beginReturning(autoOwner);   // 与手动回收一样扣 1 耐久
+        this.setRetrieving(true);
+    }
+}
+```
+
+和「按住右键回收」不冲突 —— 那条走 use 系统的 `setRetrieving`，这条只是把 `RETURNING`
+状态踢起来，之后 `tickReturning` 照常拉。
+
+### ③ 回收状态下不能疾跑
+
+**这是原版行为，不是本模组的问题。** 原版 `LocalPlayer` 的疾跑门槛是：
+
+```java
+isSprintingBlocked = isUsingItem() && !useItem.getOrDefault(USE_EFFECTS, UseEffects.DEFAULT).canSprint();
+```
+
+而 `UseEffects.DEFAULT` 是 `(canSprint=false, speedMultiplier=0.2)` —— 只要进了 use 状态就
+不能疾跑。1.2.0.55 我把 `use_effects` 整个撤掉时，这一项也跟着回到了默认的 `false`。
+
+**修**：给流星锤显式设组件
+
+```java
+.component(DataComponents.USE_EFFECTS, new UseEffects(true, true, 0.2F))
+```
+
+`canSprint = true` ⇒ 蓄力与回收期间都能疾跑；`speedMultiplier` 仍是 0.2，
+蓄力的减速照旧（回收那段由 `LocalPlayerMixin` 抬到 1.0）。
+
+### ④ 出手点下调（轻球贴脸打会从头顶飞过）
+
+原来用的是 `spinTop(shooter)` —— 那是**蓄力环绕的最高点**：
+
+```
+脚底 + SPIN_HEIGHT(1.75) + SPIN_RADIUS(1.5) = 3.25 格
+```
+
+比玩家视线（1.62）高出 1.6 格。贴脸打怪时锤头直接从头顶飞过去，轻球（初速度大）最明显。
+
+**修**：新增 `launchOrigin()`，从视线附近出手
+
+```java
+private Vec3 launchOrigin(LivingEntity shooter) {
+    Vec3 look = shooter.getLookAngle();
+    return shooter.getEyePosition()
+            .add(look.scale(0.35D))
+            .add(0.0D, -0.1D, 0.0D);
+}
+```
+
+蓄力环绕仍用 `spinTop`，那是另一回事。出手前照样验一次实心（贴墙时前方 0.35 格可能嵌进方块）。
+
+---
 ## 1.2.0.58 — 回收状态保持到松手、耐久整数溢出
 
 ### ① 回收后按住右键仍显示蓄力字样 + 吃移速惩罚

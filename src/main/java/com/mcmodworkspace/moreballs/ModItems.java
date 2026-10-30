@@ -83,8 +83,31 @@ public final class ModItems {
      *
      * <p>这里设成 {@code speedMultiplier = 1.0} 且允许疾跑，蓄力和回收期间移动速度不受影响。</p>
      */
+    /**
+     * <b>流星锤</b>。
+     *
+     * <p>⚠️ 必须显式覆写 {@code use_effects}（作者 2026-10-30：「回收完成后的确没有移速惩罚了，
+     * 但是疾跑在这个状态下不进行」）：</p>
+     *
+     * <p>原版 {@code LocalPlayer} 的疾跑门槛是</p>
+     *
+     * <pre>
+     * isSprintingPossible = isUsingItem() &amp;&amp; !USE_EFFECTS.canSprint()
+     * </pre>
+     *
+     * <p>而 {@code UseEffects.DEFAULT} 是 {@code (canSprint=false, speedMultiplier=0.2)} ——
+     * 只要进了 use 状态就不能疾跑。<b>这是原版行为，不是本模组的问题</b>，
+     * 但对流星锤不合理：蓄力和回收都可能持续好几秒，期间完全跑不起来。</p>
+     *
+     * <p>这里设成 {@code canSprint = true}：允许疾跑；{@code speedMultiplier} 仍是 0.2，',
+     * 蓄力期间的减速照旧（回收那段由 {@code LocalPlayerMixin} 抬到 1.0）。</p>
+     */
     public static final DeferredItem<Item> FLAIL = ITEMS.registerItem(
-            "flail", props -> new FlailItem(props.stacksTo(1).enchantable(14)));
+            "flail", props -> new FlailItem(props
+                    .stacksTo(1)
+                    .enchantable(14)
+                    .component(net.minecraft.core.component.DataComponents.USE_EFFECTS,
+                            new net.minecraft.world.item.component.UseEffects(true, true, 0.2F))));
     public static final DeferredItem<Item> COMBO_BALL = ITEMS.registerItem(
             "combo_ball", props -> new ComboBallItem(props.stacksTo(BALL_STACK_SIZE)));
 

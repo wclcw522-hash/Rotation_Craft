@@ -384,6 +384,18 @@ public class FlailHeadEntity extends BallProjectile {
                 this.noPhysics = false;
                 super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）
                 tickFlying();
+
+                // ===== 掷出者走近 ⇒ 自动开始回收（作者 2026-10-30 指定）=====
+                //
+                //   不必按住右键：人走到锤头旁边（碰撞箱相交）就自动收线。
+                //   这和「按住右键回收」不冲突 —— 那条走 use 系统的 setRetrieving，
+                //   这条只是把 RETURNING 状态踢起来，之后 tickReturning 照常拉。
+                if (this.getOwner() instanceof LivingEntity autoOwner
+                        && this.getBoundingBox().inflate(0.2D)
+                                .intersects(autoOwner.getBoundingBox())) {
+                    this.beginReturning(autoOwner);   // 会扣 1 耐久，与手动回收一致
+                    this.setRetrieving(true);
+                }
             }
         }
     }
@@ -500,13 +512,19 @@ public class FlailHeadEntity extends BallProjectile {
         this.setStage(Stage.FLYING);
         this.setNoGravity(false);
 
-        // ① 瞬移到蓄力旋转的最高点 —— **但必须先确认那个位置不是实心的**（作者 2026-10-30：
-        //    「流星锤扔出会沉到方块里」）。
+        // ===== ① 出手点：从**视线附近**甩出去（作者 2026-10-30）=====
         //
-        //    spinTop 是「玩家侧上方一点点」，玩家贴着墙、蹲在低矮空间、或者头顶有方块时，
-        //    这个点可能整个落在方块内部。原来直接 setPos 过去 ⇒ 锤头从第一 tick 就嵌在方块里，
-        //    每 tick 撞一次 ⇒ 扣耐久 + 卡死。
-        Vec3 top = spinTop(shooter);
+        //   原来是 `spinTop(shooter)` —— 那是「蓄力环绕的最高点」，等于
+        //   `脚底 + SPIN_HEIGHT(1.75) + SPIN_RADIUS(1.5)` = **3.25 格**，
+        //   比玩家视线（1.62）高出 1.6 格。贴脸打怪时它直接从头顶飞过去，
+        //   轻球（初速度大）尤其明显。
+        //
+        //   改成「眼睛高度再往下 0.1、身前 0.35」—— 与第一人称的出手位置一致，
+        //   近距离也不会越过目标。蓄力环绕仍用 spinTop，那是另一回事。
+        //
+        //   出手前同样要验一次实心：贴着墙时前方 0.35 格可能在方块里，
+        //   那样锤头从第一 tick 就嵌住。
+        Vec3 top = launchOrigin(shooter);
         if (!this.isFreeAt(top)) {
             // 退到掷出者眼睛高度 —— 那是玩家视野所在，一定不是实心的
             Vec3 eye = shooter.getEyePosition();
@@ -543,6 +561,21 @@ public class FlailHeadEntity extends BallProjectile {
         return owner.position()
                 .add(right.scale(owner.getBbWidth() * 0.5D))
                 .add(0.0D, SPIN_HEIGHT + SPIN_RADIUS, 0.0D);
+    }
+
+    /**
+     * <b>出手点</b>：视线略下方、身前一点点（作者 2026-10-30）。
+     *
+     * <p>原来用的是 {@link #spinTop}（蓄力环绕最高点），高度是「脚底 + 1.75 + 1.5 = 3.25 格」，
+     * 比视线高 1.6 格 —— 贴脸打怪时锤头从头顶飞过去，轻球（初速度大）最明显。</p>
+     *
+     * <p>改成正对视线出手：与第一人称看到的锤头位置一致，近距离也不会越过去。</p>
+     */
+    private Vec3 launchOrigin(net.minecraft.world.entity.LivingEntity shooter) {
+        Vec3 look = shooter.getLookAngle();
+        return shooter.getEyePosition()
+                .add(look.scale(0.35D))
+                .add(0.0D, -0.1D, 0.0D);
     }
 
     /**

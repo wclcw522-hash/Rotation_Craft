@@ -601,6 +601,16 @@ public class FlailItem extends Item {
         //     · 球的 consumeDurability 改的是实体字段 ⇒ 玩家物品的组件没动（耐久不掉）
         //     · getWeight()==0 ⇒ 速度按最轻算 ⇒ 重球也飞得远（重量不对）
         BallBehavior.BallProfile startProfile = profileOf(stack);
+        // ⚠️ **基础伤害也必须灌进去**（作者 2026-10-30：「绿宝石流星锤打的伤害比铁流星锤还高」）。
+        //
+        //   `BallPhysicsCore.damage` 是实体字段、默认 `3.0F`，而上面这里原来只灌了
+        //   toughness / weight / bounce / pierceLevel —— **漏了 damage**。
+        //   于是每把锤头的基础伤害都是 3，伤害差异只剩「速度比」那一点：
+        //   铁球 physicalVelocity 1.05、绿宝石 1.2，比值只差 14%，体感上完全压不住
+        //   绿宝石「飞得更快、命中更稳」的优势 ⇒ 看起来就是「绿宝石伤害更高」。
+        //
+        //   补上之后：铁球 `3 → 11`、绿宝石 `3 → 2`，再加上速度比，直觉就对了。
+        head.setDamage(startProfile.damage());
         head.setToughness(startProfile.toughness());
         head.setWeight(startProfile.weight());
         head.setBounce(startProfile.bounce());
