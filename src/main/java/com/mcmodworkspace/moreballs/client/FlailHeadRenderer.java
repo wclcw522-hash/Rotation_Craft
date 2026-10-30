@@ -112,8 +112,9 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
 
         if (part != null) {
             poseStack.pushPose();
-            // 球模型是 0.5 格，锤头碰撞箱是 0.2 格 ⇒ 缩到 0.4 保持原尺寸
-            final float shrink = 0.4F;
+            // 球模型 0.5 格，锤头碰撞箱**已经改成 0.5**（作者 2026-10-30：「碰撞箱变了但是模型没变」）
+            // ⇒ 不再缩放，1:1 画出来
+            final float shrink = 1.0F;
             poseStack.scale(shrink, shrink, shrink);
             int light = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
             collector.submitBlockModel(

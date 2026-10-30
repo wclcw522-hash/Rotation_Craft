@@ -546,6 +546,33 @@ public class FlailHeadEntity extends BallProjectile {
         }
         return super.effectiveSpeed();
     }
+    /**
+     * <b>锤头永远不「飞回主人」</b>（作者 2026-10-30：「回响流星锤会在与掷出者碰撞的时候
+     * 在掷出者身上掉落一个回响球」）。
+     *
+     * <h2>根因</h2>
+     * <p>回响球带【忠诚】，而 {@code homingToOwner0()} 里有一段交付逻辑：</p>
+     *
+     * <pre>
+     * if (toOwner.length() &lt;= RETURN_ARRIVE_DISTANCE) {
+     *     this.deliverToOwner(serverLevel, living);   // ← 把球交回玩家 / 掉在脚边
+     *     return true;
+     * }
+     * </pre>
+     *
+     * <p>锤头继承了球的整套词条，于是它一飞到掷出者身边就被判成「回归到达」，
+     * 把内嵌那颗回响球交了出去 —— 表现就是「碰到掷出者时在身上掉一个回响球」。</p>
+     *
+     * <h2>为什么整个关掉</h2>
+     * <p>锤头有自己的回收系统（{@code RETURNING} 状态 + {@code finishReturn}），
+     * 走的是「线拉回手里」而不是「球自己飞回来」。两条路径并存只会打架：
+     * 一条要交付、一条要收线，谁先到谁说了算。所以这里直接返回 false，
+     * 让锤头的生命周期完全由自己的三态机掌控。</p>
+     */
+    @Override
+    protected boolean homingToOwner0() {
+        return false;
+    }
     /** 这个位置放得下锤头吗？（碰撞箱与方块不相交） */
     private boolean isFreeAt(Vec3 pos) {
         net.minecraft.world.phys.AABB box = this.getDimensions(this.getPose()).makeBoundingBox(pos);

@@ -1,3 +1,78 @@
+## 1.2.0.51 — 回响球掉出、锤头模型尺寸、回收移速惩罚
+
+上一轮（1.2.0.50）的三个 bug，这次按「修 bug 四步」重查了一遍：
+
+### ① 回响流星锤撞掷出者时，世界里掉出一个回响球
+
+作者纠正过我上一次的诊断方向：「不是对我生效了，是异常掉出了球」——
+说的对，`deliverToOwner()` 的结尾是 `spawnAtLocation()`，那是**在世界里生成 ItemEntity**，
+不是把球塞进背包。
+
+**完整链路（两处入口，都通到 `deliverToOwner`）**
+
+`BallPhysicsCore.java:4259` 的 `deliverToOwner()`：
+
+```java
+boolean stored = delivery != BallPouchHelper.Delivery.NOWHERE;
+if (!stored) {
+    this.spawnAtLocation(level, stack, 0.1F);   // ← L4338：世界里掉出球
+}
+```
+
+调用它的地方有两处：
+
+| 位置 | 触发条件 |
+|---|---|
+| `BallPhysicsCore:4063`（`homingToOwner0()` 内） | 飞回主人途中距离 ≤ `RETURN_ARRIVE_DISTANCE` |
+| `BallPhysicsCore:2593`（`onHit()` 内） | `homingBack == true` 且撞到主人 |
+
+第二处容易漏 —— 它判的是**独立字段 `homingBack`**，跟 `homingToOwner0()` 的返回值不是一回事。
+
+而 `homingBack` 在全仓库**只有一处被赋 true**：`BallPhysicsCore:4068`，就在 `homingToOwner0()` 里。
+所以只要把 `homingToOwner0()` 整个挡掉，两条入口就同时失效。
+
+**修**：`FlailHeadEntity` 覆写
+
+```java
+@Override
+protected boolean homingToOwner0() {
+    return false;
+}
+```
+
+锤头有自己的回收系统（`RETURNING` + `finishReturn` + 线拉回手里），
+和球的「自己飞回来」是两套并存机制 —— 让球那套彻底不参与。
+
+**顺带核实过的**：`isPickable()` 与 `canBeCollidedWith()` 都返回 false，
+所以玩家右键接不走锤头（那条也走 `giveTo` → 掉球）。
+
+### ② 锤头碰撞箱变了但模型没变
+
+碰撞箱早就是 `0.5`（`ModEntities:66`），但渲染器里还留着给 0.2 时代写的缩放：
+
+```java
+final float shrink = 0.4F;      // 0.5 × 0.4 = 0.2，看起来还是旧尺寸
+```
+
+**修**：`FlailHeadRenderer` 改成 `shrink = 1.0F` —— 球模型本身就是 0.5 格，1:1 画出来正好等于碰撞箱。
+
+### ③ 回收时取消移速惩罚
+
+原版 `UseEffects.DEFAULT` 是 `(canSprint=false, speedMultiplier=0.2)`，
+只要 `isUsingItem()` 为真，客户端就把移动速度乘 0.2。
+
+蓄力和回收都靠 `startUsingItem()` 维持右键状态 —— 于是整个过程中移速被砍到 20%，
+回收时尤其难受（要站着不动等锤头飞回来）。
+
+**修**：`ModItems.FLAIL` 显式覆写组件
+
+```java
+.component(DataComponents.USE_EFFECTS, new UseEffects(true, true, 1.0F))
+```
+
+`speedMultiplier = 1.0` + 允许疾跑，蓄力与回收期间移速不受影响。
+
+---
 ## 1.2.0.50 — 流星锤四项：松手语义、碰撞箱、蓄力伤害、锁物品栏
 
 ### ① 回收后按住右键不应进入蓄力（我上一版改坏的）

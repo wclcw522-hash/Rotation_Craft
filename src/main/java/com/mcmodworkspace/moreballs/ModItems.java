@@ -72,8 +72,23 @@ public final class ModItems {
      *
      * <p>堆叠数固定 1：它带耐久，而且扔出去之后要能定位到「原本那一格」。</p>
      */
+    /**
+     * <b>流星锤</b>。
+     *
+     * <p>⚠️ 必须显式覆写 {@code use_effects}（作者 2026-10-30：「让回收球的时候取消移速惩罚」）：
+     * 蓄力/回收都靠 {@code startUsingItem} 保持右键状态，而原版的
+     * {@code UseEffects.DEFAULT} 是 {@code (canSprint=false, speedMultiplier=0.2)}
+     * —— 只要 {@code isUsingItem()} 为真，{@code LocalPlayer.modifyInput()} 就把移动速度
+     * 乘 0.2。那是给「吃东西 / 拉弓」设计的，流星锤不该吃这套。</p>
+     *
+     * <p>这里设成 {@code speedMultiplier = 1.0} 且允许疾跑，蓄力和回收期间移动速度不受影响。</p>
+     */
     public static final DeferredItem<Item> FLAIL = ITEMS.registerItem(
-            "flail", props -> new FlailItem(props.stacksTo(1).enchantable(14)));
+            "flail", props -> new FlailItem(props
+                    .stacksTo(1)
+                    .enchantable(14)
+                    .component(net.minecraft.core.component.DataComponents.USE_EFFECTS,
+                            new net.minecraft.world.item.component.UseEffects(true, true, 1.0F))));
     public static final DeferredItem<Item> COMBO_BALL = ITEMS.registerItem(
             "combo_ball", props -> new ComboBallItem(props.stacksTo(BALL_STACK_SIZE)));
 
