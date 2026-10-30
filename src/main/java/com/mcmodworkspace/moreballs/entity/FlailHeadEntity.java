@@ -548,6 +548,18 @@ public class FlailHeadEntity extends BallProjectile {
         float speed = (float) (profile.physicalVelocity() * Math.max(0.1F, velocityMultiplier));
         this.launchSpeed = speed;
 
+        // ⚠️⚠️ **每次投掷都必须把线长标记复位**（这是「线长限制 / 弹回等一大堆功能不生效」的根因）。
+        //
+        //   `lineCapConsumed` 在 tickFlying 里一旦置 true 就再也不回 false：
+        //     if (lineLength >= MAX_LINE && !lineCapConsumed) { lineCapConsumed = true; ...弹回... }
+        //   它是**实体字段、跨投掷保留**，而 launch() 原来只复位了位置与速度。
+        //   于是第一次扔到线长之后，之后每一次投掷线长上限都彻底失效 ——
+        //   既不会弹回、也不会被拽回，锤头可以拽到任意远。
+        //
+        //   同理把回收状态也清掉，让这次投掷从干净状态开始。
+        this.lineCapConsumed = false;
+        this.setRetrieving(false);
+
         Vec3 dir = shooter.getLookAngle();
         if (dir.lengthSqr() < 1.0E-6D) {
             dir = new Vec3(0.0D, 0.0D, 1.0D);
@@ -704,13 +716,28 @@ public class FlailHeadEntity extends BallProjectile {
         // 2) 卡住时关掉重力，别再让重力继续往下压；真正脱离后下一次再开回来。
         if (this.isInWall()) {
             this.setNoGravity(true);
-            Vec3 escape = this.escapeDirection();
+            // 先**向上**找空位：被重力压进地面时，只有往上是有效的
+            // （原来只朝玩家方向水平逃逸，锤头嵌在脚下就永远出不来）。
+            boolean escaped = false;
             for (int step = 1; step <= 40; step++) {
-                Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
+                Vec3 candidate = this.position().add(0.0D, step * 0.0625D, 0.0D);
                 if (this.isFreeAt(candidate)) {
                     this.setPos(candidate.x, candidate.y, candidate.z);
                     this.setDeltaMovement(Vec3.ZERO);
+                    escaped = true;
                     break;
+                }
+            }
+            // 上方被堵（洞穴顶）⇒ 再试朝掷出者方向
+            if (!escaped) {
+                Vec3 escape = this.escapeDirection();
+                for (int step = 1; step <= 40; step++) {
+                    Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
+                    if (this.isFreeAt(candidate)) {
+                        this.setPos(candidate.x, candidate.y, candidate.z);
+                        this.setDeltaMovement(Vec3.ZERO);
+                        break;
+                    }
                 }
             }
         } else if (this.getDeltaMovement().lengthSqr() > 1.0E-4D) {

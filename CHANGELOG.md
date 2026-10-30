@@ -1,3 +1,50 @@
+## 1.2.0.62 — 线长限制/弹回失效的真根因：lineCapConsumed 从不清零
+
+### 根因（一条代码同时打死两个功能）
+
+`tickFlying` 里那段：
+
+```java
+if (this.lineLength() >= MAX_LINE && !this.lineCapConsumed) {
+    this.lineCapConsumed = true;
+    ...
+    this.setDeltaMovement(toOwner.normalize().scale(SNAP_BACK_SPEED));   // 弹回
+    this.consumeOneToughness("到达线长上限");
+}
+```
+
+`lineCapConsumed` 是**实体字段、跨投掷保留**。而 `launch()` 里复位了位置、速度、`launchSpeed`，
+**唯独没有复位它**。
+
+于是：
+
+- 第一次投掷到线长 → 置 `true`，弹回一次 ✓
+- **之后每一次投掷** → `lineCapConsumed` 已是 `true` → **线长上限彻底不触发、弹回也不触发**
+
+表现就是「线长限制和弹回等一大堆功能不生效」—— 一个字段把两条功能全关了。
+
+### 修
+
+`launch()` 里补两行：
+
+```java
+this.lineCapConsumed = false;   // 每次投掷都从「没到过线长」开始
+this.setRetrieving(false);      // 回收状态也清干净
+```
+
+### 顺带：下沉的逃逸方向错了
+
+`escapeDirection()` 只返回「朝掷出者」方向。锤头被重力压进**脚下地面**时，朝玩家是**水平**的，
+逃不出去（头顶方向才是空的）。
+
+**修**：先尝试**向上** 40 步（2.5 格），上方被堵（洞穴顶）再退回朝掷出者。
+
+### 说明
+
+球没有下沉这个问题，也不该有 —— 球落地被碰撞解算推回方块表面、静止待命是正常表现，
+它没有耐久账本，贴地看不出异常。锤头的问题是「继承球的物理 + 自己撞方块扣耐久」叠加出来的。
+
+---
 ## 1.2.0.61 — 落地持续掉耐久、线长超限不拉回、移动拖拽失效
 
 ### ① 锤头落地后下沉、卡在方块里持续掉耐久
