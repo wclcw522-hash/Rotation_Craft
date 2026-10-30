@@ -486,52 +486,61 @@ public class FlailItem extends Item {
             return InteractionResult.CONSUME;
         }
 
-        // 作者 2026-10-19：回收完之后必须**松开再按**才算下一次蓄力。
-        // 玩家还按着右键时（isUsingItem 为真）不响应，松手后 FlailCastHandler 会清标记。
-        if (isRecovered(stack) && player.isUsingItem()) {
-            return InteractionResult.CONSUME;
-        }
+        // ================================================================
+        // 作者 2026-10-30 的完整规则（照原话实现）：
+        //
+        //   「右键按住的时候瞬间检测锤头是否在手里，是的话进行蓄力，否则进行回收，
+        //     回收的代码优先级高于蓄力，在回收时按住右键不会导致回收完成后行为降级成蓄力」
+        //
+        // 三条推论，下面严格按顺序执行：
+        //   ① **回收优先**：先判「锤头不在手里」，成立就直接回收并返回，不再看蓄力；
+        //   ② **蓄力只在锤头在手里时发生**（没扔出去 / 正在绕圈）；
+        //   ③ **不可能降级**：只要手指还按着，回收分支每被调一次就刷新一次
+        //      FLAIL_HOLD_TICK；锤头回来后 head 变 null 也照样刷新 ——
+        //      所以「超过阈值没刷新」只会在真正松手时发生。
+        //
+        //   ④ 回收这一段**不调 startUsingItem**，isUsingItem() 始终为 false，
+        //      于是不会套上 use_effects 的 0.2 移速惩罚；蓄力那一段照旧走它，惩罚保留。
+        // ================================================================
 
         var head = findHead(level, player);
+        boolean headInHand = head == null
+                || head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN;
 
-        // ===== 情况 A：锤头已经扔出去了 ⇒ 这一下是「回收开关」 =====
+        // ===== ① 回收（优先级高于蓄力）：锤头不在手里，或上一次按住已经进了回收状态 =====
         //
-        // ⚠️⚠️ **回收与蓄力在这里彻底分家**（作者 2026-10-30：
-        //    「看起来就是你蓄力和回收用的同一个底层代码……我现在要求回收用另外的代码不要触发蓄力」）。
-        //
-        //   旧写法是 `player.startUsingItem(hand)` —— 借用原版的「使用中」状态来检测松手，
-        //   代价是它也一并套用了 use_effects 的移速惩罚（UseEffects.DEFAULT 的 0.2），
-        //   于是「回收时走不动路」。
-        //
-        //   现在回收**完全不进 use 系统**：
-        //     · 点一下右键 = 开始回收；再点一下 = 停止（开关式）；
-        //     · 不复用 startUsingItem，isUsingItem() 始终为 false ⇒ 没有任何移速惩罚；
-        //     · 蓄力那条路（情况 B）照旧走 startUsingItem，移速惩罚原样保留。
-        //
-        //   按住右键时原版会反复调 use()，所以这里用物品冷却挡一下（0.3 秒），
-        //   否则会变成每刻疯狂开关。
-        if (head != null
-                && head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
-            if (!level.isClientSide() && !player.getCooldowns().isOnCooldown(stack)) {
-                player.getCooldowns().addCooldown(stack, RECOVER_TOGGLE_COOLDOWN_TICKS);
-                if (head.isRetrieving()) {
-                    head.setRetrieving(false);        // 再点一下 ⇒ 停止回收
-                    markRetrieving(stack, false);
-                } else {
-                    if (head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING) {
-                        head.beginReturning(player);  // 首次 ⇒ 进入回收并扣 1 耐久
-                    }
-                    head.setRetrieving(true);
-                    markRetrieving(stack, true);
+        // 第二个条件（isRetrieving）是「不降级」的关键：锤头飞回手里之后 head 会变成 null，
+        // 若只看 headInHand 就会落进蓄力分支 —— 玩家手指没松，却开始蓄力了。
+        if (!headInHand || isRetrieving(stack)) {
+            if (!level.isClientSide()) {
+                if (head != null
+                        && head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING
+                        && !head.isRetrieving()) {
+                    head.beginReturning(player);      // 首次 ⇒ 进入回收并扣 1 耐久
                 }
+                if (head != null) {
+                    head.setRetrieving(true);         // 按住才拉
+                }
+                markRetrieving(stack, true);          // 物品状态：回收中（动画变 NONE）
+                // ⚠️ **无条件刷新**「按住」时刻 —— 哪怕锤头已经回到手里（head == null）。
+                //    这是「不会降级成蓄力」的全部机制：只要手指按着就一直有刷新，
+                //    超时判定（= 松手）永远不成立。
+                stack.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
+                        player.tickCount);
             }
             return InteractionResult.CONSUME;
         }
 
-        // ===== 情况 B：还没扔 ⇒ 开始蓄力 =====
-        // ⚠️ 作者 2026-10-19：回收完之后必须**松开再按**才算下一次蓄力。
-        //    这里用 head == null 作为「上一把已经收回来了」的判据：
-        //    回收完成时实体会 discard，所以下一 tick findHead 就是 null。
+        // ===== ② 蓄力：锤头在手里 =====
+        //
+        // 蓄力走原版 use 系统（startUsingItem），移速惩罚 use_effects 的 0.2 原样保留 ——
+        // 那是「正在做一件需要站定的事」的自然反馈，作者只要求取消回收那一段。
+        //
+        // RECOVERED 是原有语义：刚回收完的那一次必须先松手，否则玩家还按着右键，
+        // 原版会立刻接着蓄力，看起来像「自动扔出」。
+        if (isRecovered(stack) && player.isUsingItem()) {
+            return InteractionResult.CONSUME;
+        }
         player.startUsingItem(hand);
         return InteractionResult.CONSUME;
     }

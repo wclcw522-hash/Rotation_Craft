@@ -31,6 +31,14 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 @EventBusSubscriber(modid = MoreBalls.MOD_ID)
 public final class FlailCastHandler {
 
+    /**
+     * 「按住回收」的超时阈值（tick）。
+     *
+     * <p>按住时原版每 4 tick 刷新一次 {@code FLAIL_HOLD_TICK}（{@code rightClickDelay} 的间隔），
+     * 超过这个值没刷新就判定松手。6 = 0.3 秒，留了 2 tick 余量。</p>
+     */
+    private static final int HOLD_TIMEOUT_TICKS = 6;
+
     private FlailCastHandler() {
     }
 
@@ -109,8 +117,23 @@ public final class FlailCastHandler {
         // 作者 2026-10-19：回收完成后不能立刻又蓄力/扔出，要松开右键重新按。
         // 锤头飞回时 `FlailHeadEntity.finishReturn` 会置这个标记；
         // 这里在玩家**松开右键**（不再 isUsingItem）时清掉。
-        if (FlailItem.isRecovered(held) && !player.isUsingItem()) {
+        // ===== 松手判定：超过阈值没再按 ⇒ 停止回收、解除「本次按住」的锁 =====
+        //
+        // 作者 2026-10-30：「回收的操作和手感不能变」—— 按住就拉、松手就停。
+        // 但回收不进 use 系统（避免 use_effects 的移速惩罚），所以没有 releaseUsing 可用，
+        // 换成「按住时 use() 每 4 tick 刷新一次 FLAIL_HOLD_TICK」+ 这里判超时。
+        //
+        // 同时清 RECOVERED，让下一次按住右键能重新从蓄力开始（而不是一直卡在回收锁里）。
+        int holdTick = held.getOrDefault(
+                com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
+                Integer.MIN_VALUE / 2);
+        if (FlailItem.isRecovered(held) && player.tickCount - holdTick > HOLD_TIMEOUT_TICKS) {
             FlailItem.markRecovered(held, false);
+            FlailItem.markRetrieving(held, false);
+            FlailHeadEntity stuck = FlailItem.findHead(player.level(), player);
+            if (stuck != null) {
+                stuck.setRetrieving(false);
+            }
         }
 
         FlailHeadEntity head = FlailItem.findHead(player.level(), player);

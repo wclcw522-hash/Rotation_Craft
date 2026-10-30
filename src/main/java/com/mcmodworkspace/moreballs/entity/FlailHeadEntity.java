@@ -853,6 +853,19 @@ public class FlailHeadEntity extends BallProjectile {
         // 所以主手那把就是被回收的这把。
         if (owner instanceof Player p) {
             clearFlailFlags(p);
+            // ⚠️ **回收状态要保持到玩家松手**（作者 2026-10-30：「回收不能在同一次按住右键
+            //    的时候转化成蓄力」）。
+            //
+            //    clearFlailFlags 会把 FLAIL_RETRIEVING 清掉，而锤头刚回来这一 tick
+            //    玩家手指通常还按着 —— 清掉的话下一次 use() 会直接落进蓄力分支，
+            //    变成「回收完自动开始蓄力」。所以这里立刻把状态与时刻重新立起来，
+            //    由 FlailCastHandler 的 HOLD_TIMEOUT_TICKS 超时清理（= 真正松手那一刻）。
+            net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
+            if (FlailItem.isFlail(heldAfter)) {
+                FlailItem.markRetrieving(heldAfter, true);
+                heldAfter.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
+                        p.tickCount);
+            }
         }
         this.discard();
     }
@@ -936,6 +949,7 @@ public class FlailHeadEntity extends BallProjectile {
             if (FlailItem.isFlail(h) && FlailItem.isCasting(h)) {
                 FlailItem.markRetrieving(h, false);
                 FlailItem.markRecovered(h, true);
+            h.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(), p.tickCount);
                 FlailItem.setCasting(h, false);
                 touched = true;
             }
@@ -944,6 +958,7 @@ public class FlailHeadEntity extends BallProjectile {
         if (FlailItem.isFlail(off) && FlailItem.isCasting(off)) {
             FlailItem.markRetrieving(off, false);
             FlailItem.markRecovered(off, true);
+            off.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(), p.tickCount);
             FlailItem.setCasting(off, false);
             touched = true;
         }

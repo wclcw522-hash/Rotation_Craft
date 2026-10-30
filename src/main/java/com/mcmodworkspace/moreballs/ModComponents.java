@@ -237,6 +237,25 @@ public final class ModComponents {
             COMPONENTS.registerComponentType("flail_key", builder -> builder
                     .persistent(com.mojang.serialization.Codec.STRING)
                     .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.STRING_UTF8));
+    /**
+     * <b>最后一次「按住右键回收」的时刻</b>（游戏刻），流星锤专用。
+     *
+     * <h2>为什么需要（作者 2026-10-30 指定的回收手感）</h2>
+     * <p>回收**不能**走原版 use 系统（那会一并套上 use_effects 的 0.2 移速惩罚），
+     * 可手感又必须是「按住就拉、松手就停」。于是换一种检测方式：</p>
+     * <ul>
+     *   <li>按住右键时，原版每 4 tick 会再调一次 {@code Item.use()}；
+     *       回收分支每次被调就刷新这个时刻；</li>
+     *   <li>松手后不再有调用 ⇒ {@code FlailCastHandler} 在超过阈值后判定「松手」，
+     *       停止拉回。</li>
+     * </ul>
+     * <p>阈值必须大于 4（{@code rightClickDelay} 的刷新间隔），这里用 6。</p>
+     */
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> FLAIL_HOLD_TICK =
+            COMPONENTS.registerComponentType("flail_hold_tick", builder -> builder
+                    .persistent(Codec.INT)
+                    .networkSynchronized(ByteBufCodecs.VAR_INT));
+
     public static void register(IEventBus modEventBus) {
         COMPONENTS.register(modEventBus);
     }

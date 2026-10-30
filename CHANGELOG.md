@@ -1,3 +1,75 @@
+## 1.2.0.53 — 回收改成独立状态，按作者原话的三条规则实现
+
+### 作者给的完整规则（原文）
+
+> 右键按住的时候瞬间检测锤头是否在手里，是的话进行蓄力，否则进行回收，
+> 回收的代码优先级高于蓄力，在回收时按住右键不会导致回收完成后行为降级成蓄力
+
+### 实现
+
+`FlailItem.use()` 现在严格按这个顺序：
+
+```java
+var head = findHead(level, player);
+boolean headInHand = head == null || head.stage() == SPIN;
+
+// ① 回收优先：锤头不在手里，或上一次按住已经进了回收状态
+if (!headInHand || isRetrieving(stack)) {
+    ... head.setRetrieving(true); markRetrieving(stack, true);
+    stack.set(FLAIL_HOLD_TICK, player.tickCount);   // 无条件刷新
+    return CONSUME;                                 // 不再看蓄力
+}
+
+// ② 蓄力：锤头在手里
+player.startUsingItem(hand);
+```
+
+### 逐场景核对
+
+| 场景 | `headInHand` | `isRetrieving` | 结果 |
+|---|---|---|---|
+| 没扔锤头 | true | false | **蓄力**（原版 use 系统，移速惩罚保留） |
+| 锤头飞行中按住 | false | false | **回收**（优先级高于蓄力） |
+| 回收中继续按住 | — | true | **回收**，刷新时刻 |
+| 锤头回来了但手指没松 | true | true | **回收**，不降级 |
+| 松手 | — | — | 超时 ⇒ 清状态 ⇒ 下次可蓄力 |
+
+### 三个关键点
+
+**「不会降级」靠两件事一起成立**
+
+1. 回收分支**无条件**刷新 `FLAIL_HOLD_TICK` —— 哪怕锤头已经回到手里（`head == null`）也刷新；
+2. 回收分支不看 `headInHand`，只看 `isRetrieving`。锤头回来那一刻 `head` 变成 null，
+   若只看 `head` 就会落进蓄力分支。
+
+两者合起来：**只要手指还按着就一直有刷新，超时判定（= 松手）永远不成立** ——
+也就是「无论按多久都不会降级」。
+
+**蓄力与回收的代码彻底分开**
+
+| | 触发 | 进 use 状态 | 移速 |
+|---|---|---|---|
+| 蓄力 | `startUsingItem(hand)` | 进 | 原版 0.2（保留） |
+| 回收 | 独立状态 `FLAIL_RETRIEVING` | 不进 | 无惩罚 |
+
+回收**不调 `startUsingItem`** ⇒ `isUsingItem()` 始终为 false ⇒ 不套 `use_effects` 的 0.2。
+蓄力仍走它，惩罚原样保留（作者只要求取消回收那段）。
+
+**「按住/松手」怎么检测**
+
+回收不进 use 系统就没有 `releaseUsing` 可用，改用刷新时刻：
+
+- 按住右键时原版每 4 tick 会再调一次 `use()`；
+- 回收分支每次被调就刷新 `FLAIL_HOLD_TICK`；
+- `FlailCastHandler` 发现「超过 6 tick 没刷新」就判定松手，清 `FLAIL_RETRIEVING` / `FLAIL_RECOVERED`。
+
+新增组件 `FLAIL_HOLD_TICK`（int，网络同步）。
+
+### 同时保留的上一版修复
+
+蓄力期间 `tickSpin` 手动扫描实体结算伤害、`onMobDeath` 清球、回收判据改盒相交。
+
+---
 ## 1.2.0.52 — 蓄力伤害、蓄力/回收底层分离、怪掉落球、回收判据
 
 ### ① 蓄力旋转期间对生物没有伤害
