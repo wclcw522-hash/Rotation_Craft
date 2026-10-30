@@ -112,6 +112,8 @@ public final class FlailCastHandler {
         // 这里在玩家**松开右键**（不再 isUsingItem）时清掉。
         if (FlailItem.isRecovered(held) && !player.isUsingItem()) {
             FlailItem.markRecovered(held, false);
+            // 回收状态也在松手这一刻解除 —— 它决定「蓄力字样 / 移速惩罚」是否生效
+            FlailItem.markRetrieving(held, false);
         }
 
         FlailHeadEntity head = FlailItem.findHead(player.level(), player);

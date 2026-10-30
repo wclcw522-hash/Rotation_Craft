@@ -867,6 +867,21 @@ public class FlailHeadEntity extends BallProjectile {
         // 所以主手那把就是被回收的这把。
         if (owner instanceof Player p) {
             clearFlailFlags(p);
+            // ⚠️⚠️ **回收状态必须保持到玩家松手**（作者 2026-10-30：
+            //    「回收之后保持右键不松手还是会显示蓄力字样并受到移速惩罚」）。
+            //
+            //    `clearFlailFlags` 会把 FLAIL_RETRIEVING 清掉，而锤头飞回这一 tick
+            //    玩家手指通常还按着。清掉之后：
+            //      · `getUseAnimation` 判不到回收 ⇒ 返回 BOW ⇒ 显示蓄力字样与拉弓动作；
+            //      · `LocalPlayerMixin` 判不到回收 ⇒ 移速照旧被乘 0.2。
+            //    两个症状同一个根，都是「状态被提前清了」。
+            //
+            //    这里把状态重新立起来，由 `FlailCastHandler` 在玩家**松开右键**
+            //    （`!isUsingItem`）时连同 FLAIL_RECOVERED 一起清掉。
+            net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
+            if (FlailItem.isFlail(heldAfter)) {
+                FlailItem.markRetrieving(heldAfter, true);
+            }
         }
         this.discard();
     }
@@ -1031,7 +1046,12 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   改成**最小间隔 4 tick**：每 0.2 秒最多扣 1 点。既保留「连续撞墙掉耐久」的语义，
         //   又不会让「卡进方块」这种异常情况瞬间把锤头烧光。
-        if (this.tickCount - this.flailLastDamageTick < TOUGHNESS_MIN_INTERVAL_TICKS) {
+        // ⚠️⚠️ 必须**先确认前一次有效**再算差值 —— 字段初始值是 `Integer.MIN_VALUE`，
+        //    直接 `tickCount - Integer.MIN_VALUE` 会**整数溢出成负数**（100 - (-2147483648)
+        //    超出 int 范围），于是 `< 4` 恒成立、每次都提前返回 —— 表现就是
+        //    **耐久一点都不扣**（作者 2026-10-30：「现在流星锤耐久不消耗了」）。
+        if (this.flailLastDamageTick >= 0
+                && this.tickCount - this.flailLastDamageTick < TOUGHNESS_MIN_INTERVAL_TICKS) {
             return;
         }
         this.flailLastDamageTick = this.tickCount;

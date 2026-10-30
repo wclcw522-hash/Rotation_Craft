@@ -1,3 +1,61 @@
+## 1.2.0.58 — 回收状态保持到松手、耐久整数溢出
+
+### ① 回收后按住右键仍显示蓄力字样 + 吃移速惩罚
+
+两个症状同一个根。`finishReturn` 里的 `clearFlailFlags(p)` 会把 `FLAIL_RETRIEVING` 清掉，
+而锤头飞回这一 tick 玩家手指通常还按着。清掉之后：
+
+- `FlailItem.getUseAnimation()` 判不到回收 ⇒ 返回 `BOW` ⇒ **显示蓄力字样与拉弓动作**；
+- `LocalPlayerMixin` 判不到回收 ⇒ `itemUseSpeedMultiplier` 照旧返回 **0.2** ⇒ 移速惩罚。
+
+也就是说「回收优先级高于蓄力」只维持到锤头落地那一刻，之后就降级了。
+
+**修**：`finishReturn` 在 `clearFlailFlags` 之后把状态重新立起来
+
+```java
+ItemStack heldAfter = p.getMainHandItem();
+if (FlailItem.isFlail(heldAfter)) {
+    FlailItem.markRetrieving(heldAfter, true);
+}
+```
+
+清点统一挪到「玩家真正松手」那一刻 —— `FlailCastHandler` 里 `!isUsingItem` 时
+连同 `FLAIL_RECOVERED` 一起清：
+
+```java
+if (FlailItem.isRecovered(held) && !player.isUsingItem()) {
+    FlailItem.markRecovered(held, false);
+    FlailItem.markRetrieving(held, false);
+}
+```
+
+于是按住不放就一直算回收（不显示蓄力、不减速），松手之后下一次按住才从蓄力重新开始。
+
+### ② 流星锤耐久完全不消耗
+
+`consumeOneToughness` 里那道「最小间隔 4 tick」的闸：
+
+```java
+private int flailLastDamageTick = Integer.MIN_VALUE;      // ← 初始值
+...
+if (this.tickCount - this.flailLastDamageTick < TOUGHNESS_MIN_INTERVAL_TICKS) {
+    return;
+}
+```
+
+`tickCount - Integer.MIN_VALUE` 会**整数溢出成负数**（100 − (−2147483648) 超出 int 范围），
+于是 `< 4` 恒成立，**每一次都提前 return** —— 一点耐久都不扣。
+
+**修**：先确认前一次有效再算差值
+
+```java
+if (this.flailLastDamageTick >= 0
+        && this.tickCount - this.flailLastDamageTick < TOUGHNESS_MIN_INTERVAL_TICKS) {
+    return;
+}
+```
+
+---
 ## 1.2.0.57 — 怪掉铁球的真因：战利品池挂到了怪物掉落表上
 
 ### 真因
