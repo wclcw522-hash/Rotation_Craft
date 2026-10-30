@@ -91,14 +91,6 @@ public class FlailItem extends Item {
      */
     public static final int RECOVER_TOGGLE_COOLDOWN_TICKS = 6;
 
-    /**
-     * 「同一次按住」的间隔上限（tick）。
-     *
-     * <p>按住右键时原版每 4 tick（{@code rightClickDelay}）会再调一次 {@code use()}，
-     * 所以相邻两次调用的间隔 ≤ 4 是常态。这里取 6：
-     * 超过 6 就说明中间松过手 —— 那是**新的一次按住**，回收状态该解掉。</p>
-     */
-    public static final int HOLD_GAP_TICKS = 1;
 
     public static final int MAX_USE_TICKS = BallCharge.USE_DURATION;
 
@@ -495,92 +487,41 @@ public class FlailItem extends Item {
             return InteractionResult.CONSUME;
         }
 
-        // ================================================================
-        // 作者 2026-10-30 的完整规则（照原话实现）：
+        // ⚠️⚠️ **回收的手感与功能一点都不能变**（作者 2026-10-30 反复强调）。
         //
-        //   「右键按住的时候瞬间检测锤头是否在手里，是的话进行蓄力，否则进行回收，
-        //     回收的代码优先级高于蓄力，在回收时按住右键不会导致回收完成后行为降级成蓄力」
+        //   原来那一版就是对的：两者都用 `startUsingItem(hand)` 借原版的「使用中」
+        //   状态来检测松手，按住就拉、松手就停。手感由原版保证，不自己造。
         //
-        // 三条推论，下面严格按顺序执行：
-        //   ① **回收优先**：先判「锤头不在手里」，成立就直接回收并返回，不再看蓄力；
-        //   ② **蓄力只在锤头在手里时发生**（没扔出去 / 正在绕圈）；
-        //   ③ **不可能降级**：只要手指还按着，回收分支每被调一次就刷新一次
-        //      FLAIL_HOLD_TICK；锤头回来后 head 变 null 也照样刷新 ——
-        //      所以「超过阈值没刷新」只会在真正松手时发生。
+        //   **隔离**是天然成立的，不需要额外机制：
+        //     · 回收进了 use 状态之后，原版走的是 onUseTick / releaseUsing，
+        //       **不会再回到 use()** ⇒ 本次按住里不可能「降级」或「升级」成蓄力；
+        //     · onUseTick 里已有判据：锤头已存在时只维持 setRetrieving，不创建新锤头；
+        //     · releaseUsing 里已有判据：stage != SPIN 时只停回收、**不发射**。
         //
-        //   ④ 回收这一段**不调 startUsingItem**，isUsingItem() 始终为 false，
-        //      于是不会套上 use_effects 的 0.2 移速惩罚；蓄力那一段照旧走它，惩罚保留。
-        // ================================================================
-
-        // ===== 「是不是同一次按住」，只看相邻两次 use() 的间隔 =====
-        //
-        // 作者 2026-10-30：「按住时就不要加 tick 检测了，检测器放在按住右键的瞬间和松开后 4 tick」。
-        //
-        // 原版按住右键时每 4 tick（rightClickDelay）会再调一次 use()，所以「间隔」本身
-        // 就是按住状态：
-        //   · 间隔 ≤ HOLD_GAP_TICKS(6)  ⇒ 同一次按住，什么也不做（回收状态保持）；
-        //   · 间隔 >  HOLD_GAP_TICKS     ⇒ 中间松过手，这是**新的一次按住**，
-        //     把上一次留下的回收状态解掉，让它重新从「锤头在不在手里」开始判。
-        //
-        // 这样就不需要在 FlailCastHandler 里每 tick 巡检了。
-        int holdTick = stack.getOrDefault(
-                com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
-                Integer.MIN_VALUE / 2);
-        boolean newPress = player.tickCount - holdTick > HOLD_GAP_TICKS;
-        if (newPress) {
-            // 上一次按住留下的回收状态与「必须松手」标记，都在这一刻解除 ——
-            // 这正是「松开后」那个检测点：不需要任何 tick 巡检。
-            if (isRetrieving(stack)) {
-                markRetrieving(stack, false);
-                var stale = findHead(level, player);
-                if (stale != null) {
-                    stale.setRetrieving(false);   // 上一次按住的拉回到此为止
-                }
-            }
-            if (isRecovered(stack)) {
-                markRecovered(stack, false);      // 新的一次按住 ⇒ 允许从蓄力开始
-            }
-        }
+        //   **唯一允许变的**是回收期间的移速惩罚 —— 那不在这一层处理，
+        //   在 LocalPlayerMixin 里：`isRetrieving(stack)` 为真时移速返回 1.0，
+        //   而蓄力（isRetrieving 为假）照旧吃 use_effects 的 0.2。
 
         var head = findHead(level, player);
-        boolean headInHand = head == null
-                || head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN;
 
-        // ===== ① 回收（优先级高于蓄力）：锤头不在手里，或上一次按住已经进了回收状态 =====
-        //
-        // 第二个条件（isRetrieving）是「不降级」的关键：锤头飞回手里之后 head 会变成 null，
-        // 若只看 headInHand 就会落进蓄力分支 —— 玩家手指没松，却开始蓄力了。
-        if (!headInHand || isRetrieving(stack)) {
+        // ===== 情况 A：锤头不在手里 ⇒ 按住回收（优先级高于蓄力）=====
+        if (head != null
+                && head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
             if (!level.isClientSide()) {
-                if (head != null
-                        && head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING
-                        && !head.isRetrieving()) {
-                    head.beginReturning(player);      // 首次 ⇒ 进入回收并扣 1 耐久
+                if (head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.FLYING) {
+                    head.beginReturning(player);    // 首次按住 ⇒ 进入回收并扣 1 耐久
                 }
-                if (head != null) {
-                    head.setRetrieving(true);         // 按住才拉
-                }
-                markRetrieving(stack, true);          // 物品状态：回收中（动画变 NONE）
-                // ⚠️ **无条件刷新**「按住」时刻 —— 哪怕锤头已经回到手里（head == null）。
-                //    这是「不会降级成蓄力」的全部机制：只要手指按着就一直有刷新，
-                //    超时判定（= 松手）永远不成立。
-                stack.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
-                        player.tickCount);
+                head.setRetrieving(true);           // 按住才拉
+                markRetrieving(stack, true);        // 动画变 NONE，不做蓄力动作
             }
-            // ⚠️ 这里必须是 FAIL，不能是 CONSUME / SUCCESS ——
-            //    那两个会让客户端设上 rightClickDelay = 4，use() 变成每 4 tick 才调一次，
-            //    于是「按住」与「快速重按」在时间上就分不开了。
-            //    FAIL 的 consumesAction() 为 false ⇒ 每 tick 都调 ⇒ 间隔恒为 1。
-            return InteractionResult.FAIL;   // 不走 consumesAction ⇒ 每 tick 重调 use()
+            player.startUsingItem(hand);            // 借用「使用中」状态来检测松开
+            return InteractionResult.CONSUME;
         }
 
-        // ===== ② 蓄力：锤头在手里 =====
+        // ===== 情况 B：锤头在手里 ⇒ 蓄力 =====
         //
-        // 蓄力走原版 use 系统（startUsingItem），移速惩罚 use_effects 的 0.2 原样保留 ——
-        // 那是「正在做一件需要站定的事」的自然反馈，作者只要求取消回收那一段。
-        //
-        // RECOVERED 是原有语义：刚回收完的那一次必须先松手，否则玩家还按着右键，
-        // 原版会立刻接着蓄力，看起来像「自动扔出」。
+        // 「回收完必须松开再按」：还按着右键时（isUsingItem 为真）不响应，
+        // 松手后 FlailCastHandler 会清标记。
         if (isRecovered(stack) && player.isUsingItem()) {
             return InteractionResult.CONSUME;
         }

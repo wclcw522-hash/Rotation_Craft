@@ -1,3 +1,61 @@
+## 1.2.0.55 — 回收手感与隔离回到原版语义
+
+### 1.2.0.54 错在哪
+
+我在 `use()` 的回收分支里返回了 `InteractionResult.FAIL`、不调 `startUsingItem`，
+再自造一套 `FLAIL_HOLD_TICK` + `HOLD_GAP_TICKS` + `tickReturning` 超时判定来模拟「按住 / 松手」。
+这套东西整个是多余的，而且直接导致两个独立的 bug：
+
+**bug A：回收手感不对**
+
+`FAIL` 不起 use 状态 ⇒ 客户端没有手臂动作、`getUseAnimation` 也无从生效，
+玩家按住右键时完全没有「正在拉住」的反馈。
+
+**bug B：回收没隔离蓄力**
+
+`FAIL` 让客户端只发一次交互包 ⇒ `FLAIL_HOLD_TICK` 不再刷新 ⇒
+「间隔 > 1」成立 ⇒ 视作新的一次按住 ⇒ 回收状态被清 ⇒ 下一次落进蓄力分支。
+
+### 现在的做法（没有自造机制）
+
+`use()` 的回收分支回到「借原版使用状态」这一条：
+
+```java
+if (head != null && head.stage() != SPIN) {
+    if (!level.isClientSide()) {
+        if (head.stage() == FLYING) head.beginReturning(player);
+        head.setRetrieving(true);
+        markRetrieving(stack, true);
+    }
+    player.startUsingItem(hand);      // ← 手感就靠这一行
+    return InteractionResult.CONSUME;
+}
+```
+
+**手感**：原版保证——按住拉、松手停。
+
+**隔离**：本来就成立，因为进了 use 状态之后原版走的是 `onUseTick` / `releaseUsing`，
+**不会再回到 `use()`**：
+
+- `onUseTick` 里锤头已存在时只维持 `setRetrieving`，不创建新锤头；
+- `releaseUsing` 里 `stage != SPIN` 时只停回收、**不发射**。
+
+**移速**：唯一允许变的那一项，在 `LocalPlayerMixin` 处理 ——
+`isRetrieving(stack)` 为真返回 1.0，蓄力（`isRetrieving` 为假）照旧吃 `use_effects` 的 0.2。
+
+### 删掉的自造机制
+
+| 删掉的东西 | 为什么 |
+|---|---|
+| `InteractionResult.FAIL` | 不起 use 状态，手感与状态刷新全丢 |
+| `HOLD_GAP_TICKS` | 「间隔判定」在 `FAIL` 下根本不可靠 |
+| `newPress` 分支 | 同上，且会把回收状态误清 |
+| `tickReturning` 里的松手判定 | `releaseUsing` 已经能做，重复且错误 |
+| `clearFlailFlags` 里的 `FLAIL_HOLD_TICK` 写入 | 无用了 |
+
+组件 `FLAIL_HOLD_TICK` 的注册保留（不写值，无副作用），避免动注册表。
+
+---
 ## 1.2.0.54 — 回收/蓄力的「同一次按住」判定压到 1 tick
 
 ### 问题
