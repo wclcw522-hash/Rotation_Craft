@@ -1,3 +1,55 @@
+## 1.2.0.57 — 怪掉铁球的真因：战利品池挂到了怪物掉落表上
+
+### 真因
+
+`BallLootTables.onLootTableLoad` 监听的是 `LootTableLoadEvent` —— **每一张战利品表都会触发**，
+包括 `entities/zombie`、`gameplay/fishing`、村庄交易等等。
+
+而规则 ①②③ 的判据是「跟随该表里铁锭 / 钻石 / 青金石的概率」：
+
+```java
+final float ironProb = followItemChance(event, "minecraft:iron_ingot");
+if (ironProb > 0.0F) {
+    addBallPool(event, "iron", ModItems.IRON_BALL.get(), ironProb * 0.30F, 1, 2, 3, null);
+}
+```
+
+**僵尸的掉落表里就有 `minecraft:iron_ingot`**（捡过铁锭的僵尸会掉它）。
+反反射读到权重 ⇒ `ironProb > 0` ⇒ 往**怪物掉落表**里加了一个「铁球池」。
+
+于是怪被砸死时，原版正常结算它的掉落 —— 里面就带着这个铁球池。怪身上什么都没有，
+照样掉铁球。
+
+### 为什么只有铁球
+
+`diamond` / `lapis_lazuli` 在原版怪物掉落表里**不存在**，所以钻石球、青金石球那两条
+不会误触发 —— 和作者报的「掉的都是铁球」完全吻合。
+
+### 修法
+
+类注释里其实早就写了这条要求（「必须先限定是箱子表 —— 否则会给每一张 loot table 都加一个池」），
+但当时只把它落实到了 ⑦ 紫水晶那一条，①②③ 漏了。
+
+现在把这个限定提到方法最前面，一次性拦住所有规则：
+
+```java
+final String path = id == null ? "" : id.getPath();
+if (!path.startsWith("chests/")) {
+    return;
+}
+```
+
+④⑤⑥ 的 `bastion_` / `buried_treasure` / `ancient_city` 本来就都在 `chests/` 下，
+这道闸对它们没有影响。
+
+### 前两版为什么没修好
+
+`1.2.0.55` / `1.2.0.56` 我一直在查「锤头往世界里掉了什么」—— 装备栏、stash、回收归还路径，
+全都不是。真正的来源是**怪自己的战利品表**，和锤头一点关系都没有。
+教训：作者说「掉铁球」就该先 grep 出「谁会生成 iron_ball 这个 ItemStack 的源头」，
+而不是顺着「锤头砸死怪」这条因果链往下找。
+
+---
 ## 1.2.0.56 — 怪死亡掉球、锤头伤害不衰减
 
 ### ① 锤头砸死空手怪仍掉球

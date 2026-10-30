@@ -100,6 +100,30 @@ public final class BallLootTables {
             final Identifier id = event.getName();
             final String path = id == null ? "" : id.getPath();
 
+            // ============================================================
+            // ⚠️⚠️ **只处理箱子表**（作者 2026-10-30：「怪手上啥都没有，但是就是会掉铁球」）
+            // ============================================================
+            //
+            //   这个事件对**每一张**战利品表都会触发，包括 `entities/zombie`、
+            //   `gameplay/fishing`、村庄交易等等。而下面 ①②③ 三条规定的是
+            //   「跟随该表里铁锭 / 钻石 / 青金石的概率」——
+            //   **僵尸的掉落表里恰好就有 `minecraft:iron_ingot`**（捡过铁锭的僵尸会掉），
+            //   于是反射读到权重、判定 ironProb > 0 ⇒ 往**怪物掉落表**里加了一个铁球池。
+            //   砸死怪就掉铁球，怪身上明明什么都没有。
+            //
+            //   只有铁球中招的原因：`diamond` / `lapis_lazuli` 在怪物掉落表里没有，
+            //   所以钻石球、青金石球那两条不会误触发 —— 和作者报的「掉的都是铁球」完全吻合。
+            //
+            //   ⑦ 紫水晶那条本来就有这个限定（注释里也写了「必须先限定是箱子表」），
+            //   但没提到最前面，①②③ 就漏了。现在统一在这里拦一次。
+            //
+            //   ④⑤⑥ 那条 `bastion_` / `buried_treasure` / `ancient_city` 也全在 chests/ 下，
+            //   所以这一道闸对它们没有影响。
+            if (!path.startsWith("chests/")) {
+                return;
+            }
+
+
             // ① 铁球：跟随该箱铁锭概率的 30%，1–2 个，试 3 次
             final float ironProb = followItemChance(event, "minecraft:iron_ingot");
             if (ironProb > 0.0F) {
