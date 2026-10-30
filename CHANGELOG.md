@@ -1,3 +1,52 @@
+## 1.2.0.54 — 回收/蓄力的「同一次按住」判定压到 1 tick
+
+### 问题
+
+作者实测：「回收完接着蓄力的动作，不到 3 tick 就可以完成松手与紧接着的下一次按住右键」。
+上一版 `HOLD_GAP_TICKS = 6` 太宽，3 tick 内的「松手 + 重按」会被当成同一次按住，
+于是按不出来蓄力。
+
+### 根因：`rightClickDelay` 让两种情形在时间上分不开
+
+按住右键时，原版只会每 4 tick 再调一次 `use()` —— 因为回收分支返回 `CONSUME`，
+它 `consumesAction() == true`，客户端就把 `rightClickDelay` 设成 4。
+
+| 操作 | 相邻两次 `use()` 的间隔 |
+|---|---|
+| 一直按住 | 4 |
+| 松手 1 tick 再按 | 5 ~ 6 |
+| 松手 3 tick 再按 | 7 ~ 8 |
+
+阈值必须 > 4 才能把「按住」认出来，可那样 3 tick 内的重按就全被吞了 —— 两个需求冲突。
+
+### 修法：回收分支返回 `InteractionResult.FAIL`
+
+`FAIL` 的 `consumesAction() == false` ⇒ 客户端**不设** `rightClickDelay`
+⇒ `use()` **每 tick 都被调一次**。于是：
+
+| 操作 | 间隔 |
+|---|---|
+| 一直按住 | **1** |
+| 松手 1 tick 再按 | **2** |
+| 松手 2 tick 再按 | **3** |
+
+`HOLD_GAP_TICKS` 压到 **1**：
+
+```java
+boolean newPress = player.tickCount - holdTick > HOLD_GAP_TICKS;   // > 1
+```
+
+间隔 1 = 按住；间隔 ≥ 2 = 新的一次按住。1 tick 的松手都能分开。
+
+### 连带的两处
+
+- `tickReturning` 里的「松手就停」用同一个常量，松手后 1~2 tick 停止拉回；
+- `newPress` 成立时同时清 `FLAIL_RETRIEVING` 与 `FLAIL_RECOVERED` ——
+  上一版这两个标记只在 `FlailCastHandler` 的每 tick 巡检里清，
+  巡检删掉后就没人清了（`RECOVERED` 会永久为 true，锤子再也蓄不了力）。
+  现在它们的清理点跟着「新的一次按住」一起，不需要任何 tick 巡检。
+
+---
 ## 1.2.0.53 — 回收改成独立状态，按作者原话的三条规则实现
 
 ### 作者给的完整规则（原文）

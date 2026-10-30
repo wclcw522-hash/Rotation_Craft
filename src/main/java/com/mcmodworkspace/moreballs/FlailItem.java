@@ -91,6 +91,15 @@ public class FlailItem extends Item {
      */
     public static final int RECOVER_TOGGLE_COOLDOWN_TICKS = 6;
 
+    /**
+     * 「同一次按住」的间隔上限（tick）。
+     *
+     * <p>按住右键时原版每 4 tick（{@code rightClickDelay}）会再调一次 {@code use()}，
+     * 所以相邻两次调用的间隔 ≤ 4 是常态。这里取 6：
+     * 超过 6 就说明中间松过手 —— 那是**新的一次按住**，回收状态该解掉。</p>
+     */
+    public static final int HOLD_GAP_TICKS = 1;
+
     public static final int MAX_USE_TICKS = BallCharge.USE_DURATION;
 
     public FlailItem(Properties properties) {
@@ -503,6 +512,36 @@ public class FlailItem extends Item {
         //      于是不会套上 use_effects 的 0.2 移速惩罚；蓄力那一段照旧走它，惩罚保留。
         // ================================================================
 
+        // ===== 「是不是同一次按住」，只看相邻两次 use() 的间隔 =====
+        //
+        // 作者 2026-10-30：「按住时就不要加 tick 检测了，检测器放在按住右键的瞬间和松开后 4 tick」。
+        //
+        // 原版按住右键时每 4 tick（rightClickDelay）会再调一次 use()，所以「间隔」本身
+        // 就是按住状态：
+        //   · 间隔 ≤ HOLD_GAP_TICKS(6)  ⇒ 同一次按住，什么也不做（回收状态保持）；
+        //   · 间隔 >  HOLD_GAP_TICKS     ⇒ 中间松过手，这是**新的一次按住**，
+        //     把上一次留下的回收状态解掉，让它重新从「锤头在不在手里」开始判。
+        //
+        // 这样就不需要在 FlailCastHandler 里每 tick 巡检了。
+        int holdTick = stack.getOrDefault(
+                com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
+                Integer.MIN_VALUE / 2);
+        boolean newPress = player.tickCount - holdTick > HOLD_GAP_TICKS;
+        if (newPress) {
+            // 上一次按住留下的回收状态与「必须松手」标记，都在这一刻解除 ——
+            // 这正是「松开后」那个检测点：不需要任何 tick 巡检。
+            if (isRetrieving(stack)) {
+                markRetrieving(stack, false);
+                var stale = findHead(level, player);
+                if (stale != null) {
+                    stale.setRetrieving(false);   // 上一次按住的拉回到此为止
+                }
+            }
+            if (isRecovered(stack)) {
+                markRecovered(stack, false);      // 新的一次按住 ⇒ 允许从蓄力开始
+            }
+        }
+
         var head = findHead(level, player);
         boolean headInHand = head == null
                 || head.stage() == com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN;
@@ -528,7 +567,11 @@ public class FlailItem extends Item {
                 stack.set(com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
                         player.tickCount);
             }
-            return InteractionResult.CONSUME;
+            // ⚠️ 这里必须是 FAIL，不能是 CONSUME / SUCCESS ——
+            //    那两个会让客户端设上 rightClickDelay = 4，use() 变成每 4 tick 才调一次，
+            //    于是「按住」与「快速重按」在时间上就分不开了。
+            //    FAIL 的 consumesAction() 为 false ⇒ 每 tick 都调 ⇒ 间隔恒为 1。
+            return InteractionResult.FAIL;   // 不走 consumesAction ⇒ 每 tick 重调 use()
         }
 
         // ===== ② 蓄力：锤头在手里 =====

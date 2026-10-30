@@ -806,6 +806,24 @@ public class FlailHeadEntity extends BallProjectile {
         }
         this.setLineLength(distance);
 
+        // ===== 松手就停：靠物品上的「按住时刻」判，不额外开检测器 =====
+        //
+        // 作者 2026-10-30：「检测器放在按住右键的瞬间和松开后 4 tick」。
+        // 按住时 use() 每 4 tick 会刷新 FLAIL_HOLD_TICK；超过 HOLD_GAP_TICKS 没刷新
+        // 就说明玩家松手了。这段放在实体自己的 tickReturning 里 —— 那个 tick 本来就要跑，
+        // 不额外占资源。
+        if (this.isRetrieving() && this.getOwner() instanceof Player holder) {
+            net.minecraft.world.item.ItemStack heldFlail = holder.getMainHandItem();
+            if (FlailItem.isFlail(heldFlail)) {
+                int lastHold = heldFlail.getOrDefault(
+                        com.mcmodworkspace.moreballs.ModComponents.FLAIL_HOLD_TICK.get(),
+                        Integer.MIN_VALUE / 2);
+                if (holder.tickCount - lastHold > FlailItem.HOLD_GAP_TICKS) {
+                    this.setRetrieving(false);          // 松手 ⇒ 停止拉回
+                }
+            }
+        }
+
         if (!this.isRetrieving()) {
             // 松开右键：原地落下（不再被拉）
             this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
