@@ -1,3 +1,61 @@
+## 1.2.0.63 — 下沉：拆掉我上一版亲手造成的负优化
+
+### 先回答「为什么锤头会沉、球不会」
+
+它们跑的是**同一份** `BallPhysicsCore.tick()`（`BallProjectile` 没有覆写 `tick()`），
+所以物理路径完全一样。差别在于**锤头在 `super.tick()` 之后又自己动它**。
+
+球的落地静止是 `ballTickPost()` 里这套：
+
+```java
+// 落定后的 5 刻「坐实」：只往下走
+if (this.settleDropTicks > 0) {
+    this.settleDropTicks--;
+    this.setDeltaMovement(0.0D, -SETTLE_DROP_SPEED, 0.0D);
+    return;
+}
+// 静止后除「向下」以外全部归零
+double down = Math.min(velocity.y, 0.0D);
+this.setDeltaMovement(0.0D, down, 0.0D);
+// 还有支撑就维持静止
+if (!this.hasSupportBelow()) { this.setSettled(false); }
+```
+
+球靠它站稳，**不会沉**。
+
+而 `BallPhysicsCore.setSettled()` 有一条硬门槛：
+
+```java
+if (settled && this.isNoGravity()) {
+    this.entityData.set(SETTLED, false);   // 无重力 ⇒ 拒绝进入静止态
+    return;
+}
+```
+
+**1.2.0.61/62 我在 `tickFlying()` 里加的 `setNoGravity(true)`，正好卡在这条上** ——
+锤头永远进不了 settled，球的物理于是每 tick 继续施加原版重力，一路往方块里压。
+「之前偶尔、现在必定」就是我亲手造出来的。
+
+### 修
+
+把那段补丁整个删掉，改为**什么都不干预**：
+
+```java
+this.setLineLength(distanceToOwner());
+
+// 已经落定 ⇒ 不再做任何位置/速度干预（否则会把 settled 状态打乱）
+if (this.isSettled()) {
+    return;
+}
+```
+
+锤头落地后由球的 settled 接管：坐实 5 刻 → 除向下速度全归零 → `hasSupportBelow()` 维持静止态。
+球没有耐久所以看不出差别，锤头只要不打断它，行为就和球一致。
+
+`setNoGravity(true)`、40 步多方向逃逸、`else if (速度非零) setNoGravity(false)` 全部删除 ——
+它们都是围着错误前提打的补丁，前提没了，补丁一起走。
+
+---
 ## 1.2.0.62 — 线长限制/弹回失效的真根因：lineCapConsumed 从不清零
 
 ### 根因（一条代码同时打死两个功能）

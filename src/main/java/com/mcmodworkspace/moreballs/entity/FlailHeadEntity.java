@@ -703,48 +703,29 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   FLYING 阶段 noPhysics=false，正常吃方块碰撞；但如果某一刻被推进实心区域
         //   （高速度穿过薄墙、被活塞推、或者在墙角爆炸），就会一直嵌在里面 ——
-        // ===== 卡进方块时先脱离（落地后下沉、持续扣耐久）=====
+        // ===== 落地静止交给球的 settled 机制（作者 2026-10-31：从根源改）=====
         //
-        // 说明一点：**球没有这个问题，也不该有**。球落地后会被碰撞解算推回方块表面、
-        // 静止待命，那是正常物理表现 —— 球没有耐久账本，贴地看不出任何异常。
+        // 这里**不要**自己调 setNoGravity(true)。`BallPhysicsCore.setSettled()` 有这条：
         //
-        // 锤头不同：它沿用球那套物理（noPhysics=false、受重力），但自己在 onHit 里
-        // 撞方块要扣耐久。于是「贴地」在锤头身上变成「卡在方块里持续掉耐久」。
+        //     if (settled && this.isNoGravity()) { SETTLED = false; return; }
         //
-        // 两件事一起做：
-        // 1) 逃逸幅度 12 步(0.75 格) 提到 40 步(2.5 格) —— 原来逃不出去就是幅度不够；
-        // 2) 卡住时关掉重力，别再让重力继续往下压；真正脱离后下一次再开回来。
-        if (this.isInWall()) {
-            this.setNoGravity(true);
-            // 先**向上**找空位：被重力压进地面时，只有往上是有效的
-            // （原来只朝玩家方向水平逃逸，锤头嵌在脚下就永远出不来）。
-            boolean escaped = false;
-            for (int step = 1; step <= 40; step++) {
-                Vec3 candidate = this.position().add(0.0D, step * 0.0625D, 0.0D);
-                if (this.isFreeAt(candidate)) {
-                    this.setPos(candidate.x, candidate.y, candidate.z);
-                    this.setDeltaMovement(Vec3.ZERO);
-                    escaped = true;
-                    break;
-                }
-            }
-            // 上方被堵（洞穴顶）⇒ 再试朝掷出者方向
-            if (!escaped) {
-                Vec3 escape = this.escapeDirection();
-                for (int step = 1; step <= 40; step++) {
-                    Vec3 candidate = this.position().add(escape.scale(step * 0.0625D));
-                    if (this.isFreeAt(candidate)) {
-                        this.setPos(candidate.x, candidate.y, candidate.z);
-                        this.setDeltaMovement(Vec3.ZERO);
-                        break;
-                    }
-                }
-            }
-        } else if (this.getDeltaMovement().lengthSqr() > 1.0E-4D) {
-            this.setNoGravity(false);
-        }
+        // 无重力时它会**拒绝进入静止态**，于是球的物理继续每 tick 施加原版重力，
+        // 把锤头一路往方块里压 —— 1.2.0.61/62 加的 setNoGravity(true) 就是这么把
+        // 「偶尔下沉」变成「必定下沉」的。
+        //
+        // 正确做法：什么都不干预。锤头落地后由球的 settled 接管 ——
+        //   · 「坐实」那 5 刻只保留向下分量；
+        //   · 真正静止后，除向下以外的速度全部归零；
+        //   · hasSupportBelow() 维持住静止态，不会沉进方块。
+        // 球没有耐久看不到这个，锤头只要不打断它就跟球一样。
 
         this.setLineLength(distanceToOwner());
+
+        // 已经落定 ⇒ 不再做任何位置/速度干预（否则会把 settled 状态打乱）
+        if (this.isSettled()) {
+            return;
+        }
+
 
         // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
         if (this.lineLength() >= MAX_LINE && !this.lineCapConsumed) {
