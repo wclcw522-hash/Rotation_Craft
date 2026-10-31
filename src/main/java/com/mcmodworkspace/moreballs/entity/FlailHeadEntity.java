@@ -989,15 +989,21 @@ public class FlailHeadEntity extends BallProjectile {
             //    但【忠诚】/【空气动力球】的自动回收走的是 autoRetrieveWanted()，
             //    玩家**从头到尾没按过右键** —— 于是没有人会松手，这个状态就永久挂着：
             //      · use() 里 `isRetrieving` 分支优先级最高，按右键只会刷新时刻、不蓄力；
-            //      · 得松手再按一次（这时 handler 才清掉它）才恢复正常。
+            // 回收完成后**把回收状态重新立起来**（作者 2026-10-30：
+            //    「回收之后保持右键不松手还是会显示蓄力字样并受到移速惩罚」）。
             //
-            //    判据用 `isUsingItem()`：手动回收时它为 true（走的就是 use 系统），
-            //    自动回收时为 false ⇒ 不设状态、立刻归位。
-            if (p.isUsingItem()) {
-                net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
-                if (FlailItem.isFlail(heldAfter)) {
-                    FlailItem.markRetrieving(heldAfter, true);
-                }
+            //    `clearFlailFlags` 会把 FLAIL_RETRIEVING 清掉，而锤头飞回这一 tick
+            //    玩家手指常常还按着 —— 清掉之后 getUseAnimation 返回 BOW（显示蓄力字样）、
+            //    LocalPlayerMixin 也判不到回收（移速被乘 0.2）。
+            //
+            //    这里无条件重设；它的清理有两条路（见 FlailCastHandler）：
+            //      · 玩家松手（!isUsingItem）；
+            //      · **锤头已经没了 + 玩家没在使用** —— 这条专门兜【忠诚】/【空气动力球】
+            //        的自动回收：那种回收玩家可能压根没按过右键，没有人会松手，
+            //        状态就永久挂着，表现为「锤头回来了但要再按一下右键才归位」。
+            net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
+            if (FlailItem.isFlail(heldAfter)) {
+                FlailItem.markRetrieving(heldAfter, true);
             }
         }
         this.discard();

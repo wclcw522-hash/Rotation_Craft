@@ -116,6 +116,25 @@ public final class FlailCastHandler {
             FlailItem.markRetrieving(held, false);
         }
 
+        // ===== 【忠诚】/【空气动力球】自动回收的收尾兜底（作者 2026-10-31）=====
+        //
+        // 「半成功」是**偶发**的：取决于自动回收那一刻玩家有没有按着右键。
+        //
+        // FLAIL_RETRIEVING 平时由 use() 的回收分支设上，靠「松手」清。
+        // 自动回收走的是 autoRetrieveWanted()：
+        //   · 玩家没按右键 ⇒ 物品上根本没这个状态 ⇒ 正常归位；
+        //   · 玩家按着右键（在蓄力/准备攻击）⇒ 状态被设上，而自动回收没有「松手」动作，
+        //     于是它一直挂着 ⇒ 按右键只会刷新时刻、不蓄力，必须再按一次才归位。
+        //
+        // 兜底：锤头已经不在了、玩家又没有在使用 ⇒ 这个状态没有任何意义，立刻清掉。
+        if (FlailItem.isRetrieving(held) && !player.isUsingItem()
+                && FlailItem.findHead(player.level(), player) == null) {
+            FlailItem.markRetrieving(held, false);
+            FlailItem.markRecovered(held, false);
+            player.containerMenu.broadcastChanges();
+            player.getInventory().setChanged();
+        }
+
         FlailHeadEntity head = FlailItem.findHead(player.level(), player);
         boolean casting = head != null;
         boolean was = FlailItem.isCasting(held);

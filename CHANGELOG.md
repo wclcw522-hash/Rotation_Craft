@@ -1,3 +1,46 @@
+## 1.2.0.65 — 【忠诚】自动回收「半成功」：偶发的真正来源
+
+### 上一版思路为什么错
+
+我 1.2.0.64 把 `finishReturn` 改成「只在 `isUsingItem()` 为真时才保持 `FLAIL_RETRIEVING`」，
+当成「必然发生」来修。但你指出这是**偶发** —— 那就说明根因不是「无条件设置」，而是
+**取决于自动回收那一刻玩家有没有按着右键**。
+
+### 偶发的机制
+
+`FLAIL_RETRIEVING` 平时由 `use()` 的回收分支设上，靠「松手」清（`FlailCastHandler`）。
+而【忠诚】/【空气动力球】的自动回收走 `autoRetrieveWanted()`：
+
+| 自动回收那一刻 | 结果 |
+|---|---|
+| 玩家**没按**右键 | 物品上根本没这个状态 ⇒ 正常归位 |
+| 玩家**按着**右键（在蓄力 / 准备攻击） | `use()` 的回收分支把它设上，而自动回收**没有「松手」这个动作** ⇒ 状态永久挂着 |
+
+挂着之后：`use()` 里 `isRetrieving` 分支优先级最高 ⇒ 按右键只刷新时刻、**不蓄力**，
+必须松手再按一次（这时 handler 才清掉它）才归位 —— 正是「锤头回来了但要再按一下右键」。
+
+### 修
+
+`finishReturn` 恢复**无条件**设置（手动回收按着右键时确实需要它，否则会显示蓄力字样、
+还被乘 0.2 移速）；清理由 `FlailCastHandler` 两条路兜住：
+
+```java
+// 松手
+if (FlailItem.isRecovered(held) && !player.isUsingItem()) { ... }
+
+// 自动回收的收尾：锤头已经不在了、玩家又没有在使用 ⇒ 这个状态没有任何意义
+if (FlailItem.isRetrieving(held) && !player.isUsingItem()
+        && FlailItem.findHead(player.level(), player) == null) {
+    FlailItem.markRetrieving(held, false);
+    FlailItem.markRecovered(held, false);
+    player.containerMenu.broadcastChanges();
+    player.getInventory().setChanged();
+}
+```
+
+第二条不依赖任何「松手」动作，所以自动回收无论当时按没按右键都会立刻归位。
+
+---
 ## 1.2.0.64 — 移动回收拖长绳子、【忠诚】自动回收「半成功」
 
 ### ① 移动回收时绳子被拖长
