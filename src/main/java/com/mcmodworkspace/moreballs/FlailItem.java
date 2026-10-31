@@ -505,6 +505,10 @@ public class FlailItem extends Item {
         var head = findHead(level, player);
 
         // ===== 情况 A：锤头不在手里 ⇒ 按住回收（优先级高于蓄力）=====
+        // 掷出后 0.5 秒内不触发回收（作者 2026-10-31）—— 刚甩出去就被自己吸回来没有意义。
+        if (head != null && head.tickCount < com.mcmodworkspace.moreballs.entity.FlailHeadEntity.RECOVER_LOCK_TICKS) {
+            return InteractionResult.CONSUME;
+        }
         if (head != null
                 && head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
             if (!level.isClientSide()) {

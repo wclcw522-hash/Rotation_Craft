@@ -1,3 +1,44 @@
+## 1.2.0.67 — 移速判据补齐、掷出后 0.5 秒回收冷却
+
+### ① 回收后按住右键的蓄力惩罚回来了
+
+我 1.2.0.66 把 `finishReturn` 改成只设 `FLAIL_RECOVERED`、不再设 `FLAIL_RETRIEVING`
+（因为后者在玩家按着右键时清不掉，会把物品卡成假回收）。
+
+但 `LocalPlayerMixin` 的判据还是只看 `isRetrieving` —— 少判 RECOVERED 就直接把
+「回收完按住右键」的移速惩罚放回来了。
+
+**修**：
+
+```java
+if (useItem.getItem() instanceof FlailItem
+        && (FlailItem.isRetrieving(useItem) || FlailItem.isRecovered(useItem))) {
+    cir.setReturnValue(1.0F);
+    return;
+}
+```
+
+`getUseAnimation` 那边 1.2.0.66 已经同步扩过，两处判据现在一致。
+
+### ② 掷出后 0.5 秒内不触发回收（新增）
+
+刚甩出去就被自己吸回来没有意义。新增常量：
+
+```java
+public static final int RECOVER_LOCK_TICKS = 10;   // 0.5 秒
+```
+
+三条回收入口全部加闸：
+
+| 入口 | 位置 |
+|---|---|
+| 手动按住右键 | `FlailItem.use()` 回收分支开头 |
+| 【忠诚】/【空气动力球】自动收线 | `tickFlying()` 的 `autoRetrieveWanted()` 分支 |
+| 掷出者走近自动回收 | `tick()` 的 FLYING 分支 |
+
+前 10 刻里按右键不会有任何反应、走近也不会自动收；10 刻之后一切照旧。
+
+---
 ## 1.2.0.66 — 假回收：实体消失但物品状态停在「回收中」
 
 ### 作者给的现场（比之前所有推断都准）

@@ -91,6 +91,14 @@ public class FlailHeadEntity extends BallProjectile {
     /** 出手宽限期（照搬 BallProjectile.SPAWN_GRACE_TICKS） */
     private static final int SPAWN_GRACE_TICKS = 2;
 
+    /**
+     * <b>掷出后的回收冷却</b>（作者 2026-10-31：「给流星锤添加一个掷出后 0.5s 不触发回收」）。
+     *
+     * <p>0.5 秒 = 10 刻。这段时间里既不能手动按住回收、也不会被走近/忠诚自动收线 ——
+     * 否则刚甩出去就被自己吸回来，投掷根本没意义。</p>
+     */
+    public static final int RECOVER_LOCK_TICKS = 10;
+
     /** 回收格每秒 → 格每刻的换算 */
     private static final double TICKS_PER_SECOND = 20.0D;
 
@@ -409,7 +417,8 @@ public class FlailHeadEntity extends BallProjectile {
                 //   不必按住右键：人走到锤头旁边（碰撞箱相交）就自动收线。
                 //   这和「按住右键回收」不冲突 —— 那条走 use 系统的 setRetrieving，
                 //   这条只是把 RETURNING 状态踢起来，之后 tickReturning 照常拉。
-                if (this.getOwner() instanceof LivingEntity autoOwner
+                if (this.tickCount >= RECOVER_LOCK_TICKS
+                        && this.getOwner() instanceof LivingEntity autoOwner
                         && this.getBoundingBox().inflate(0.2D)
                                 .intersects(autoOwner.getBoundingBox())) {
                     this.beginReturning(autoOwner);   // 会扣 1 耐久，与手动回收一致
@@ -776,7 +785,8 @@ public class FlailHeadEntity extends BallProjectile {
         //    于是 FlailCastHandler 的收尾逻辑（它只看物品组件）对自动回收完全不生效：
         //    锤头飞回来了、实体也 discard 了，物品却停在「扔出中」的形态，
         //    非得再按一次右键（走一遍手动路径）才把状态补齐。
-        if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
+        if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
+                && this.autoRetrieveWanted()) {
             if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity autoOwner) {
                 this.beginReturning(autoOwner);
                 this.setRetrieving(true);

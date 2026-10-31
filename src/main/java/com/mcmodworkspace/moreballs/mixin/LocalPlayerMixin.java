@@ -64,11 +64,16 @@ public abstract class LocalPlayerMixin {
         // 【流星锤 · 回收】作者 2026-10-30：「我只要取消回收过程的」移速惩罚。
         //
         // 蓄力（SPIN）继续按原版 0.2 减速 —— 那是「正在做一件需要站定的事」的自然反馈；
-        // 只有**回收**（FLAIL_RETRIEVING）期间放开到 1.0，方便边走边把锤头拽回来。
+        // 只有**回收**期间放开到 1.0，方便边走边把锤头拽回来。
         //
-        // 判据用物品组件 FLAIL_RETRIEVING：它随物品栈同步，客户端拿得到。
+        // 判据同时看两个标记（作者 2026-10-31：「回收后按住右键的蓄力惩罚回来了」）：
+        //   · FLAIL_RETRIEVING —— 回收进行中；
+        //   · FLAIL_RECOVERED  —— 刚回收完、玩家还没松手。
+        // 1.2.0.66 起 finishReturn 只设后者（前者会因为玩家按着右键清不掉而卡成假回收），
+        // 所以这里少判 RECOVERED 就会把「回收完按住右键」的移速惩罚放回来。
         if (useItem.getItem() instanceof com.mcmodworkspace.moreballs.FlailItem
-                && com.mcmodworkspace.moreballs.FlailItem.isRetrieving(useItem)) {
+                && (com.mcmodworkspace.moreballs.FlailItem.isRetrieving(useItem)
+                        || com.mcmodworkspace.moreballs.FlailItem.isRecovered(useItem))) {
             cir.setReturnValue(1.0F);
             return;
         }
