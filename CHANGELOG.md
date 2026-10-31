@@ -1,3 +1,63 @@
+## 1.2.0.66 — 假回收：实体消失但物品状态停在「回收中」
+
+### 作者给的现场（比之前所有推断都准）
+
+> 感觉是碰撞箱碰到后判定了回收，锤头实体消失，但是因为在向左移动导致分开，
+> 没来得及更新物品状态导致的假回收
+
+对。本质就是**实体已经 discard、物品状态却还停在「扔出中 / 回收中」**。
+
+### 两条独立的原因
+
+**一、`finishReturn` 无条件重设 `FLAIL_RETRIEVING`**
+
+```java
+ItemStack heldAfter = p.getMainHandItem();
+if (FlailItem.isFlail(heldAfter)) {
+    FlailItem.markRetrieving(heldAfter, true);   // 无条件
+}
+```
+
+这行是 1.2.0.53 加的，为了防「按着右键时显示蓄力字样」。
+但它在 `FlailCastHandler` 里只在 `!isUsingItem` 时清 —— 玩家按着右键就把状态永久挂住了，
+物品于是停在「回收中」，要松手再按一次才补齐。
+
+**二、到达判定用的锚点会跑**
+
+`tickReturning` 的 `distance` 是对 `handAnchor()` 算的：
+
+```java
+owner.position() + right(0.35) + (0, bbHeight * 0.75, 0)
+```
+
+`right` 跟着**视线**走、原点跟着玩家走，每 tick 都在变。玩家一扭头或一走，
+锤头就永远差一点点，卡在「脑袋右边」那个位置 —— 这时实体还在，但已经够不到判据。
+
+### 修
+
+**状态收尾改成单一来源**：`finishReturn` 不再设 `RETRIEVING`，只留 `RECOVERED`，
+并把三件事一次做干净（`markRetrieving(false)` + `markRecovered(true)` + `setCasting(false)` + 广播同步）。
+
+`getUseAnimation` 的判据同步扩成 `isRetrieving || isRecovered` ——
+所以**按着右键同样不会显示蓄力字样**，原来那行的目的仍然达到，但不再需要那个会卡住的标记。
+
+**到达判定补一条以本体为准的**：
+
+```java
+double toBody = living.position()
+        .add(0.0D, living.getBbHeight() * 0.5D, 0.0D)
+        .distanceTo(this.position());
+if (this.getBoundingBox().intersects(living.getBoundingBox())
+        || distance < 0.05D
+        || toBody < ARRIVE_TO_BODY_DISTANCE) {     // 1.2 格
+    this.finishReturn(living);
+    return;
+}
+```
+
+这个距离与视线、朝向都无关，玩家怎么动都收敛得过去。
+
+---
 ## 1.2.0.65 — 【忠诚】自动回收「半成功」：偶发的真正来源
 
 ### 上一版思路为什么错

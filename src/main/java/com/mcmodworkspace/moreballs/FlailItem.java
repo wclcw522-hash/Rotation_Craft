@@ -545,12 +545,16 @@ public class FlailItem extends Item {
         // 回收中不显示蓄力动作（作者 2026-10-19：「回收动作不应该和蓄力的一样，
         // 应该保持不动来收回锤头」）。判据用独立的 FLAIL_RETRIEVING，
         // 因为 FLAIL_CASTING 在蓄力时也是 true，拿它会让正常蓄力也没动作。
-        if (isRetrieving(stack)) {
+        // 回收中、以及「刚回收完还没松手」两种情况都不做蓄力动作。
+        //
+        // 后者原来靠 finishReturn 里无条件设 FLAIL_RETRIEVING 实现，但那个标记
+        // 在玩家按着右键时清不掉，会把物品永久卡在回收状态（假回收）。
+        // 现在统一用 RECOVERED 表达「这次按住已经用完了」。
+        if (isRetrieving(stack) || isRecovered(stack)) {
             return net.minecraft.world.item.ItemUseAnimation.NONE;
         }
         return net.minecraft.world.item.ItemUseAnimation.BOW;
     }
-
     /**
      * 蓄力中每 tick：**首次调用时生成锤头实体**，之后由 {@code FlailHeadEntity.tick()} 自己维持环绕。
      *

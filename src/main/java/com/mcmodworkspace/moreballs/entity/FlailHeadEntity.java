@@ -110,6 +110,14 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double ARRIVE_DISTANCE = 0.7D;
 
     /**
+     * 「回到主人身边」的判定半径（以**玩家本体**为准，不受视线影响）。
+     *
+     * <p>{@code handAnchor()} 每 tick 随视线与位置重算，拿它当到达目标时玩家一扭头就追不上，
+     * 锤头会卡在「脑袋右边」表现为假回收。这条用本体中点做判据，玩家怎么动都收敛。</p>
+     */
+    private static final double ARRIVE_TO_BODY_DISTANCE = 1.2D;
+
+    /**
      * 移动回收时，玩家水平位移传递给锤头的比例（作者 2026-10-30 指定 70%）。
      *
      * <p>锤头自己每 tick 只走 {@code recoverSpeed / 20}（铁球 ≈ 0.21 格），比玩家疾跑
@@ -751,9 +759,34 @@ public class FlailHeadEntity extends BallProjectile {
         // 它对应的是**收线**，所以这里直接开始回收。
         //
         // ⚠️ 只在「还没在回收」时触发一次；`beginReturning` 自己会判重入。
+        // ===== ② 自动回收类词条 ⇒ 自动收线 =====
+        //
+        // 【空气动力球】/【忠诚】/【魔法·回收】在球身上的语义是「自己飞回主人」。
+        // 锤头没有「飞回主人」这回事 —— 它对应的是**收线**，所以这里直接开始回收。
+        //
+        // ⚠️⚠️ **必须把物品上的 FLAIL_RETRIEVING 也一起写上**（作者 2026-10-31：
+        //    「回响流星锤在由【忠诚】自动回收时，有时会出现半成功，锤头已经回来了，
+        //     但是还需要按一下右键才会归位」）。
+        //
+        //    锤头的「回收」状态有两份、彼此独立：
+        //      · 实体字段 RETRIEVING —— tickReturning 靠它决定要不要拉；
+        //      · 物品组件 FLAIL_RETRIEVING —— 收尾（清标记、恢复形态、归位）靠它。
+        //
+        //    手动回收走 use()，两条都写了；这里原来**只写了实体那条**，
+        //    于是 FlailCastHandler 的收尾逻辑（它只看物品组件）对自动回收完全不生效：
+        //    锤头飞回来了、实体也 discard 了，物品却停在「扔出中」的形态，
+        //    非得再按一次右键（走一遍手动路径）才把状态补齐。
         if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
-            this.beginReturning((net.minecraft.world.entity.LivingEntity) this.getOwner());
-            this.setRetrieving(true);
+            if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity autoOwner) {
+                this.beginReturning(autoOwner);
+                this.setRetrieving(true);
+                if (autoOwner instanceof Player autoPlayer) {
+                    net.minecraft.world.item.ItemStack heldFlail = autoPlayer.getMainHandItem();
+                    if (FlailItem.isFlail(heldFlail)) {
+                        FlailItem.markRetrieving(heldFlail, true);
+                    }
+                }
+            }
         }
 
         // ===== ③ 绳子的物理约束（作者 2026-10-29：「要有被绳子拽着的物理效果」）=====
@@ -882,19 +915,27 @@ public class FlailHeadEntity extends BallProjectile {
         }
         Vec3 target = handAnchor(living);
         double distance = target.distanceTo(this.position());
-        // 作者 2026-10-30：「让锤头的碰撞箱与玩家碰撞箱相接触后即可完成回收」。
+        // ===== 到达判定（作者 2026-10-31：「会挂在掷出者脑袋右边导致假回收」）=====
         //
-        // 原来是「中心距 < ARRIVE_DISTANCE(0.7)」—— 两个 0.5 格的盒子贴在一起时中心距就已经是 0.5，
-        // 那个阈值对现在的碰撞箱来说偏大，视觉上还差一截就被判到了。改成真正的**盒相交**，
-        // 另留一个极小的心距兜底（防止两个盒子完全重合时因为浮点误差永不触发）。
-        if (this.getBoundingBox().intersects(living.getBoundingBox()) || distance < 0.05D) {
+        // 原来只有两条：盒相交、或「到 handAnchor 的距离 < 0.05」。
+        //
+        // 但 `handAnchor()` 是**每 tick 重算**的：
+        //     owner.position() + right(0.35) + (0, bbHeight * 0.75, 0)
+        // 它的 right 跟着视线走、原点跟着玩家走 —— 玩家一扭头或一走，锚点就挪开，
+        // 锤头永远差那么一点点，于是**停在「脑袋右边」那个位置不动**，
+        // 表现为「回收假成功」：实体还在、线还连着、物品也没归位。
+        //
+        // 所以补一条**以玩家本体为准**的判据：只要靠近到 1.2 格就算到位。
+        // 这个距离与视线、朝向都无关，玩家怎么动都收敛得过去。
+        double toBody = living.position()
+                .add(0.0D, living.getBbHeight() * 0.5D, 0.0D)
+                .distanceTo(this.position());
+        if (this.getBoundingBox().intersects(living.getBoundingBox())
+                || distance < 0.05D
+                || toBody < ARRIVE_TO_BODY_DISTANCE) {
             this.finishReturn(living);
             return;
         }
-        // 线长**只减不增**（作者 2026-10-31：「移动回收现在还是会拖长绳子」）。
-        //
-        // 这里原来是 `setLineLength(distance)` —— 用的是**当前实际距离**。
-        // 玩家一边跑一边收线时，锤头虽然被拖着走，但距离仍然可能变大，
         // 线就跟着视觉上被拉长。回收的语义是「把线收回来」，它只该缩短。
         this.setLineLength(Math.min(distance, this.lineLength()));
 
@@ -970,41 +1011,28 @@ public class FlailHeadEntity extends BallProjectile {
         // 所以主手那把就是被回收的这把。
         if (owner instanceof Player p) {
             clearFlailFlags(p);
-            // ⚠️⚠️ **回收状态必须保持到玩家松手**（作者 2026-10-30：
-            //    「回收之后保持右键不松手还是会显示蓄力字样并受到移速惩罚」）。
+            // ===== 收尾：把物品状态一次清干净（作者 2026-10-31）=====
             //
-            //    `clearFlailFlags` 会把 FLAIL_RETRIEVING 清掉，而锤头飞回这一 tick
-            //    玩家手指通常还按着。清掉之后：
-            //      · `getUseAnimation` 判不到回收 ⇒ 返回 BOW ⇒ 显示蓄力字样与拉弓动作；
-            //      · `LocalPlayerMixin` 判不到回收 ⇒ 移速照旧被乘 0.2。
-            //    两个症状同一个根，都是「状态被提前清了」。
+            // 作者判断得很准：「碰撞箱碰到后判定了回收，锤头实体消失，
+            // 但是因为在向左移动导致分开，没来得及更新物品状态」——
+            // 本质就是**实体已经 discard、物品状态却停在「扔出中 / 回收中」**。
             //
-            //    这里把状态重新立起来，由 `FlailCastHandler` 在玩家**松开右键**
-            //    （`!isUsingItem`）时连同 FLAIL_RECOVERED 一起清掉。
-            // ⚠️⚠️ **只有玩家确实按着右键时才保持回收状态**（作者 2026-10-31：
-            //    「回响流星锤在由【忠诚】自动回收时，有时会出现半成功，锤头已经回来了，
-            //     但是还需要按一下右键才会归位」）。
+            // 原来这里会无条件 `markRetrieving(true)`（为了防「按着右键时显示蓄力字样」），
+            // 而它在 FlailCastHandler 里只在 `!isUsingItem` 时清 ——
+            // 玩家按着右键就把这个状态永久挂住了。
             //
-            //    原来是无条件 `markRetrieving(true)`，靠 FlailCastHandler 在「松手」时清。
-            //    但【忠诚】/【空气动力球】的自动回收走的是 autoRetrieveWanted()，
-            //    玩家**从头到尾没按过右键** —— 于是没有人会松手，这个状态就永久挂着：
-            //      · use() 里 `isRetrieving` 分支优先级最高，按右键只会刷新时刻、不蓄力；
-            // 回收完成后**把回收状态重新立起来**（作者 2026-10-30：
-            //    「回收之后保持右键不松手还是会显示蓄力字样并受到移速惩罚」）。
-            //
-            //    `clearFlailFlags` 会把 FLAIL_RETRIEVING 清掉，而锤头飞回这一 tick
-            //    玩家手指常常还按着 —— 清掉之后 getUseAnimation 返回 BOW（显示蓄力字样）、
-            //    LocalPlayerMixin 也判不到回收（移速被乘 0.2）。
-            //
-            //    这里无条件重设；它的清理有两条路（见 FlailCastHandler）：
-            //      · 玩家松手（!isUsingItem）；
-            //      · **锤头已经没了 + 玩家没在使用** —— 这条专门兜【忠诚】/【空气动力球】
-            //        的自动回收：那种回收玩家可能压根没按过右键，没有人会松手，
-            //        状态就永久挂着，表现为「锤头回来了但要再按一下右键才归位」。
+            // 现在改成：**不设 RETRIEVING，只留 RECOVERED**。
+            //   · `getUseAnimation` 里把 RECOVERED 也算作「不做蓄力动作」，
+            //     所以按着右键同样不会显示蓄力字样；
+            //   · RECOVERED 由 FlailCastHandler 在松手时清，语义单一、不会互相打架。
             net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
             if (FlailItem.isFlail(heldAfter)) {
-                FlailItem.markRetrieving(heldAfter, true);
+                FlailItem.markRetrieving(heldAfter, false);
+                FlailItem.markRecovered(heldAfter, true);
+                FlailItem.setCasting(heldAfter, false);
             }
+            p.containerMenu.broadcastChanges();
+            p.getInventory().setChanged();
         }
         this.discard();
     }
