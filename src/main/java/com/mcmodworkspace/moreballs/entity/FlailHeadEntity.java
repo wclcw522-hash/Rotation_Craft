@@ -968,7 +968,14 @@ public class FlailHeadEntity extends BallProjectile {
             return;
         }
         // 线就跟着视觉上被拉长。回收的语义是「把线收回来」，它只该缩短。
-        this.setLineLength(Math.min(distance, this.lineLength()));
+        // ⚠️ 线长**不再同步成实际距离**（作者 2026-10-31：「移动回收那里还是不对，换个思路修」）。
+        //
+        //   原来这里写的是 `setLineLength(min(distance, lineLength()))`：
+        //   线长被强行等同于「当前位置到手的距离」，而回收又靠「缩短线长」来实现，
+        //   于是两者互相抵消 —— 无论朝主人挪多少，下一 tick 线长又被改回实际距离，
+        //   锤头等于原地不动；玩家一跑，实际距离变大，锤头就被拽着走，越走越远。
+        //
+        //   现在线长是**独立的自由度**：只在回收时递减，由下面的位移段统一维护。
 
         if (!this.isRetrieving()) {
             // 松开右键：原地落下（不再被拉）
@@ -998,33 +1005,39 @@ public class FlailHeadEntity extends BallProjectile {
         // 现在改成纯速度叠加：锤头朝主人的每 tick 位移 =
         //     基础回收速度 + 玩家水平移速 × RETURN_SPEED_BONUS_RATIO(0.5)
         // 玩家跑得越快，锤头往回飞得越快 —— 这才是「边跑边收」该有的样子。
+        // ===== 回收 = 「收线」（作者 2026-10-31：换个思路修）=====
+        //
+        // 不再用「每 tick 朝主人挪多少格」这种写法 —— 那必然要和玩家的移动速度赛跑，
+        // 谁快谁赢，玩家一疾跑就把线拉长。
+        //
+        // 改成绳子的本来面目：**线长是唯一的自由度**。
+        //     锤头位置 = 手部锚点 + 方向 × 线长
+        //   · 回收 = 线长每 tick 减一点；
+        //   · 玩家移动 = 锚点跟着走 ⇒ 锤头自动被「带着走」，不需要额外加法；
+        //   · 玩家跑得再快也只是改变锚点，线长不会因此变长。
+        //
+        // 于是「移动回收」不需要任何专门代码 —— 它是「收线」这个模型天然的结果。
         double basePerTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
 
-        // 玩家这一 tick 的水平位移（用真实坐标差，getDeltaMovement 在服务端不准）
-        Vec3 ownerMove = living.position().subtract(living.xo, living.yo, living.zo);
-        double playerSpeed = Math.sqrt(ownerMove.x * ownerMove.x + ownerMove.z * ownerMove.z);
+        // 线长只能缩短，且不会短于「贴手」的阈值
+        double newLine = Math.max(ARRIVE_DISTANCE * 0.5D, this.lineLength() - basePerTick);
+        this.setLineLength(newLine);
 
-        double perTick = basePerTick + playerSpeed * RETURN_SPEED_BONUS_RATIO;
-        perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
-
-        Vec3 dir = target.subtract(this.position()).normalize();
-        Vec3 next = this.position().add(dir.scale(perTick));
-
-        // ===== 重力（作者 2026-10-31：「收球过程中不受重力影响了，受到一半的球会悬在空中」）=====
-        //
-        //   1.2.0.68 为了不让球的 move() 跟 setPos 对着拉，把 RETURNING 阶段的 super.tick()
-        //   整个摘掉了 —— 连重力一起没了，于是锤头悬在半空。
-        //
-        //   这里手动补：脚下没有支撑就往下坠一点。判据用「下方 0.05 格是否通畅」，
-        //   因为 RETURNING 阶段 noPhysics = true，onGround() 不可靠。
-        if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
-            next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);
+        // 从锚点指向锤头的单位方向（每 tick 重算，保留摆动感）
+        Vec3 out = this.position().subtract(target);
+        if (out.lengthSqr() < 1.0E-6D) {
+            out = new Vec3(0.0D, 1.0D, 0.0D);
+        } else {
+            out = out.normalize();
         }
 
-        // 绳子不延长：位移之后若仍超出线长，沿朝主人方向夹回上限
-        Vec3 toTarget = target.subtract(next);
-        if (toTarget.length() > MAX_LINE) {
-            next = target.subtract(toTarget.normalize().scale(MAX_LINE));
+        // 位置 = 锚点 + 方向 × 线长
+        Vec3 next = target.add(out.scale(newLine));
+
+        // 重力：脚下没有支撑就往下垂一点（RETURNING 不跑球物理，onGround 不可靠，
+        // 用「下方 0.05 格是否通畅」当判据）
+        if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
+            next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);
         }
 
         this.setPos(next.x, next.y, next.z);

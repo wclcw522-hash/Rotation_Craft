@@ -1,3 +1,63 @@
+## 1.2.0.70 — 回收改成「收线」模型：线长是唯一自由度
+
+### 为什么前两种写法都不对
+
+前两版都在调「**每 tick 朝主人挪多少格**」：
+
+- 1.2.0.68 之前：`recoverSpeed / 20`（铁球 0.21）
+- 1.2.0.69：再叠加玩家移速的 50%（0.21 + 0.28 × 0.5 = 0.35）
+
+而玩家疾跑是 **0.28 格/tick**。这种写法必然要和玩家的移动速度赛跑，
+0.35 − 0.28 只剩 0.07 —— 相对靠近极慢，看起来就是「越走越远」。
+
+### 换思路：按绳子的本来面目写
+
+**线长是唯一的自由度**：
+
+```
+锤头位置 = 手部锚点 + 方向 × 线长
+```
+
+- **回收** = 线长每 tick 减一点；
+- **玩家移动** = 锚点跟着走 ⇒ 锤头**自动被带着走**，不需要任何额外加法；
+- 玩家跑得再快也只是改变锚点，**线长不会因此变长**。
+
+于是「移动回收」不需要专门代码 —— 它是这个模型天然的结果。
+
+```java
+double newLine = Math.max(ARRIVE_DISTANCE * 0.5D, this.lineLength() - basePerTick);
+this.setLineLength(newLine);
+
+Vec3 out = this.position().subtract(target);
+out = out.lengthSqr() < 1.0E-6D ? new Vec3(0, 1, 0) : out.normalize();
+
+Vec3 next = target.add(out.scale(newLine));
+if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
+    next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);
+}
+this.setPos(next.x, next.y, next.z);
+```
+
+### 顺带删掉一处互相抵消的写法
+
+`tickReturning` 里原来有：
+
+```java
+this.setLineLength(Math.min(distance, this.lineLength()));
+```
+
+它把线长**强行等同于当前位置到手的实际距离**。而回收靠「缩短线长」实现 ——
+两者互相抵消：无论朝主人挪多少，下一 tick 线长又被改回实际距离，锤头等于原地不动；
+玩家一跑实际距离变大，锤头反而被拽着走。
+
+现在线长独立维护，只在回收时递减。
+
+### 保留
+
+- 重力（`RETURN_GRAVITY_PER_TICK`）—— 解决 1.2.0.68 摘掉 `super.tick()` 后锤头悬空的问题；
+- `RETURNING` 阶段不跑球物理 —— 避免 `move()` 和 `setPos` 对着拉。
+
+---
 ## 1.2.0.69 — 移动回收改速度叠加、回收补回重力
 
 ### ① 移动回收：改成「基础速度 + 玩家移速 × 50%」
