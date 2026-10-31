@@ -891,7 +891,12 @@ public class FlailHeadEntity extends BallProjectile {
             this.finishReturn(living);
             return;
         }
-        this.setLineLength(distance);
+        // 线长**只减不增**（作者 2026-10-31：「移动回收现在还是会拖长绳子」）。
+        //
+        // 这里原来是 `setLineLength(distance)` —— 用的是**当前实际距离**。
+        // 玩家一边跑一边收线时，锤头虽然被拖着走，但距离仍然可能变大，
+        // 线就跟着视觉上被拉长。回收的语义是「把线收回来」，它只该缩短。
+        this.setLineLength(Math.min(distance, this.lineLength()));
 
         if (!this.isRetrieving()) {
             // 松开右键：原地落下（不再被拉）
@@ -976,9 +981,23 @@ public class FlailHeadEntity extends BallProjectile {
             //
             //    这里把状态重新立起来，由 `FlailCastHandler` 在玩家**松开右键**
             //    （`!isUsingItem`）时连同 FLAIL_RECOVERED 一起清掉。
-            net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
-            if (FlailItem.isFlail(heldAfter)) {
-                FlailItem.markRetrieving(heldAfter, true);
+            // ⚠️⚠️ **只有玩家确实按着右键时才保持回收状态**（作者 2026-10-31：
+            //    「回响流星锤在由【忠诚】自动回收时，有时会出现半成功，锤头已经回来了，
+            //     但是还需要按一下右键才会归位」）。
+            //
+            //    原来是无条件 `markRetrieving(true)`，靠 FlailCastHandler 在「松手」时清。
+            //    但【忠诚】/【空气动力球】的自动回收走的是 autoRetrieveWanted()，
+            //    玩家**从头到尾没按过右键** —— 于是没有人会松手，这个状态就永久挂着：
+            //      · use() 里 `isRetrieving` 分支优先级最高，按右键只会刷新时刻、不蓄力；
+            //      · 得松手再按一次（这时 handler 才清掉它）才恢复正常。
+            //
+            //    判据用 `isUsingItem()`：手动回收时它为 true（走的就是 use 系统），
+            //    自动回收时为 false ⇒ 不设状态、立刻归位。
+            if (p.isUsingItem()) {
+                net.minecraft.world.item.ItemStack heldAfter = p.getMainHandItem();
+                if (FlailItem.isFlail(heldAfter)) {
+                    FlailItem.markRetrieving(heldAfter, true);
+                }
             }
         }
         this.discard();

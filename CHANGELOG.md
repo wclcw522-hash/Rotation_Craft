@@ -1,3 +1,57 @@
+## 1.2.0.64 — 移动回收拖长绳子、【忠诚】自动回收「半成功」
+
+### ① 移动回收时绳子被拖长
+
+`tickReturning` 里原来写的是：
+
+```java
+this.setLineLength(distance);      // distance = 当前位置到手的实际距离
+```
+
+玩家一边跑一边收线时，锤头虽然被 70% 拖拽带着走，但**相对距离仍可能变大**，
+线就跟着视觉上被拉长。
+
+**修**：回收的语义是「把线收回来」，它只该缩短：
+
+```java
+this.setLineLength(Math.min(distance, this.lineLength()));
+```
+
+### ② 【忠诚】自动回收「半成功」：锤头回来了，还要按一下右键才归位
+
+`finishReturn` 里原来**无条件**把回收状态重新立起来：
+
+```java
+ItemStack heldAfter = p.getMainHandItem();
+if (FlailItem.isFlail(heldAfter)) {
+    FlailItem.markRetrieving(heldAfter, true);
+}
+```
+
+这个状态的设计前提是「玩家还按着右键、松手时由 `FlailCastHandler` 清掉」——
+那是**手动回收**的情形。
+
+而【忠诚】/【空气动力球】的自动回收走的是 `autoRetrieveWanted()`，
+玩家**从头到尾没按过右键**，也就没有人会松手。于是 `FLAIL_RETRIEVING` 永久挂着：
+
+- `use()` 里 `isRetrieving` 分支优先级最高 ⇒ 按右键只刷新时刻、**不蓄力**；
+- 必须松手再按一次（这时 handler 才清掉它）才恢复正常 —— 也就是「按一下右键才归位」。
+
+**修**：只在玩家确实按着右键时才保持该状态
+
+```java
+if (p.isUsingItem()) {
+    ItemStack heldAfter = p.getMainHandItem();
+    if (FlailItem.isFlail(heldAfter)) {
+        FlailItem.markRetrieving(heldAfter, true);
+    }
+}
+```
+
+手动回收时 `isUsingItem()` 为真（走的就是 use 系统），行为不变；
+自动回收时为假 ⇒ 不设状态、立刻归位。
+
+---
 ## 1.2.0.63 — 下沉：拆掉我上一版亲手造成的负优化
 
 ### 先回答「为什么锤头会沉、球不会」
