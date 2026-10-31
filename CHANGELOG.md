@@ -1,3 +1,36 @@
+## 1.2.0.73 — 首次掷出下坠、松手后绳长未释放
+
+### ① 首次掷出后锤头往下掉
+
+`launch()` 是从 `SPIN` 阶段调过来的，而 `SPIN` 期间 `noPhysics = true`
+（环绕位置靠 `setPos`，不需要方块碰撞）。`launch()` 里**没有把它恢复**，
+所以出手后第一 tick 的 `move()` 不做碰撞解算，锤头直接穿过地面往下掉一格。
+
+`tick()` 的 `FLYING` 分支确实会设 `noPhysics = false`，但那是**下一 tick** 的事，来不及。
+
+**修**：`launch()` 里显式恢复
+
+```java
+this.noPhysics = false;
+this.ropeLimit = MAX_LINE;
+```
+
+### ② 松手后绳长被锁死，再次回收瞬移
+
+绳长上限 `ropeLimit` 在回收时被一路收紧。松手后它就那么锁着 ——
+玩家走远了它还是旧值，再按右键时约束会把锤头一把钳回**那个旧半径**，
+表现就是「暂停回收后远离锤头，再次回收时锤头瞬移到暂停前的长度」。
+
+**修**：松手 = 绳子重新放松，让上限跟随实际距离
+
+```java
+// tickReturning 里 !isRetrieving() 分支
+this.ropeLimit = Math.max(this.ropeLimit, this.distanceToOwner());
+```
+
+只增不减，所以不会把锤头往远处推；玩家怎么移动绳长都跟着走，再次回收从当前位置开始收。
+
+---
 ## 1.2.0.72 — 回收改用「绳长约束」模型
 
 ### 作者的设计（这次是完整架构，不是补丁）

@@ -634,6 +634,14 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   同理把回收状态也清掉，让这次投掷从干净状态开始。
         this.lineCapConsumed = false;
+        // ⚠️ **必须在这里把 noPhysics 放开**（作者 2026-10-31：「首次掷出后还是会下坠」）。
+        //
+        //   launch() 是从 SPIN 阶段调过来的，而 SPIN 期间 noPhysics = true（环绕靠 setPos，
+        //   不需要方块碰撞）。如果不在这一刻恢复，出手后**第一 tick 的 move() 不做碰撞解算**，
+        //   锤头会直接穿过地面往下掉一格 —— 看起来就是「首次掷出下坠」。
+        //
+        //   之后 tick() 的 FLYING 分支也会设 false，但那是下一 tick 的事，来不及。
+        this.noPhysics = false;
         this.ropeLimit = MAX_LINE;      // 绳子拉满 30 格
         this.setRetrieving(false);
 
@@ -1047,6 +1055,14 @@ public class FlailHeadEntity extends BallProjectile {
             //
             //   RETURNING 阶段不跑球的物理（1.2.0.68 起），也就没有 move() 的方块碰撞。
             //   原来这里只改速度、不判碰撞，锤头会一路穿进地面。
+            // ⚠️ **松手要释放绳长**（作者 2026-10-31：「暂停回收后远离锤头，再次回收时锤头瞬移」）。
+            //
+            //   绳长上限在回收时被一路收紧，松手后如果就那么锁着，人走远了它还是旧值；
+            //   再按右键，约束会把锤头一把钳回那个旧半径 —— 表现为瞬移。
+            //
+            //   松手 = 绳子重新放松：让上限跟随实际距离（只增不减，不会把锤头往远处推）。
+            this.ropeLimit = Math.max(this.ropeLimit, this.distanceToOwner());
+
             Vec3 fall = this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D);
             Vec3 fallTo = this.position().add(fall);
             if (this.isFreeAt(fallTo)) {
