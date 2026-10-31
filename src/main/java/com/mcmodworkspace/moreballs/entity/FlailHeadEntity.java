@@ -402,11 +402,26 @@ public class FlailHeadEntity extends BallProjectile {
                 super.tick();
                 tickSpin();
             }
-            case RETURNING -> {
-                this.noPhysics = true;
-                super.tick();
-                tickReturning();
-            }
+        case RETURNING -> {
+            this.noPhysics = true;
+
+            // ⚠️⚠️ **回收阶段不跑球物理**（作者 2026-10-31：「移动回收的代码还是没作用，
+            //    依旧是越来越远」）。
+            //
+            //   原来这里是 `super.tick()` + `tickReturning()`：
+            //     · `super.tick()` 是球的完整 tick，内部会 `move()` 按当前速度把锤头推一段；
+            //     · 紧接着 `tickReturning()` 又用 `setPos` 覆盖成「朝主人靠近一步」的结果。
+            //   两者每 tick 对着拉一次，净位移被吃掉一大半；玩家一跑，
+            //   `move()` 那一段的干扰就盖过了回收那一步 —— 表现就是「越走越远」。
+            //
+            //   回收的位置本来就该**完全由 tickReturning 决定**，不需要球的弹道。
+            //   唯一必须保留的是上一 tick 坐标（客户端插值靠它，不更新会抽搐），
+            //   这里手动维护即可。
+            this.xo = this.getX();
+            this.yo = this.getY();
+            this.zo = this.getZ();
+            tickReturning();
+        }
             case FLYING -> {
                 this.noPhysics = false;
                 super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）

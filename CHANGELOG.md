@@ -1,3 +1,54 @@
+## 1.2.0.68 — HUD 蓄力字样、移动回收失效
+
+### ① 回收时仍显示「蓄力 x / y」
+
+`getUseAnimation`（拉弓动作）和 `LocalPlayerMixin`（移速）1.2.0.67 都补过 RECOVERED 判据，
+**唯独 HUD 那处漏了** —— `MoreBallsClient` 里写的是：
+
+```java
+if (FlailItem.isFlail(stack) && FlailItem.isRetrieving(stack)) {
+    return;      // 回收时不画蓄力文字
+}
+```
+
+1.2.0.66 起 `finishReturn` 只设 `RECOVERED`，`isRetrieving` 在那时已经是 false，
+于是这行判不到，回收全程一直挂着「蓄力 x / y」。
+
+**修**：判据补成 `isRetrieving || isRecovered`，和另外两处一致。
+
+### ② 移动回收没作用、锤头越走越远
+
+`tick()` 的 `RETURNING` 分支原来是：
+
+```java
+case RETURNING -> {
+    this.noPhysics = true;
+    super.tick();        // ← 球的完整 tick
+    tickReturning();     // ← 再 setPos 覆盖
+}
+```
+
+`super.tick()` 内部会 `move()`，按当前速度把锤头推一段；紧接着 `tickReturning()` 又用 `setPos`
+把它覆盖成「朝主人靠近一步」的结果。两者每 tick 对着拉一次，**净位移被吃掉一大半**。
+玩家一跑，`move()` 那段的干扰就盖过了回收那一步 —— 表现就是「越走越远」。
+
+回收的位置本来就该**完全由 `tickReturning` 决定**，不需要球的弹道。
+
+**修**：不跑球物理，只手动维护上一 tick 坐标（客户端插值靠它）
+
+```java
+case RETURNING -> {
+    this.noPhysics = true;
+    this.xo = this.getX();
+    this.yo = this.getY();
+    this.zo = this.getZ();
+    tickReturning();
+}
+```
+
+这样 `tickReturning` 里那 70% 拖拽 + 朝主人收线的位移就是**净位移**，不再被吃掉。
+
+---
 ## 1.2.0.67 — 移速判据补齐、掷出后 0.5 秒回收冷却
 
 ### ① 回收后按住右键的蓄力惩罚回来了

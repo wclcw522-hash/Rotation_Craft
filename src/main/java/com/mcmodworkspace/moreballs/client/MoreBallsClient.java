@@ -155,8 +155,11 @@ public final class MoreBallsClient {
         // ⚠️ 回收锤头时**不显示蓄力文字**（作者 2026-10-19）。
         //    回收同样靠 startUsingItem 维持「使用中」，所以 isUsingItem 为真 ——
         //    不判这一条的话，按住右键回收时会一直挂着「蓄力 x / y」。
+        // 判据同 getUseAnimation / LocalPlayerMixin：回收中 **或** 刚回收完还没松手。
+        // 1.2.0.66 起 finishReturn 只设 RECOVERED，少判它就会在回收期间一直挂着「蓄力 x / y」。
         if (com.mcmodworkspace.moreballs.FlailItem.isFlail(stack)
-                && com.mcmodworkspace.moreballs.FlailItem.isRetrieving(stack)) {
+                && (com.mcmodworkspace.moreballs.FlailItem.isRetrieving(stack)
+                        || com.mcmodworkspace.moreballs.FlailItem.isRecovered(stack))) {
             return;
         }
         if (!BallBehavior.handles(probe)) {
