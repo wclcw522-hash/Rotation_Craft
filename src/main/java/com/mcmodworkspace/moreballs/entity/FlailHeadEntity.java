@@ -126,15 +126,21 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double ARRIVE_TO_BODY_DISTANCE = 1.2D;
 
     /**
-     * 移动回收时，玩家水平位移传递给锤头的比例（作者 2026-10-30 指定 70%）。
+     * 移动回收时，**玩家水平移速**额外叠加到收球速度上的比例（作者 2026-10-31 指定 50%）。
      *
-     * <p>锤头自己每 tick 只走 {@code recoverSpeed / 20}（铁球 ≈ 0.21 格），比玩家疾跑
-     * （0.28 格/tick）慢 ⇒ 原地收线时人一跑就把绳子拉长、永远追不上。
-     * 按这个比例把玩家的位移分给锤头，它就能被「拖着走」，边跑边收得回来。</p>
-     *
-     * <p>拖拽之后仍夹在 {@link #MAX_LINE} 以内，所以绳子不会变长。</p>
+     * <p>锤头每 tick 朝主人的位移 = 基础回收速度 + 玩家移速 × 这个比例。</p>
+     * <p>玩家跑得越快锤头回得越快，边跑边收才追得上（铁球基础只有 0.21 格/tick，
+     * 而玩家疾跑是 0.28）。</p>
      */
-    private static final double RETURN_DRAG_RATIO = 0.7D;
+    private static final double RETURN_SPEED_BONUS_RATIO = 0.5D;
+
+    /**
+     * 回收阶段的手动重力（格/tick）。
+     *
+     * <p>RETURNING 不跑球的物理（否则 move() 会和 setPos 对着拉），
+     * 所以重力要自己加 —— 不加的话锤头会悬在半空。</p>
+     */
+    private static final double RETURN_GRAVITY_PER_TICK = 0.08D;
 
     /**
      * 锤头最长寿命（刻）= 5 分钟。
@@ -984,33 +990,40 @@ public class FlailHeadEntity extends BallProjectile {
         //
         // 碰撞体积本身还在（`isPickable` / `canBeCollidedWith` 仍是 false，生物碰不到），
         // 只是这条「绳子拉回」的路径不再受方块阻挡。
-        double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+        // ===== 移动回收：收球速度**额外加上玩家移速的 50%**（作者 2026-10-31 指定）=====
+        //
+        // 之前的做法是把玩家位移按 70% 直接加到锤头位置上（拖拽），
+        // 手感不对：锤头是被「推着走」而不是「更快地飞回来」。
+        //
+        // 现在改成纯速度叠加：锤头朝主人的每 tick 位移 =
+        //     基础回收速度 + 玩家水平移速 × RETURN_SPEED_BONUS_RATIO(0.5)
+        // 玩家跑得越快，锤头往回飞得越快 —— 这才是「边跑边收」该有的样子。
+        double basePerTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+
+        // 玩家这一 tick 的水平位移（用真实坐标差，getDeltaMovement 在服务端不准）
+        Vec3 ownerMove = living.position().subtract(living.xo, living.yo, living.zo);
+        double playerSpeed = Math.sqrt(ownerMove.x * ownerMove.x + ownerMove.z * ownerMove.z);
+
+        double perTick = basePerTick + playerSpeed * RETURN_SPEED_BONUS_RATIO;
         perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
 
-        // ===== 移动回收：被掷出者「拖着走」（作者 2026-10-30 指定）=====
-        //
-        //   静态回收时锤头每 tick 只走 `recoverSpeed / 20`（铁球 ≈ 0.21 格），
-        //   而玩家疾跑是 0.28 格/tick —— **锤头追不上人**，绳子只会越拉越长。
-        //
-        //   做法：把玩家这一 tick 的水平位移按 {@link #RETURN_DRAG_RATIO}(70%) 加给锤头，
-        //   于是它一边自己往回飞、一边被拖着走。铁球合起来 ≈ 0.41 格/tick，
-        //   相对玩家仍以 0.13 格/tick 靠近 ⇒ 边跑边收得回来。
-        //
-        //   同时**不让绳子变长**：拖拽之后若距离超过 {@link #MAX_LINE}，
-        //   就沿「朝玩家」的方向夹回上限 —— 这是作者明确要求的。
-        // 用位置差而不是 getDeltaMovement()：玩家实体的 deltaMovement 由 Player.aiStep()
-        // 每 tick 重算，服务端读到的值不一定等于实际位移(实测拖拽完全没生效就是它)。
-        // xo/yo/zo 是上一 tick 的真实坐标，稳得多。
-        Vec3 ownerMove = living.position().subtract(living.xo, living.yo, living.zo);
-        Vec3 drag = new Vec3(ownerMove.x * RETURN_DRAG_RATIO, 0.0D, ownerMove.z * RETURN_DRAG_RATIO);
-
         Vec3 dir = target.subtract(this.position()).normalize();
-        Vec3 next = this.position().add(dir.scale(perTick)).add(drag);
+        Vec3 next = this.position().add(dir.scale(perTick));
 
-        // 绳子不延长：超出上限就夹回来（沿朝玩家方向），这段不受地形限制的语义不变
+        // ===== 重力（作者 2026-10-31：「收球过程中不受重力影响了，受到一半的球会悬在空中」）=====
+        //
+        //   1.2.0.68 为了不让球的 move() 跟 setPos 对着拉，把 RETURNING 阶段的 super.tick()
+        //   整个摘掉了 —— 连重力一起没了，于是锤头悬在半空。
+        //
+        //   这里手动补：脚下没有支撑就往下坠一点。判据用「下方 0.05 格是否通畅」，
+        //   因为 RETURNING 阶段 noPhysics = true，onGround() 不可靠。
+        if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
+            next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);
+        }
+
+        // 绳子不延长：位移之后若仍超出线长，沿朝主人方向夹回上限
         Vec3 toTarget = target.subtract(next);
-        double afterDrag = toTarget.length();
-        if (afterDrag > MAX_LINE) {
+        if (toTarget.length() > MAX_LINE) {
             next = target.subtract(toTarget.normalize().scale(MAX_LINE));
         }
 

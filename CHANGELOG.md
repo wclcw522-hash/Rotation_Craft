@@ -1,3 +1,44 @@
+## 1.2.0.69 — 移动回收改速度叠加、回收补回重力
+
+### ① 移动回收：改成「基础速度 + 玩家移速 × 50%」
+
+之前的做法是把玩家位移按 70% 直接加到锤头**位置上**（拖拽），手感是被「推着走」而不是飞回来。
+
+**修**（按作者指定）：
+
+```java
+double basePerTick = FlailItem.recoverSpeed(profile) / TICKS_PER_SECOND;
+
+Vec3 ownerMove = living.position().subtract(living.xo, living.yo, living.zo);
+double playerSpeed = Math.sqrt(ownerMove.x * ownerMove.x + ownerMove.z * ownerMove.z);
+
+double perTick = basePerTick + playerSpeed * RETURN_SPEED_BONUS_RATIO;   // 0.5
+```
+
+纯速度叠加：玩家跑得越快，锤头往回飞得越快。铁球基础 0.21、玩家疾跑 0.28，
+合起来 0.35 格/tick，能追。
+
+`RETURN_DRAG_RATIO`（0.7 拖拽）已删除，换成 `RETURN_SPEED_BONUS_RATIO = 0.5`。
+
+### ② 收球过程中球悬在空中
+
+1.2.0.68 为了不让球的 `move()` 跟 `setPos` 对着拉，把 `RETURNING` 阶段的 `super.tick()`
+整个摘掉了 —— **连重力一起没了**，于是锤头会悬在半空。
+
+**修**：手动补重力
+
+```java
+if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
+    next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);   // 0.08
+}
+```
+
+判据用「下方 0.05 格是否通畅」而不是 `onGround()` —— `RETURNING` 阶段 `noPhysics = true`，
+`onGround()` 不可靠。
+
+依然不跑球物理，所以「`move()` 和 `setPos` 对着拉」那个问题不会回来。
+
+---
 ## 1.2.0.68 — HUD 蓄力字样、移动回收失效
 
 ### ① 回收时仍显示「蓄力 x / y」
