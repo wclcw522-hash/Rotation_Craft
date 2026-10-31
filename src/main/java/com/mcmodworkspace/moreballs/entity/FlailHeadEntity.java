@@ -143,6 +143,32 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double RETURN_GRAVITY_PER_TICK = 0.08D;
 
     /**
+     * 超出线长时，绳子把锤头往里拉的速度（格/tick）。
+     *
+     * <p>⚠️ 只改速度、不 setPos —— 位置交给 move() 带碰撞去走，这样不会嵌进方块。</p>
+     */
+    private static final double PULL_IN_SPEED = 0.35D;
+
+    /**
+     * 松弛绳段的收线速度（格/tick，作者 2026-10-31 提出）。
+     *
+     * <p>回收开始时 ropeLimit 从 {@link #MAX_LINE} 起算，此刻绳子对锤头其实是松的，
+     * 锤头并不受约束。这一段用极快的速度把松弛量收掉，直到 ropeLimit 追平实际距离 ——
+     * 也就是绳子绷紧那一刻。之后才进入「锤头拖着绳子」的正常回收速度。</p>
+     */
+    private static final double SLACK_TAKE_UP_SPEED = 4.0D;
+
+    /**
+     * <b>当前绳长上限</b>（格）。回收就是把这条上限一点点收紧（作者 2026-10-31）。
+     *
+     * <p>锤头始终被约束在「以手部锚点为球心、半径 = 这个值」的球面上。</p>
+     * <p>· 飞行阶段 = {@link #MAX_LINE}（30 格，绳子拉满就拽住）；</p>
+     * <p>· 回收阶段 = 从当前实际距离一路收紧到 0 —— <b>这就是「回收」</b>：</p>
+     * <p>  玩家把绳子往回收，锤头被绳子拽着带回来，而不是自己飞回来。</p>
+     */
+    private double ropeLimit = MAX_LINE;
+
+    /**
      * 锤头最长寿命（刻）= 5 分钟。
      *
      * <p>作者 2026-10-19：存档里有个锤头扔出去再也没回来，导致手里每把流星锤都
@@ -408,26 +434,23 @@ public class FlailHeadEntity extends BallProjectile {
                 super.tick();
                 tickSpin();
             }
-        case RETURNING -> {
-            this.noPhysics = true;
-
-            // ⚠️⚠️ **回收阶段不跑球物理**（作者 2026-10-31：「移动回收的代码还是没作用，
-            //    依旧是越来越远」）。
-            //
-            //   原来这里是 `super.tick()` + `tickReturning()`：
-            //     · `super.tick()` 是球的完整 tick，内部会 `move()` 按当前速度把锤头推一段；
-            //     · 紧接着 `tickReturning()` 又用 `setPos` 覆盖成「朝主人靠近一步」的结果。
-            //   两者每 tick 对着拉一次，净位移被吃掉一大半；玩家一跑，
-            //   `move()` 那一段的干扰就盖过了回收那一步 —— 表现就是「越走越远」。
-            //
-            //   回收的位置本来就该**完全由 tickReturning 决定**，不需要球的弹道。
-            //   唯一必须保留的是上一 tick 坐标（客户端插值靠它，不更新会抽搐），
-            //   这里手动维护即可。
-            this.xo = this.getX();
-            this.yo = this.getY();
-            this.zo = this.getZ();
-            tickReturning();
-        }
+            case RETURNING -> {
+                // ===== 回收阶段：**重新启动运动状态**（作者 2026-10-31）=====
+                //
+                // 作者原话：「防止下沉和悬空的话，让回收启动和结束时分别重新启动和终止
+                // 运动状态不就行了吗」
+                //
+                // 对。之前为了躲开「move() 和 setPos 对着拉」把 super.tick() 摘掉了，
+                // 代价是**重力与方块碰撞一起没了** —— 于是锤头悬空或嵌进地面。
+                //
+                // 正确做法是反过来：把这个阶段当成**正常的物理阶段**重新启动，
+                // 然后用「速度」而不是 setPos 去驱动它 —— 这样 move() 会带着碰撞走，
+                // 重力也照常生效，两个问题同时消失。
+                this.noPhysics = false;      // 恢复方块碰撞（防下沉）
+                this.setNoGravity(false);    // 恢复重力（防悬空）
+                super.tick();                // 球物理：重力 + move() 碰撞解算
+                tickReturning();
+            }
             case FLYING -> {
                 this.noPhysics = false;
                 super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）
@@ -446,6 +469,21 @@ public class FlailHeadEntity extends BallProjectile {
                     this.setRetrieving(true);
                 }
             }
+        }
+
+        // ===== 统一收尾：方块碰撞解算（作者 2026-10-31：「下沉别忘了修好」）=====
+        //
+        // 上面三个分支都会用 setPos 直接改坐标（环绕 / 收线 / 位移），
+        // 而 setPos 是**跳过方块碰撞**的 —— 坐标落在方块里时没有任何东西会把锤头推出来，
+        // 于是它嵌进地面、每 tick 触发 onHit、一直扣耐久，这就是「下沉」。
+        //
+        // 这里是**唯一的兜底点**：不管上面谁改过位置，收尾都做一次零位移的 move()，
+        // 它的碰撞解算会把嵌进方块的部分推出去。一次写在这里，比每个分支各修一遍可靠。
+        //
+        // ⚠️ 只在 noPhysics == false 时做 —— SPIN / RETURNING 是刻意穿墙的，
+        //    那两段不参与方块碰撞。
+        if (!this.noPhysics) {
+            this.move(net.minecraft.world.entity.MoverType.SELF, Vec3.ZERO);
         }
     }
 
@@ -596,6 +634,7 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   同理把回收状态也清掉，让这次投掷从干净状态开始。
         this.lineCapConsumed = false;
+        this.ropeLimit = MAX_LINE;      // 绳子拉满 30 格
         this.setRetrieving(false);
 
         Vec3 dir = shooter.getLookAngle();
@@ -721,21 +760,53 @@ public class FlailHeadEntity extends BallProjectile {
 
 
     /**
-     * FLYING 阶段。
+     * <b>距离约束 —— 唯一实现点，处处复用。</b>
      *
-     * <p>球的物理与词条由 {@link BallPhysicsCore#tick()} 跑（父类 tick 已经覆盖：
-     * 尖啸路径判定 / 弹射 / 音波 / 感应积热 / 磁吸 / 磁性 / 照明 / 透镜 / 融化 / 引雷 / 导电 …），
-     * 这里只加**锤头独有的两条**（作者 2026-10-20 补充）：</p>
+     * <p>作者 2026-10-31：「回收的时候不就相当于掷出者拽着绳子让绳子持续处于最大长度
+     * 来带回锤头吗？……这一段代码写好了可以很多地方复用的。」</p>
      *
+     * <p>把锤头钳制在「以手部锚点为球心、半径 {@link #ropeLimit}」的球面上：</p>
      * <ol>
-     *   <li><b>线长上限 = 完成一次弹射</b> —— 到 30 格时调一次 {@code shriekLand}，
-     *       让【尖啸】把这一次当成「撞到东西」，按 {@code bounce} 档位结算一次弹射，
-     *       然后扣 1 耐久 + 给一个朝掷出者的小速度。</li>
-     *   <li><b>自动回收类词条 = 自动收线</b> —— 【空气动力球】/【忠诚】/【魔法·回收】
-     *       原本的语义是「球自己飞回主人」，在锤头身上就是<b>自动收线</b>：
-     *       直接把 {@code RETRIEVING} 置 true，走已有的回收流程。</li>
+     *   <li><b>位置投影</b> —— 超出就拉回球面；</li>
+     *   <li><b>速度径向清零</b> —— 砍掉朝外的分量（绳子不可拉伸），切向保留（链球摆动）；</li>
+     *   <li><b>碰撞解算</b> —— 投影后可能落在方块里，用零位移 move() 推出来。</li>
      * </ol>
+     *
+     * <p>回收不需要「让锤头飞」：只要<b>把 ropeLimit 一点点收紧</b>，
+     * 这个约束就会把锤头拽回来；玩家移动时锚点移动，锤头自然被带着走。</p>
+     *
+     * <p>飞行阶段用 {@link #MAX_LINE} 当上限，同一个函数就实现了「超出线长被拉动」。</p>
      */
+    private void applyRopeConstraint() {
+        if (!(this.getOwner() instanceof net.minecraft.world.entity.LivingEntity ropeOwner)) {
+            return;
+        }
+        Vec3 anchor = handAnchor(ropeOwner);
+        Vec3 delta = this.position().subtract(anchor);
+        double distance = delta.length();
+        if (distance <= this.ropeLimit || distance < 1.0E-4D) {
+            return;
+        }
+
+        Vec3 out = delta.scale(1.0D / distance);            // 锚点 → 锤头
+
+        // ① 位置投影回球面
+        Vec3 clamped = anchor.add(out.scale(this.ropeLimit));
+        this.setPos(clamped.x, clamped.y, clamped.z);
+
+        // ② 速度：砍掉朝外的分量，保留切向（链球摆动）
+        Vec3 velocity = this.getDeltaMovement();
+        double radialOut = velocity.dot(out);
+        if (radialOut > 0.0D) {
+            this.setDeltaMovement(velocity.subtract(out.scale(radialOut)));
+        }
+
+        // ③ 投影后再解算一次方块碰撞 —— 把嵌进方块的部分推出来（防下沉）
+        if (!this.noPhysics) {
+            this.move(net.minecraft.world.entity.MoverType.SELF, Vec3.ZERO);
+        }
+    }
+
     private void tickFlying() {
         // ===== ⓪ 卡进方块时先脱离（作者 2026-10-30：「扔出会沉到方块里」）=====
         //
@@ -829,32 +900,15 @@ public class FlailHeadEntity extends BallProjectile {
             Vec3 anchor = handAnchor(ropeOwner);
             Vec3 delta = this.position().subtract(anchor);
             double distance = delta.length();
-            // ⚠️ 只在**明显**超出线长时才约束（作者 2026-10-30：「收到脚边时会变得非常费劲，还会卡在方块上」）。
+            // ===== 绳子约束：**唯一的实现点**（作者 2026-10-31）=====
             //
-            //   原来阈值正好卡在 MAX_LINE 上，锤头一到边界就被反复拉回 + 施加向内张力，
-            //   表现为「越靠近越费力」，还会被硬 setPos 塞进方块里卡住。
+            // 作者原话：「为什么不从根源解决，让线真的拥有一个上限长度，
+            // 达到上限后启用线的物理逻辑呢？你这样修要修到什么时候去」
             //
-            //   现在：① 阈值放宽到 1.15 × MAX_LINE，正常回收全程不触发；
-            //        ② **不再加向内张力** —— 「绳子不可拉伸」只用「砍掉朝外的径向分量」表达。
-            // 阈值必须是 MAX_LINE 本身，不能是 1.15 倍。
-            //
-            // 原来放宽到 1.15 倍是为了不让回收过程被反复拉回，但回收走 RETURNING 阶段、
-            // 根本不会进这个方法。FLYING 阶段放宽只会让锤头在线外(30~34.5 格)无人约束地停着：
-            // 物品栏显示已扔出，锤头却躺在地上不动，人走远了也不跟过来。
-            //
-            // 现在只要超出线长就每 tick 拽回球面，并砍掉朝外的速度分量。
-            if (distance > MAX_LINE && distance > 1.0E-4D) {
-                Vec3 out = delta.scale(1.0D / distance);          // 掷出者 → 锤头
-                Vec3 clamped = anchor.add(out.scale(MAX_LINE));
-                this.setPos(clamped.x, clamped.y, clamped.z);
-
-                Vec3 velocity = this.getDeltaMovement();
-                double radialOut = velocity.dot(out);
-                if (radialOut > 0.0D) {
-                    velocity = velocity.subtract(out.scale(radialOut));   // 只砍向外的分量
-                }
-                this.setDeltaMovement(velocity);
-            }
+            // 对。「线长上限」本来就该是一条**约束**，而不是散落在各处的特判。
+            // 所以这里只调一次 applyRopeConstraint() —— 位置钳制、速度径向清零、
+            // 碰撞解算全在它内部，别的地方不再重复实现。
+            this.applyRopeConstraint();
 
         // ⚠️⚠️ **落定检查必须放在线长处理之后**（作者 2026-10-31：「线长上限时拉动锤头的设计
         //    没有实现，现在还是超出距离没效果」）。
@@ -907,6 +961,9 @@ public class FlailHeadEntity extends BallProjectile {
         this.getEntityData().set(TRAITS_DISABLED, true);
         this.setDeltaMovement(Vec3.ZERO);
         this.consumeOneToughness("开始回收");
+        // 回收开始：绳长上限从**当前实际距离**开始收紧（不是从 30 格）
+        // 回收开始：绳长上限从最大值起算（作者 2026-10-31 进阶思路）
+        this.ropeLimit = MAX_LINE;
     }
 
     /**
@@ -1000,65 +1057,40 @@ public class FlailHeadEntity extends BallProjectile {
             return;
         }
 
-        // ===== 回收：**完全不受地形限制**（作者 2026-10-19 第三次修订）=====
+        // ===== 回收 = 把绳长上限收紧（作者 2026-10-31）=====
         //
-        // 作者原话：「我要的回收是具有物理碰撞、并且**完全不受地形限制**的回收。」
+        // 作者原话：「回收不要让锤头飞，回收的时候不就相当于掷出者拽着绳子
+        // 让绳子持续处于最大长度来带回锤头吗？只不过回收过程不会扣除耐久就是了。」
         //
-        // 这两件事并不矛盾：
-        //   · 「有物理碰撞」= 投掷飞行阶段照常吃方块碰撞、能打生物、能被打 —— 没变；
-        //   · 「不受地形限制」= **回收阶段**的路径不再做任何方块检测。
+        // 对 —— 所以这里**只改 ropeLimit**，完全不碰锤头的位置和速度。
+        // 位置由下面的 applyRopeConstraint() 统一投影到球面上；
+        // 玩家移动时锚点移动，绳长不变 ⇒ 锤头被绳子拽着一起走。
         //
-        // 我前两版都错在同一个地方：一直在回收路径上做 `level().clip(...)`（先是撞到就弹开，
-        // 后来改成沿面滑动），但锤头低于玩家时朝主手的路径**必被地面挡住**，
-        // 只要检测还在，它就一定上不来。
-        //
-        // 碰撞体积本身还在（`isPickable` / `canBeCollidedWith` 仍是 false，生物碰不到），
-        // 只是这条「绳子拉回」的路径不再受方块阻挡。
-        // ===== 移动回收：收球速度**额外加上玩家移速的 50%**（作者 2026-10-31 指定）=====
-        //
-        // 之前的做法是把玩家位移按 70% 直接加到锤头位置上（拖拽），
-        // 手感不对：锤头是被「推着走」而不是「更快地飞回来」。
-        //
-        // 现在改成纯速度叠加：锤头朝主人的每 tick 位移 =
-        //     基础回收速度 + 玩家水平移速 × RETURN_SPEED_BONUS_RATIO(0.5)
-        // 玩家跑得越快，锤头往回飞得越快 —— 这才是「边跑边收」该有的样子。
-        // ===== 回收 = 「收线」（作者 2026-10-31：换个思路修）=====
-        //
-        // 不再用「每 tick 朝主人挪多少格」这种写法 —— 那必然要和玩家的移动速度赛跑，
-        // 谁快谁赢，玩家一疾跑就把线拉长。
-        //
-        // 改成绳子的本来面目：**线长是唯一的自由度**。
-        //     锤头位置 = 手部锚点 + 方向 × 线长
-        //   · 回收 = 线长每 tick 减一点；
-        //   · 玩家移动 = 锚点跟着走 ⇒ 锤头自动被「带着走」，不需要额外加法；
-        //   · 玩家跑得再快也只是改变锚点，线长不会因此变长。
-        //
-        // 于是「移动回收」不需要任何专门代码 —— 它是「收线」这个模型天然的结果。
+        // 回收过程不扣耐久（扣耐久只在「飞行时撞到线长上限」那一条）。
         double basePerTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
 
-        // 线长只能缩短，且不会短于「贴手」的阈值
-        double newLine = Math.max(ARRIVE_DISTANCE * 0.5D, this.lineLength() - basePerTick);
-        this.setLineLength(newLine);
-
-        // 从锚点指向锤头的单位方向（每 tick 重算，保留摆动感）
-        Vec3 out = this.position().subtract(target);
-        if (out.lengthSqr() < 1.0E-6D) {
-            out = new Vec3(0.0D, 1.0D, 0.0D);
+        // ===== 两段式收线（作者 2026-10-31 进阶思路）=====
+        //
+        // 绳长 ropeLimit 是**独立状态**，与实际位置解耦：
+        //
+        //   ① 绳子还松着（ropeLimit > 实际距离）：锤头根本不受约束，
+        //      这一段只是把多余的绳子收回来 —— 用极快速度一次性吃掉松弛量；
+        //   ② 绳子绷紧后（ropeLimit == 实际距离）：锤头开始**拖着绳子**走，
+        //      也就是正常的回收速度，由它决定锤头被拽回得多快。
+        //
+        // 这样分的好处：绳长是一个可以独立读写、独立调节的状态，
+        // 以后要加「绳长相关的机制」（比如被拉长后需要额外收线）直接改这一处就够了。
+        double actual = this.distanceToOwner();
+        if (this.ropeLimit > actual) {
+            // 松弛段：极快收掉
+            this.ropeLimit = Math.max(actual, this.ropeLimit - SLACK_TAKE_UP_SPEED);
         } else {
-            out = out.normalize();
+            // 绷紧段：锤头拖着绳子，按球的回收速度收紧
+            this.ropeLimit = Math.max(ARRIVE_DISTANCE * 0.5D, this.ropeLimit - basePerTick);
         }
 
-        // 位置 = 锚点 + 方向 × 线长
-        Vec3 next = target.add(out.scale(newLine));
-
-        // 重力：脚下没有支撑就往下垂一点（RETURNING 不跑球物理，onGround 不可靠，
-        // 用「下方 0.05 格是否通畅」当判据）
-        if (this.isFreeAt(next.add(0.0D, -0.05D, 0.0D))) {
-            next = next.add(0.0D, -RETURN_GRAVITY_PER_TICK, 0.0D);
-        }
-
-        this.setPos(next.x, next.y, next.z);
-        this.setDeltaMovement(Vec3.ZERO);
+        // 距离约束：把锤头钳到当前绳长的球面上（唯一实现点，飞行/回收共用）
+        this.applyRopeConstraint();
         this.hurtMarked = true;
     }
     private void finishReturn(LivingEntity owner) {

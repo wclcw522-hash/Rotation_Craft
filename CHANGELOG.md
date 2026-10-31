@@ -1,3 +1,61 @@
+## 1.2.0.72 — 回收改用「绳长约束」模型
+
+### 作者的设计（这次是完整架构，不是补丁）
+
+> 回收不要让锤头飞，回收的时候不就相当于掷出者拽着绳子让绳子持续处于最大长度来带回锤头吗？
+> 只不过回收过程不会扣除耐久就是了。
+>
+> 回收时线从最大值开始计算回收，在线未绷紧之前按照极快的速度收完，
+> 等到绳子绷紧后让锤头拖着绳子产生正确的回收速度。
+
+### 实现
+
+把绳长做成**独立状态** `ropeLimit`，与锤头位置解耦：
+
+```java
+/** 当前绳长上限（格）。回收就是把这条上限一点点收紧。 */
+private double ropeLimit = MAX_LINE;
+```
+
+唯一的约束实现点 `applyRopeConstraint()`：
+
+1. **位置投影** —— 超出 `ropeLimit` 就把锤头拉回球面；
+2. **速度径向清零** —— 砍掉朝外分量（绳子不可拉伸），切向保留（链球摆动）；
+3. **碰撞解算** —— 投影后用零位移 `move()` 把嵌进方块的部分推出来（防下沉）。
+
+回收就是**只收紧 `ropeLimit`**，完全不碰锤头的位置和速度：
+
+```java
+double actual = this.distanceToOwner();
+if (this.ropeLimit > actual) {
+    // 松弛段：绳子还没绷紧，锤头不受约束 —— 极快收掉松弛量
+    this.ropeLimit = Math.max(actual, this.ropeLimit - SLACK_TAKE_UP_SPEED);   // 4.0 格/tick
+} else {
+    // 绷紧段：锤头开始拖着绳子，按球的回收速度收紧
+    this.ropeLimit = Math.max(ARRIVE_DISTANCE * 0.5D, this.ropeLimit - basePerTick);
+}
+this.applyRopeConstraint();
+```
+
+- `beginReturning()` 时 `ropeLimit = MAX_LINE`（从最大值起算）；
+- `launch()` 时 `ropeLimit = MAX_LINE`；
+- 飞行阶段同一函数、`ropeLimit == MAX_LINE` ⇒ 顺带实现了「超出线长被拉动」；
+- **回收过程不扣耐久**（扣耐久只在飞行时撞到线长上限那一条）。
+
+### 为什么这样能同时解决一堆问题
+
+| 问题 | 原因 |
+|---|---|
+| 移动回收越走越远 | 锤头不自己飞，"回收"是绳长收紧；玩家移动时锚点移动、绳长不变 ⇒ 锤头被拽着走 |
+| 下沉 | 约束投影后做一次零位移 `move()`，碰撞解算把锤头从方块里推出来 |
+| 悬空 | `RETURNING` 恢复 `super.tick()` + `setNoGravity(false)`，重力照常 |
+| 线长超限没效果 | 与回收共用同一个 `applyRopeConstraint()`，不再各写一份 |
+
+### 后续扩展
+
+绳长现在是可独立读写、独立调节的状态，以后加「绳长相关机制」只改这一处。
+
+---
 ## 1.2.0.71 — 落定检查放错位置、松手落地穿进方块
 
 ### ① 线长超上限时不拉动锤头
