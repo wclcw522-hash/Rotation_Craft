@@ -1,3 +1,47 @@
+## 1.2.0.71 — 落定检查放错位置、松手落地穿进方块
+
+### ① 线长超上限时不拉动锤头
+
+`tickFlying` 里 1.2.0.63 加了这一句，位置在**最前面**：
+
+```java
+if (this.isSettled()) {
+    return;
+}
+```
+
+它后面才是「到达线长上限」（弹回 + 扣耐久）和「径向约束」（超出即拽回）。
+锤头一落地静止就直接 `return`，**这两条全被跳过** —— 超出距离没有任何效果。
+
+**修**：把它移到两条线长处理**之后**。它只用来挡住「落定之后不该做的事」（自动收线等），
+线长相关的逻辑任何时候都要执行。
+
+### ② 下沉复发
+
+1.2.0.68 为了不让球的 `move()` 和 `setPos` 对着拉，把 `RETURNING` 阶段的 `super.tick()`
+整个摘掉了 —— **连 `move()` 的方块碰撞一起没了**。
+
+于是 `tickReturning` 里「松开右键就原地落下」那段：
+
+```java
+this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
+```
+
+只改速度、不做碰撞判定，锤头会一路**穿进地面**。
+
+**修**：落下前先试算目标位置，被挡就停住
+
+```java
+Vec3 fall = this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D);
+Vec3 fallTo = this.position().add(fall);
+if (this.isFreeAt(fallTo)) {
+    this.setPos(fallTo.x, fallTo.y, fallTo.z);
+} else {
+    this.setDeltaMovement(Vec3.ZERO);   // 贴住就停，不再往下压
+}
+```
+
+---
 ## 1.2.0.70 — 回收改成「收线」模型：线长是唯一自由度
 
 ### 为什么前两种写法都不对

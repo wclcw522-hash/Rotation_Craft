@@ -759,10 +759,6 @@ public class FlailHeadEntity extends BallProjectile {
 
         this.setLineLength(distanceToOwner());
 
-        // 已经落定 ⇒ 不再做任何位置/速度干预（否则会把 settled 状态打乱）
-        if (this.isSettled()) {
-            return;
-        }
 
 
         // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
@@ -859,6 +855,17 @@ public class FlailHeadEntity extends BallProjectile {
                 }
                 this.setDeltaMovement(velocity);
             }
+
+        // ⚠️⚠️ **落定检查必须放在线长处理之后**（作者 2026-10-31：「线长上限时拉动锤头的设计
+        //    没有实现，现在还是超出距离没效果」）。
+        //
+        //    1.2.0.63 把它放在 tickFlying 开头，锤头一落地静止就 return，
+        //    下面「到达线长上限」与「径向约束」全被跳过 —— 超长时既不会弹回也不会被拽回。
+        //
+        //    现在它只挡「落定之后不该做的事」（自动收线等），线长那两条永远执行。
+        if (this.isSettled()) {
+            return;
+        }
         }
     }
 
@@ -869,6 +876,7 @@ public class FlailHeadEntity extends BallProjectile {
      * <ul>
      *   <li>【空气动力球】{@code aerodynamic_ball} —— 球静止后自动飞回</li>
      *   <li>【忠诚】{@code loyalty} —— 唯一特性，完整球才有</li>
+
      *   <li>【魔法·回收】{@code TRAIT_MAGIC_RECOVER} —— 魔法球的一档</li>
      * </ul>
      */
@@ -978,8 +986,17 @@ public class FlailHeadEntity extends BallProjectile {
         //   现在线长是**独立的自由度**：只在回收时递减，由下面的位移段统一维护。
 
         if (!this.isRetrieving()) {
-            // 松开右键：原地落下（不再被拉）
-            this.setDeltaMovement(this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D));
+            // 松开右键：原地落下 —— **但不能穿进方块**（作者 2026-10-31：「下沉的问题又出现了」）。
+            //
+            //   RETURNING 阶段不跑球的物理（1.2.0.68 起），也就没有 move() 的方块碰撞。
+            //   原来这里只改速度、不判碰撞，锤头会一路穿进地面。
+            Vec3 fall = this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D);
+            Vec3 fallTo = this.position().add(fall);
+            if (this.isFreeAt(fallTo)) {
+                this.setPos(fallTo.x, fallTo.y, fallTo.z);
+            } else {
+                this.setDeltaMovement(Vec3.ZERO);   // 贴住就停，不再往下压
+            }
             return;
         }
 
