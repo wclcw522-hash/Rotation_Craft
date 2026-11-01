@@ -52,12 +52,19 @@ public final class ModEntities {
     /**
      * 流星锤的锤头（作者 2026-10-19）。
      *
-     * <p>判定盒 0.3 见方 —— 比球（0.25）略大，因为它是个带绳子的实心锤头，
-     * 太小的盒子在环绕时容易「看着擦到却不判定」。</p>
+     * <p>判定盒 <b>0.5 见方</b>（与球一致）—— 作者 2026-10-30 把锤头碰撞箱从 0.2 改成 0.5
+     * 以统一手感：「碰撞箱变了但是模型没变」那次就是这么定的。</p>
      *
-     * <p>⚠️ 它是<b>独立实体类</b>，不是 {@link BallProjectile} 的子类 ——
-     * 这样 {@code BallMobAI.tryCatchBall(mob, BallProjectile)}、{@code BallPickupHandler}
-     * 这些「只认球」的路径天然碰不到它，满足作者「锤头不能被捡、不能被怪接」的硬要求。</p>
+     * <p>⚠️ <b>与球的关系（作者 2026-11-01 明确过一次）</b>：</p>
+     * <ul>
+     *   <li>它是<b>独立的实体种类</b>（{@code rotation_craft:flail_head} ≠ {@code rotation_craft:ball}）；</li>
+     *   <li>但类上<b>继承了 {@code BallProjectile}</b> 以复用物理与词条 —— 作者明确
+     *       「代码可以重叠、球和锤头可以互相交互」，所以这不是问题；</li>
+     *   <li>代价是**所有按 {@code BallProjectile} 类型批量操作的地方都要显式排除锤头** ——
+     *       目前有四处：{@code BallPhysicsCore.enforceBallCap}（球上限清理）、
+     *       {@code BallMobAI.tryCatchBall} / {@code tryPickUpBall}、{@code BallPouchCurios.autoCollect}。
+     *       再加新的「批量处理球」逻辑时，记得一并考虑。</li>
+     * </ul>
      */
     public static final DeferredHolder<EntityType<?>, EntityType<com.mcmodworkspace.moreballs.entity.FlailHeadEntity>> FLAIL_HEAD =
             ENTITIES.register("flail_head", () -> EntityType.Builder

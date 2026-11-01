@@ -1,3 +1,27 @@
+## 1.2.0.85 — ModEntities 里锤头的注释与实际不符
+
+### 问题
+
+`ModEntities.FLAIL_HEAD` 的类注释写着：
+
+> 它是**独立实体类**，不是 `BallProjectile` 的子类 —— 这样 `BallMobAI.tryCatchBall(mob, BallProjectile)`、`BallPickupHandler` 这些「只认球」的路径天然碰不到它。
+
+而实际声明是 `public class FlailHeadEntity extends BallProjectile`。尺寸注释写「0.3 见方」，
+实际 `sized(0.5F, 0.5F)`。
+
+按作者 2026-11-01 的要求（「球就是球，锤头就是锤头」只针对实体种类、注释表述要明确区分），
+把这段改成事实描述，并列出**所有需要显式排除锤头的地方**：
+
+| 位置 | 做什么 |
+|---|---|
+| `BallPhysicsCore.enforceBallCap` | 球上限清理 |
+| `BallMobAI.tryCatchBall` | 怪物接球 |
+| `BallMobAI.tryPickUpBall` | 怪物顺手捡球 |
+| `BallPouchCurios.autoCollect` | 收纳袋自动收纳 |
+
+以后再写「批量处理球」的逻辑，照着这份清单检查。
+
+---
 ## 1.2.0.84 — 组合球【变形】的候选列表会越界崩溃
 
 ### 问题
