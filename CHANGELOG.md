@@ -1,3 +1,35 @@
+## 1.2.0.83 — 收纳袋会把锤头自动收进去
+
+### 问题
+
+`BallPouchCurios.autoCollect()` 按 `BallProjectile` 类型捞身边停着的球：
+
+```java
+List<BallProjectile> balls = wearer.level().getEntitiesOfClass(
+        BallProjectile.class,
+        wearer.getBoundingBox().inflate(COLLECT_RADIUS),
+        ball -> ball.isAlive() && ball.isSettled());
+```
+
+而锤头继承了 `BallProjectile` 以复用物理与词条 —— 于是佩戴收纳袋的玩家走过一个停在地上的锤头时，
+锤头会被「自动收进袋子」，`ball.discard()` 把实体删掉，手里那件武器就丢了。
+
+这是全模组最后一处「按 `BallProjectile` 类型批量操作、却没有排除锤头」的地方
+（另外三处在 `BallMobAI` 的接球 / 捡球 / `isPickableBall`，都已挡过）。
+
+### 修
+
+在过滤条件里排除：
+
+```java
+ball -> ball.isAlive() && ball.isSettled()
+        && !(ball instanceof FlailHeadEntity));
+```
+
+作者 2026-11-01 明确：锤头不能被任何容器收走、也不能被球上限删掉；
+它与球可以互相交互、代码可以重叠，但**不能共享「可以被收集」这个属性**。
+
+---
 ## 1.2.0.82 — 锤头 onHit 里的重复弹出段
 
 ### 问题

@@ -115,7 +115,11 @@ public final class BallPouchCurios {
         List<BallProjectile> balls = wearer.level().getEntitiesOfClass(
                 BallProjectile.class,
                 wearer.getBoundingBox().inflate(COLLECT_RADIUS),
-                ball -> ball.isAlive() && ball.isSettled());
+                // ⚠️ **锤头不能被自动收进袋子**（作者 2026-11-01 明确：锤头不能被收进任何容器）。
+                //    它继承了 BallProjectile 以复用物理与词条，所以这个按类型的查询收得下它 ——
+                //    必须在过滤条件里挡出去。同理见 BallMobAI 的接球/捡球两处。
+                ball -> ball.isAlive() && ball.isSettled()
+                        && !(ball instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity));
 
         for (BallProjectile ball : balls) {
             ItemStack stack = ball.getItem().copy();
