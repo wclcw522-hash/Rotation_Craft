@@ -1,6 +1,0 @@
-{
-    "parent":  "minecraft:item/generated",
-    "textures":  {
-                     "layer0":  "rotation_craft:item/copper_ball_quarter_2"
-                 }
-}

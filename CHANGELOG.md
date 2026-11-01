@@ -1,3 +1,50 @@
+## 1.2.0.101 — 组合球：删掉自造的分片模型，直接用回已有的 combo_piece_*
+
+作者 2026-11-01：「为什么又不回归到已有代码而是乱写？」并报了两个现象：
+「有个组合球贴图组合错误」「切开的时候除了第一象限的切球，剩下的部分变成了两个无关的半球」。
+
+### 我犯的两个错
+
+**① 自造了一套 `combo_piece_2d_*`，还带错了 source 顺序**
+
+1.2.0.100 我新建了 72 份 `combo_piece_2d_<source>_<q>.json`，用的 source 顺序是：
+
+```
+0..10 对，11=tidal 12=emerald 13=dripstone 14=preserve 15=talisman 16=echo 17=ender_pearl 18=slime
+```
+
+而 `BallFragments.sources()` 的真实顺序是：
+
+```
+0..10 相同，11=ender_pearl 12=tidal 13=slime 14=emerald 15=dripstone 16=preserve 17=talisman 18=echo
+```
+
+**下标 11..18 全部错位**。后果正是作者看到的两个现象：
+- 贴图组合错误（每层取到了别的材质）
+- 切开后得到错误来源的碎片（除了恰好对上的第一象限）
+
+**② 误判 `combo_piece_*` 是 3D**
+
+实际上现有的 `combo_piece_<n>_<q>.json` 本来就是 2D：
+
+```json
+{ "parent": "minecraft:item/generated",
+  "textures": { "layer0": "rotation_craft:item/<key>_ball_quarter_<q>" } }
+```
+
+而且 **source 顺序完全正确**（11=ender_pearl 的贴图名是 `ender_pearl_quarter_1`，不是 `_ball_quarter_`）。
+这就是作者要的东西，`items/ball_half.json` 用的也是同一套写法。
+
+### 这一版
+
+- **删掉** 72 份自造的 `combo_piece_2d_*`
+- `items/combo_ball.json` 重建为单个 `composite`（4 个 `select` 按 `combo_slot_N` 选
+  **已有的** `combo_piece_<source>_<q>`，19 个 case + fallback），
+  **不再按 `display_context` 分叉** —— GUI / 手持 / 掉落物 / 展示框全部这一套 2D
+- 实体仍是 `ball3d_<key>_q<1..4>`（**原始坐标，无任何偏移**），`BallRenderer` 里
+  那句 `translate(-0.5)` 已删
+
+---
 ## 1.2.0.100 — 组合球：手持用 2D 贴图，实体用原始坐标
 
 作者 2026-11-01：「组合球手中贴图和普通球一样换回 2d 的贴图，然后把实体回调到不偏移的那一版」。
