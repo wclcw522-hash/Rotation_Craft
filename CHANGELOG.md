@@ -1,3 +1,52 @@
+## 1.2.0.104 — 组合球禁止对半切（吞物品）；回归落地后等 0.5 秒再起飞
+
+作者 2026-11-02：
+1. 「组合球的四合一放进切石机的时候应当禁用半球切分选项」
+2. 「四合一球在切开时，按住 shift 一键合成会导致只获得 1 个四分之一球和随机两个组件的二分之一球，其余物品全部被吞掉」
+3. 「为回归功能在落地后添加 0.5s 的等待时间，不要立即回归」
+
+### ① ④ 组合球禁止对半切
+
+`BallCuttingRecipe.matches` 里本来就有这条排除，但配方列表是 `selectByInput` 算出来的，
+一旦某条路径漏掉它、玩家又选到了半球配方，`giveRestPieces` 会按 `quarter = false`
+**只补 2 份** ⇒ **另外两个象限的材质直接消失**（正是「其余物品全部被吞掉」）。
+
+两处改动：
+
+- **`AbstractContainerMenuMixin.moreballs$cutBalls`**：在**实际产出点**再拦一次 ——
+  组合球 + 产物是 `ball_half` ⇒ `return true`（吞掉这次点击，什么都不做）。
+  用 `return true` 而不是 `false`，因为 `false` 会让原版接手，而原版会真的产出一份半球。
+- **`moreballs$giveRestPieces`**：`quarter` 的判据从「看产物」改成「看材料」——
+
+```java
+boolean comboMaterial = combo.is(ModItems.COMBO_BALL.get());
+boolean quarter = comboMaterial || product.is(ModItems.BALL_QUARTER.get());
+```
+
+组合球是四象限结构，只要切的是组合球就一定是四分四片，一份都不能少。
+这是第二道保险，保证任何路径都不会丢内容。
+
+### ③ 回归落地后等 0.5 秒
+
+新增 `HOMING_DELAY_TICKS = 10`（0.5 秒）与 `homingDelayTicks` 计数：
+
+```java
+if (!this.homingBack) {
+    if (++this.homingDelayTicks < HOMING_DELAY_TICKS) {
+        return false;   // 还在等，本刻不起飞（也不碰 speed / noPhysics）
+    }
+    this.homingDelayTicks = 0;
+}
+this.homingBack = true;
+```
+
+为什么需要：球一落定就被拽走，玩家看不到它停下来的样子；而且刚落地那几刻位置还在微调
+（`settleDrop` 坐实、与地面的浮点贴面修正），立刻起飞会把这些微调带进飞行轨迹。
+
+`BallProjectile.tickHomingReturn` 里放弃回归（主人不在 / 超时）时把计数一并清零，
+下次落定重新等。
+
+---
 ## 1.2.0.103 — 组合球：手持用 2D 分片贴图，实体用 1.2.0.94 的原始坐标几何
 
 作者指示：「手持的图换回 2d 版的，然后把实体的模型调成我说不偏的那版」。

@@ -269,6 +269,25 @@ public abstract class AbstractContainerMenuMixin {
             return false;   // 还没选配方 / 配方算不出东西
         }
 
+        // ===== 组合球**禁止对半切**（作者 2026-11-02）=====
+        //
+        // 作者报：「四合一球在切开时，按住 shift 一键合成会导致只获得 1 个四分之一球和
+        // 随机两个组件的二分之一球，其余物品全部被吞掉。」
+        //
+        // 根因链：
+        //   · 组合球是四象限结构，只有「四等分」才表达得出全部内容；
+        //     半球只是球的「上下两半」，对组合球没有意义（作者 2026-10-16 已经说过
+        //     「4 合一不能对半切」）。
+        //   · `BallCuttingRecipe.matches` 里确实写了这条排除，但配方列表是按
+        //     `selectByInput` 算出来的，一旦某个路径漏掉它、玩家又选到了半球配方，
+        //     `giveRestPieces` 会按 `quarter = false` 只补 2 份 ⇒ **另外两个象限直接消失**。
+        //
+        // 所以在**实际产出点**再拦一次：组合球 + 产物是半球 ⇒ 吞掉这次点击，什么都不做。
+        // （`return true` 而不是 `false`：`false` 会让原版接手，而原版会真的产出一份半球。）
+        if (combo && resultSlot.getItem().is(com.mcmodworkspace.moreballs.ModItems.BALL_HALF.get())) {
+            return true;
+        }
+
         // ===== 耐久门槛：组合球与球堆同样要过 80%（作者 2026-10-16）=====
         // 球的耐久记在球自己身上（球堆的耐久记在**壳里那颗球**上），所以统一摊开来看。
         // 球堆里的球都是**同一档位**的（BallClusterContents.matches 要求同档位），
@@ -402,7 +421,18 @@ public abstract class AbstractContainerMenuMixin {
     private static void moreballs$giveRestPieces(Player player, ItemStack combo, ItemStack product) {
         Integer keptSource = product.get(
                 com.mcmodworkspace.moreballs.ModComponents.FRAGMENT_SOURCE.get());
-        boolean quarter = product.is(com.mcmodworkspace.moreballs.ModItems.BALL_QUARTER.get());
+        // ⚠️ 组合球**一律按四等分补**（作者 2026-11-02）。
+        //
+        //   组合球是四象限结构，四个象限各自独立。若因为漏拦而走了半球配方
+        //   （`product` 是 ball_half），按 `quarter = false` 只补 2 份的话，
+        //   **另外两个象限的材质就凭空消失了** —— 正是作者报的「其余物品全部被吞掉」。
+        //
+        //   这里以「材料是不是组合球」为准而不是看产物：只要切的是组合球，
+        //   就一定是四分四片，一份都不能少。（`cutBalls` 那边已经先拦掉了半球，
+        //   这里是第二道保险，保证任何路径都不会丢内容。）
+        boolean comboMaterial = combo.is(com.mcmodworkspace.moreballs.ModItems.COMBO_BALL.get());
+        boolean quarter = comboMaterial
+                || product.is(com.mcmodworkspace.moreballs.ModItems.BALL_QUARTER.get());
         int total = quarter ? 4 : 2;
         for (int i = 0; i < total; i++) {
             int source = com.mcmodworkspace.moreballs.BallCuttingRecipe

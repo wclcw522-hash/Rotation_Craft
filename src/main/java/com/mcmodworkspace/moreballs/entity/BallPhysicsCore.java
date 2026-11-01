@@ -635,6 +635,15 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     protected static final int RETURN_GIVE_UP_TICKS = 600;
 
     /**
+     * 回归启动前的等待刻数 —— <b>0.5 秒 = 10 刻</b>（作者 2026-11-02：「为回归功能在落地后
+     * 添加 0.5s 的等待时间，不要立即回归」）。
+     *
+     * <p>球一落定就被拽走的话，玩家看不到它停下来的样子；而且刚落地那几刻位置还在微调
+     * （settleDrop 坐实、与地面的浮点贴面修正），立刻起飞会把这些微调带进飞行轨迹。</p>
+     */
+    private static final int HOMING_DELAY_TICKS = 10;
+
+    /**
      * 球在水里泡这么多刻，就当它「落定」了。
      *
      * <p>水里的球被浮力托着，速度永远压不到静止阈值以下，正常那套落定判定根本走不到 ——
@@ -671,6 +680,9 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
 
     /** 回归已经飞了几刻 —— 用来做「越飞越快」的加速 */
     protected int homingTicks;
+
+    /** 已经等了多久还没起飞（见 HOMING_DELAY_TICKS）。起飞后归零。 */
+    protected int homingDelayTicks;
 
     /** 上一刻是否在实心里 —— 用来把「连续实心段」和「被空气隔开的另一段」区分开 */
     protected boolean wasInsideBlock;
@@ -4095,6 +4107,25 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
                 this.deliverToOwner(serverLevel, living);
             }
             return true;
+        }
+
+        // ===== 落地后先等 0.5 秒（10 刻）再起飞（作者 2026-11-02）=====
+        //
+        // 作者原话：「为回归功能在落地后添加 0.5s 的等待时间，不要立即回归。」
+        //
+        // 为什么需要：球一落定就被拽走，玩家根本看不到它停下来的样子，
+        // 视觉上像是「掉了就消失」；而且刚落地那几刻位置还在微调（settleDrop 的坐实、
+        // 与地面的浮点贴面修正），立刻起飞会把那些微调一起带进飞行轨迹。
+        //
+        // 计时用 `homingDelayTicks`：`homingBack` 还是 false 时累加，
+        // 满了才真正置 `homingBack = true`。改成 false 的那一条路径
+        // （`tickHomingReturn` 放弃回归 / 主人不在）会把计数一并清零，
+        // 下次落定重新等 —— 见那个方法。
+        if (!this.homingBack) {
+            if (++this.homingDelayTicks < HOMING_DELAY_TICKS) {
+                return false;   // 还在等，本刻不起飞（也不碰 speed / noPhysics）
+            }
+            this.homingDelayTicks = 0;
         }
 
         this.homingBack = true;
