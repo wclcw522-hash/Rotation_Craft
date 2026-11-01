@@ -1135,47 +1135,42 @@ public class FlailHeadEntity extends BallProjectile {
             return;
         }
 
-        // ===== 回收 = 把绳长上限收紧（作者 2026-10-31）=====
+        // ===== 回收 = 每刻直接朝主人推进（原始实现，作者 2026-11-01 要求恢复）=====
         //
-        // 作者原话：「回收不要让锤头飞，回收的时候不就相当于掷出者拽着绳子
-        // 让绳子持续处于最大长度来带回锤头吗？只不过回收过程不会扣除耐久就是了。」
+        // ⚠️⚠️ **这一段必须「每刻都 setPos 前进」，不能靠 ropeLimit 收紧 + 投影**。
         //
-        // 对 —— 所以这里**只改 ropeLimit**，完全不碰锤头的位置和速度。
-        // 位置由下面的 applyRopeConstraint() 统一投影到球面上；
-        // 玩家移动时锚点移动，绳长不变 ⇒ 锤头被绳子拽着一起走。
+        //   1.2.0.31 我把它改成了「两段式收线」：先收松弛量、绷紧后逐刻收紧 ropeLimit，
+        //   再由 applyRopeConstraint() 把锤头投影到球面上。结果是：
         //
-        // 回收过程不扣耐久（扣耐久只在「飞行时撞到线长上限」那一条）。
-        double basePerTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
-        // 手动按住右键 ⇒ 在自动回收的速度上再叠一层（作者 2026-11-01：只叠加，不打断）
+        //     tick N   : ropeLimit -= perTick → distance > ropeLimit → 投影 → 前进 perTick
+        //     tick N+1 : distance == ropeLimit（上一刻刚投影到那儿）→ **distance <= ropeLimit
+        //                → applyRopeConstraint 提前 return** → 位置一动不动
+        //     tick N+2 : ropeLimit 又减了 → 再前进 perTick
+        //
+        //   **两刻才前进一次 = 一动一停；每两刻只走一个 perTick = 速度正好减半。**
+        //   这正是作者报的「一动一停一动一停，速度还慢的要死」，而且「在空中也会」——
+        //   因为它跟撞不撞方块完全无关，是收线方式本身决定的。
+        //
+        //   原始写法（1.2.0.23 之前，936 行那版）就是下面这样：每刻算一个 perTick，
+        //   直接把位置朝主人挪过去、然后 setDeltaMovement(ZERO) 清掉速度
+        //   （因为位移已经由 setPos 给足了，速度留着反而会叠加）。
+        double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+        // 手动按住右键 ⇒ 在自动回收速度上再叠一层（作者 2026-11-01：只叠加，不打断）
         if (this.manualRetrieving) {
-            basePerTick *= MANUAL_RECOVER_BOOST;
+            perTick *= MANUAL_RECOVER_BOOST;
         }
+        // 别冲过头：最后一小段按剩余距离收缩
+        perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
 
-        // ===== 两段式收线（作者 2026-10-31 进阶思路）=====
-        //
-        // 绳长 ropeLimit 是**独立状态**，与实际位置解耦：
-        //
-        //   ① 绳子还松着（ropeLimit > 实际距离）：锤头根本不受约束，
-        //      这一段只是把多余的绳子收回来 —— 用极快速度一次性吃掉松弛量；
-        //   ② 绳子绷紧后（ropeLimit == 实际距离）：锤头开始**拖着绳子**走，
-        //      也就是正常的回收速度，由它决定锤头被拽回得多快。
-        //
-        // 这样分的好处：绳长是一个可以独立读写、独立调节的状态，
-        // 以后要加「绳长相关的机制」（比如被拉长后需要额外收线）直接改这一处就够了。
-        // ⚠️ 必须与 applyRopeConstraint 用**同一个锚点**（手部）。
-        //    原来这里用 distanceToOwner()（到**眼睛**的距离），而约束用的是 handAnchor（到手部），
-        //    两者差 0.3~0.5 格 —— 收紧与约束互相打架，也是「一顿一顿」的来源之一。
-        double actual = handAnchor(living).distanceTo(this.position());
-        if (this.ropeLimit > actual) {
-            // 松弛段：极快收掉
-            this.ropeLimit = Math.max(actual, this.ropeLimit - SLACK_TAKE_UP_SPEED);
-        } else {
-            // 绷紧段：锤头拖着绳子，按球的回收速度收紧
-            this.ropeLimit = Math.max(ARRIVE_DISTANCE * 0.5D, this.ropeLimit - basePerTick);
-        }
+        // ⚠️ 绳长上限跟着实际距离走，让 applyRopeConstraint 在「飞行阶段」仍能兜住超长拖拽；
+        //    但**不要**用它来推进位置（那正是上面说的隔刻才动的根源）。
+        this.ropeLimit = Math.min(this.maxRopeLength,
+                Math.max(this.ropeLimit, distance));
 
-        // 距离约束：把锤头钳到当前绳长的球面上（唯一实现点，飞行/回收共用）
-        this.applyRopeConstraint();
+        Vec3 dir = target.subtract(this.position()).normalize();
+        Vec3 next = this.position().add(dir.scale(perTick));
+        this.setPos(next.x, next.y, next.z);
+        this.setDeltaMovement(Vec3.ZERO);
         this.hurtMarked = true;
     }
     private void finishReturn(LivingEntity owner) {

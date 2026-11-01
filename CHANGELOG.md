@@ -1,3 +1,73 @@
+## 1.2.0.89 — 锤头回收「一动一停、速度减半」的真正根因
+
+作者定位：「重点在流星锤这边」「回复球还是保留收线的功能」「在空中也会重置速度」。
+
+### 根因：收线方式从「每刻推进位置」改成了「收紧绳长再投影」
+
+`FlailHeadEntity.tickReturning()` 的回收段被改成了「两段式收线」：
+
+```java
+// 1.2.0.31 的写法（坏）
+double actual = handAnchor(living).distanceTo(this.position());
+if (this.ropeLimit > actual) {
+    this.ropeLimit = Math.max(actual, this.ropeLimit - SLACK_TAKE_UP_SPEED);
+} else {
+    this.ropeLimit = Math.max(ARRIVE_DISTANCE * 0.5D, this.ropeLimit - basePerTick);
+}
+this.applyRopeConstraint();      // ← 位置靠这里投影推进
+```
+
+而 `applyRopeConstraint()` 开头有一条提前返回：
+
+```java
+if (distance <= this.ropeLimit || distance < 1.0E-4D) {
+    return;                      // ← 距离够近就什么都不做
+}
+...
+this.setPos(clamped.x, clamped.y, clamped.z);
+```
+
+于是每两刻才推进一次：
+
+| tick | ropeLimit | distance | 结果 |
+|---|---|---|---|
+| N | 减 perTick | > ropeLimit | 投影 → **前进 perTick** |
+| N+1 | 不变 | == ropeLimit | `distance <= ropeLimit` → **提前 return，位置不动** |
+| N+2 | 再减 | > ropeLimit | **前进 perTick** |
+
+**两刻走一步 = 一动一停；每两刻只走一个 `perTick` = 速度正好减半。**
+与撞不撞方块毫无关系 —— 所以「在空中也会」，这一点是作者指出来的关键。
+
+### 修：恢复原始实现（`1.2.0.23` 之前那版）
+
+```java
+double perTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+if (this.manualRetrieving) {
+    perTick *= MANUAL_RECOVER_BOOST;
+}
+perTick = Math.min(perTick, Math.max(0.05D, distance - ARRIVE_DISTANCE * 0.5D));
+
+this.ropeLimit = Math.min(this.maxRopeLength, Math.max(this.ropeLimit, distance));
+
+Vec3 dir = target.subtract(this.position()).normalize();
+Vec3 next = this.position().add(dir.scale(perTick));
+this.setPos(next.x, next.y, next.z);
+this.setDeltaMovement(Vec3.ZERO);
+this.hurtMarked = true;
+```
+
+**每刻 `setPos` 直接前进一整步**，不依赖绳长、不依赖速度 —— 这才是「丝滑并且很快」。
+
+`ropeLimit` 保留但只用于**飞行阶段**的超长拖拽兜底（`applyRopeConstraint`），
+不再用它推进回收位置。「按住右键加速」（`MANUAL_RECOVER_BOOST`）保留。
+
+### ⚠️ 澄清一处误解
+
+「速度被重置」不是原因。`setDeltaMovement(Vec3.ZERO)` 在**原始版本里也有** ——
+因为位置已经由 `setPos` 给足了，速度留着反而会在下一 tick 叠加。
+真正的问题是**位置推进方式**，不是清速度那一句。
+
+---
 ## 1.2.0.88 — 回归手感：撤掉 1.2.0.81 引入的两处改动，恢复原始实现
 
 作者 2026-11-01：「原来的回归是开始之后很丝滑并且很快的飞回来，和忠诚附魔一模一样，
