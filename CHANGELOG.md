@@ -1,3 +1,41 @@
+## 1.2.0.76 — 落地判定、清掉两个死常量
+
+### ① 锤头落地后往方块里钻（作者：球落地就是落地了，锤头却会）
+
+球靠 `BallPhysicsCore` 里这套条件进静止态：
+
+```java
+impulseTicks <= 0 && wisdomHitGrace <= 0
+    && hasSupportBelow()
+    && deltaMovement.lengthSqr() < SETTLE_SPEED_SQR   // 0.0009
+```
+
+球在 `super.tick()` 里被 `move()` 拦停后垂直速度归零，进这一判时速度≈0，能过。
+
+锤头过不了：撞地那一刻速度确实归零，但**下一 tick 原版重力（`Entity.getDefaultGravity()` = 0.08）
+又给它 0.08 的向下速度**，`0.08² = 0.0064` 远大于 `0.0009` —— 条件永远凑不齐，静止态进不去。
+于是每 tick 被往下压一点、被方块挡住、再往下压。
+
+**修**：给锤头补一条自己的判定
+
+```java
+if (this.onGround() && this.getDeltaMovement().horizontalDistanceSqr() < 0.0016D) {
+    this.setDeltaMovement(Vec3.ZERO);
+}
+```
+
+站在地上且水平几乎不动就清速度，下一个 `move()` 会挡住重力，位置不再往下走。
+（`setSettled()` 是父类 private 方法，子类调不到，所以走这条。）
+
+### ② 清掉两个死常量
+
+- `RETURN_GRAVITY_PER_TICK = 0.08` —— 1.2.0.68 为「RETURNING 不跑父类 tick」手动补重力时加的；
+  1.2.0.72 恢复父类 tick 后原版重力已经在跑，它成了死代码。
+- `PULL_IN_SPEED = 0.35` —— 被 `applyRopeConstraint()` 取代后无引用。
+
+顺带说明：0.08 这个数不是我定的，是原版 `Entity.getDefaultGravity()` 的默认值。
+
+---
 ## 1.2.0.75 — 砸地后嵌进方块：命中点落在方块表面
 
 ### 现场（作者 2026-11-01 的补充说明）

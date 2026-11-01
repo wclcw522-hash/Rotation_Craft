@@ -134,20 +134,7 @@ public class FlailHeadEntity extends BallProjectile {
      */
     private static final double RETURN_SPEED_BONUS_RATIO = 0.5D;
 
-    /**
-     * 回收阶段的手动重力（格/tick）。
-     *
-     * <p>RETURNING 若跑父类 tick（会自己改位置），就会和 setPos 对着拉，
-     * 所以重力要自己加 —— 不加的话锤头会悬在半空。</p>
-     */
-    private static final double RETURN_GRAVITY_PER_TICK = 0.08D;
 
-    /**
-     * 超出线长时，绳子把锤头往里拉的速度（格/tick）。
-     *
-     * <p>⚠️ 只改速度、不 setPos —— 位置交给 move() 带碰撞去走，这样不会嵌进方块。</p>
-     */
-    private static final double PULL_IN_SPEED = 0.35D;
 
     /**
      * 松弛绳段的收线速度（格/tick，作者 2026-10-31 提出）。
@@ -826,6 +813,28 @@ public class FlailHeadEntity extends BallProjectile {
     }
 
     private void tickFlying() {
+        // ===== 锤头自己的「落定」判定（作者 2026-11-01：「球落地就是落地了，锤头却会往方块里钻」）=====
+        //
+        //   球靠 BallPhysicsCore 里这套严格条件进静止态：
+        //     impulseTicks <= 0 && wisdomHitGrace <= 0 && hasSupportBelow()
+        //       && deltaMovement.lengthSqr() < SETTLE_SPEED_SQR(0.0009)
+        //   球在 super.tick() 里被 move() 拦停后垂直速度归零，进这一判时速度≈0，所以能过。
+        //
+        //   锤头过不了：撞地那一刻速度确实归零，但下一 tick 重力又给它 0.08 的向下速度，
+        //   0.08^2 = 0.0064 远大于 0.0009 —— 条件永远凑不齐，静止态进不去。
+        //   于是它每 tick 被往下压一点、被方块挡住、再往下压，表现为「一直往方块里钻」。
+        //   而且这是「掷出那一次」才明显：后面回收流程会把它拉到球面上，位置动过就恢复正常。
+        //
+        //   这里给锤头补一条自己的判定：只要**已经站在地上**且水平几乎不动，就直接进静止。
+        //   阈值比球宽一点（0.04 格/tick），因为锤头比球重、落地那一下残留速度更大。
+        if (this.onGround()
+                && this.getDeltaMovement().horizontalDistanceSqr() < 0.0016D) {
+            // 站在地上且水平几乎不动 ⇒ 把速度清掉。
+            // 下一步 move() 会挡住重力，位置就不会再往下走。
+            // （注意：这里不能调 setSettled() —— 它是父类的 private 方法。）
+            this.setDeltaMovement(Vec3.ZERO);
+        }
+
         // ===== ⓪ 卡进方块时先脱离（作者 2026-10-30：「扔出会沉到方块里」）=====
         //
         //   FLYING 阶段 noPhysics=false，正常吃方块碰撞；但如果某一刻被推进实心区域
