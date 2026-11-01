@@ -1,3 +1,37 @@
+## 1.2.0.79 — 带【忠诚】的流星锤一扔出去就开始回收
+
+### 原因
+
+`autoRetrieveWanted()` 对【忠诚】球返回 true，而锤头在 `tickFlying` 里的判据只有：
+
+```java
+if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
+        && this.autoRetrieveWanted()) {
+    this.beginReturning(autoOwner);
+```
+
+也就是「过了 10 刻冷却就收线」。而【忠诚】在球身上的语义是
+**落定之后**自己飞回主人 —— 飞行途中它老老实实按弹道走。
+锤头少了「落定」这一条，于是扔出去半秒就被拽回来，根本飞不出去。
+
+（与回响球无关：`shriekAllowed()` 是给尖啸音波留的开关，不参与回收判定。）
+
+### 修
+
+补上「已经落地或基本停下」：
+
+```java
+boolean settleReady = this.onGround()
+        || this.getDeltaMovement().horizontalDistanceSqr() < 0.0025D;
+
+if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
+        && settleReady
+        && this.autoRetrieveWanted()) {
+```
+
+语义对齐：飞完、停下、再收线。
+
+---
 ## 1.2.0.78 — 回收中断后超长拖拽失效
 
 ### 原因

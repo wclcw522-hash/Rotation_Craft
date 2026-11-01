@@ -908,13 +908,6 @@ public class FlailHeadEntity extends BallProjectile {
 
         // ===== ② 自动回收类词条 ⇒ 自动收线 =====
         //
-        // 【空气动力球】（aerodynamic_ball）/【忠诚】（loyalty）/【魔法·回收】
-        // 在球身上的语义都是「自己飞回主人」。锤头没有「飞回主人」这回事 ——
-        // 它对应的是**收线**，所以这里直接开始回收。
-        //
-        // ⚠️ 只在「还没在回收」时触发一次；`beginReturning` 自己会判重入。
-        // ===== ② 自动回收类词条 ⇒ 自动收线 =====
-        //
         // 【空气动力球】/【忠诚】/【魔法·回收】在球身上的语义是「自己飞回主人」。
         // 锤头没有「飞回主人」这回事 —— 它对应的是**收线**，所以这里直接开始回收。
         //
@@ -930,7 +923,17 @@ public class FlailHeadEntity extends BallProjectile {
         //    于是 FlailCastHandler 的收尾逻辑（它只看物品组件）对自动回收完全不生效：
         //    锤头飞回来了、实体也 discard 了，物品却停在「扔出中」的形态，
         //    非得再按一次右键（走一遍手动路径）才把状态补齐。
+        // ===== 自动回收类词条 ⇒ 自动收线（作者 2026-11-01：「带【忠诚】的流星锤一扔出去就开始回收」）=====
+        //
+        //   【忠诚】在球身上的语义是「**落定之后**自己飞回主人」—— 飞行途中它老老实实按弹道走。
+        //   这里原来只判了「过了 10 刻冷却」就收线，于是带【忠诚】的流星锤一扔出去、
+        //   冷却一到立刻被拽回来，根本飞不出去。
+        //
+        //   补上「已经落地或基本停下」这一条，语义就对齐了：飞完、停下、再收线。
+        boolean settleReady = this.onGround()
+                || this.getDeltaMovement().horizontalDistanceSqr() < 0.0025D;
         if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
+                && settleReady
                 && this.autoRetrieveWanted()) {
             if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity autoOwner) {
                 this.beginReturning(autoOwner);
