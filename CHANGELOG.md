@@ -1,3 +1,27 @@
+## 1.2.0.82 — 锤头 onHit 里的重复弹出段
+
+### 问题
+
+`FlailHeadEntity.onHit()` 里有**两段完全相同**的「方块命中沿法线弹出」：
+
+```java
+if (!this.level().isClientSide() && hitResult instanceof BlockHitResult blockHit) {
+    Direction face = blockHit.getDirection();
+    Vec3 nudge = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ())
+            .scale(this.getBbHeight() * 0.5D + 0.02D);
+    this.setPos(this.position().add(nudge));
+    this.setDeltaMovement(Vec3.ZERO);
+}
+```
+
+每命中一次就执行两遍 ⇒ 推出 `0.27 × 2 = 0.54` 格。落地后被弹起半格多，
+再落再弹 —— 表现就是「抖动 / 看着还在往下钻」。
+
+### 修
+
+删掉重复的一段，只留一处。注释里写明「只能有一段」以及为什么。
+
+---
 ## 1.2.0.81 — 投球崩溃、锤头被球上限误删、【忠诚】回归一顿一顿
 
 ### ① 扔球就崩溃
