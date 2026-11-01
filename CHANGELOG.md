@@ -1,3 +1,44 @@
+## 1.2.0.91 — 回归速度不再受重量影响（回响流星锤回归慢的根因）
+
+作者 2026-11-01：「回归速度不应该被重量影响吧」。
+
+### 问题
+
+`homingToOwner0()` 里算回归速度用的是**球的当前速度**：
+
+```java
+double currentSpeed = this.getDeltaMovement().length();
+double nextSpeed = Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL);
+```
+
+而当前速度受**重量**影响 —— `withWeight(0)` 的球（回响球）会按重量把初速度抬到远高于 4.0：
+
+```java
+public BallProfile withWeight(int value) {
+    float speed = BASE_LAUNCH_SPEED - (value - BallWeight.BASELINE);   // weight 0 ⇒ 基准 + 4
+```
+
+于是回归的**第一刻**速度就被 `Math.min(4.0, ...)` 压回去，等于刚起飞就踩刹车。
+潮汐球重量 6、初速只有 1.5 左右，一路加速上去看不出问题 —— 这正好对上
+「潮汐流星锤好了、回响流星锤没好」。
+
+### 修
+
+回归是一段**独立的运动**，与球原本多重、飞得多快都无关 —— 只用它自己的公式：
+
+```java
+double nextSpeed = Math.min(RETURN_MAX_SPEED,
+        RETURN_BASE_SPEED + this.homingTicks * RETURN_ACCEL);
+this.setDeltaMovement(this.returnDirection.scale(nextSpeed));
+```
+
+`RETURN_BASE_SPEED`（0.6）这个常量在旧代码里算出来了却**一直没被用上**（死值），
+它本来就是为这件事准备的。现在让所有球种一律走同一条速度曲线：
+0.6 起、每刻 +0.09、封顶 4.0。重量的影响只保留在「掉落 / 投掷弹道」这些真正该看重量的地方。
+
+顺带删掉了那个死值（`double speed = ...` 算了从没用）。
+
+---
 ## 1.2.0.90 — 锤头的「回归」与「回收」彻底分开（这才是回归慢的根因）
 
 作者 2026-11-01：「回收和回归不是一个概念」「回归是效果或附魔导致的自动飞回，

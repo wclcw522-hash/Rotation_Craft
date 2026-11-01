@@ -4110,26 +4110,31 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         this.setNoGravity(true);
         this.homingTicks++;
 
-        // 越飞越快（作者指定「加速飞回」）
-        double speed = Math.min(RETURN_MAX_SPEED,
-                RETURN_BASE_SPEED + this.homingTicks * RETURN_ACCEL);
-
         // 方向不必每刻重算：贴着障碍物边缘时逐刻重算会左右横跳，
         // 表现就是球在空中一抖一抖。隔几刻定一次就够，也省掉大部分射线检测
         if (this.returnDirection == null || this.homingTicks % RETURN_RETARGET_INTERVAL == 0) {
             this.returnDirection = this.chooseReturnDirection(living, toOwner);
         }
 
-        // <b>仿恼鬼：朝目标全程加速前进</b>（作者指定的方案）。
+        // <b>回归速度：只由「基础速度 + 已飞刻数 × 加速度」决定</b>
         //
-        // 上一版「速度清零 + 手动 setPos」是绕开物理引擎，结果飞得死板、没有惯性 ——
-        // 作者一句话点破了：不该绕开引擎，而是该换成恼鬼那种「对着目标持续加速」的走法。
-        // 所以这里：
-        //   · 方向 —— 每刻立即对齐目标（锐角转弯，不兜圈子）
-        //   · 速度 —— 在旧速度基础上持续累加（全程加速，越飞越快）
-        //   · 物理 —— 照常交给 move() 处理，惯性和位移都由引擎算
-        double currentSpeed = this.getDeltaMovement().length();
-        double nextSpeed = Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL);
+        // ⚠️⚠️ **绝不能拿 currentSpeed 来算**（作者 2026-11-01：
+        // 「回归速度不应该被重量影响吧」）。
+        //
+        //   原来这里是 `Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL)` ——
+        //   用的是球**当前**的速度，而当前速度受**重量**影响：
+        //   `withWeight(0)` 的球（回响球）会按重量把初速度抬到远高于 4.0
+        //   （`BASE_LAUNCH_SPEED - (0 - 4)`），于是回归的第一刻就被 4.0 的上限压回去，
+        //   表现就是「潮汐流星锤好了、回响流星锤没好」。
+        //
+        //   而 `RETURN_BASE_SPEED` 这个常量在旧代码里算出来了却**没用上**（死值），
+        //   它本来就是为这件事准备的：回归是一段**独立的运动**，与球原本多重、
+        //   飞得多快、甚至撞没撞墙都无关 —— 从 RETURN_BASE_SPEED 起，每刻加
+        //   RETURN_ACCEL，封顶 RETURN_MAX_SPEED。任何球种一律相同。
+        //
+        //   重量的影响只保留在「掉落 / 投掷弹道」那些真正该看重量的地方。
+        double nextSpeed = Math.min(RETURN_MAX_SPEED,
+                RETURN_BASE_SPEED + this.homingTicks * RETURN_ACCEL);
         this.setDeltaMovement(this.returnDirection.scale(nextSpeed));
 
         // 已经在方块里 = 正在穿墙，按「每穿一个新方块扣一点耐久」记账
