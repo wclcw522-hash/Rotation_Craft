@@ -97,9 +97,17 @@ public final class BallMorph {
         if (ball.getItem() == ModItems.COMBO_BALL.get()) {
             List<Integer> indexes = BallFragments.parseIndexes(
                     ball.getOrDefault(ModComponents.COMBO_SOURCES.get(), ""));
+            List<Item> sources = BallFragments.sources();
             List<Block> out = new ArrayList<>(indexes.size());
             for (int index : indexes) {
-                Block block = blockOf(BallFragments.sources().get(index));
+                // ⚠️ **必须做边界检查**：index 来自物品组件，可能被 /give、数据包或
+                //    别的模组写坏。直接 sources().get(index) 会在渲染/破碎那一刻抛
+                //    IndexOutOfBoundsException 把整帧打崩。
+                //    同文件的 BallFragmentItem.getName 早就有夹取保护，这里原先漏了。
+                if (index < 0 || index >= sources.size()) {
+                    continue;
+                }
+                Block block = blockOf(sources.get(index));
                 if (block != null) {
                     out.add(block);
                 }

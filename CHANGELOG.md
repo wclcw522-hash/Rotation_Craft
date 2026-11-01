@@ -1,3 +1,32 @@
+## 1.2.0.84 — 组合球【变形】的候选列表会越界崩溃
+
+### 问题
+
+`BallMorph.candidatesOf()` 直接拿组件里的索引去查来源表：
+
+```java
+Block block = blockOf(BallFragments.sources().get(index));
+```
+
+`index` 来自物品组件 `combo_sources`，可能被 `/give`、数据包或其它模组写坏。
+越界时抛 `IndexOutOfBoundsException`，而调用点在【变形】结算（耐久耗尽那一刻）——
+异常会把当刻的 tick 直接打断。
+
+同文件的 `BallFragmentItem.getName()` 早就有夹取保护，`BallPhysicsCore.traitChance()`
+也判了 `index < 0 || index >= sources().size()`，唯独这里漏了。
+
+### 修
+
+```java
+List<Item> sources = BallFragments.sources();
+...
+if (index < 0 || index >= sources.size()) {
+    continue;   // 组件被写坏 ⇒ 跳过这一项，不让它把结算打崩
+}
+Block block = blockOf(sources.get(index));
+```
+
+---
 ## 1.2.0.83 — 收纳袋会把锤头自动收进去
 
 ### 问题
