@@ -1,3 +1,56 @@
+## 1.2.0.94 — 组合球实体改为「四块真几何」组合渲染
+
+作者 2026-11-01：「你的方式应该是先组合球再投影物品贴图，但是这样会导致看上去很怪，
+不像正常物品的颜色组合。我想要的方法是先渲染各部分完整的切球建模，再把切球建模组合渲染，
+就像组合球贴图一样，只不过从二维贴图变为三维建模了。我知道这样会让有一边只能看到
+比较长的切球侧面，我要的就是这样。」并明确**只有实体改，弩保持贴图**。
+
+### 做法
+
+**① 生成 68 份象限几何**（`ball3d_<key>_q<1..4>.json`）
+
+球模型 `ball3d_<key>.json` 是 30 个 cuboid、范围 `x/z -4..4`、`y 0..8`、全部无 rotation。
+按 **x=0 / y=4** 切成四个象限：
+
+| 象限 | 范围 | 对应 |
+|---|---|---|
+| q1 | x ≤ 0, y ≥ 4 | 左上 |
+| q2 | x ≥ 0, y ≥ 4 | 右上 |
+| q3 | x ≤ 0, y ≤ 4 | 左下 |
+| q4 | x ≥ 0, y ≤ 4 | 右下 |
+
+跨越切面的 cuboid 直接裁开（改 `from`/`to`），**贴图仍引用原球贴图**——不重新画。
+17 种材质 × 4 = 68 份。
+
+**② `Ball3DModels` 注册 68 个 standalone 模型**
+
+新增 `QUADRANT_MODELS` 与两个方法：
+
+```java
+public static BlockStateModelPart quadrantPart(String key, int q)
+public static RenderType quadrantRenderType()   // Sheets.cutoutBlockItemSheet()
+```
+
+**③ `BallRenderState` 加 `comboQuadrantKeys`**
+
+`extractRenderState` 里把 `COMBO_SLOT_1..4` 存的来源下标映射成材质 key
+（用 `Ball3DModels.keyOf(new ItemStack(sources.get(src)))`，与 `KEYS` 天然对齐）。
+
+**④ `BallRenderer.submit` 加组合球分支**
+
+按四个象限分别提交自己的几何，四块拼起来就是整颗球。位置放在 `part == null`
+的 2D 兜底之前 —— 组合球的 `ball3dKey` 本来就是 null（`combo_ball` 去掉 `_ball`
+得到 `combo`，不在 `KEYS` 里），否则会掉进 2D。
+
+滚动姿态照旧套在四块上一起转，所以整球拼起来后滚动看起来是连续的。
+
+### 不动的部分
+
+- **弩上的组合球外观**（`ComboChargeBallRenderer`）**保持原样** —— 仍是「CPU 合成 2D 贴图」，
+  作者明确说了只改实体。
+- 物品栏 / 手持 / 掉落物仍是 2D 图标。
+
+---
 ## 1.2.0.93 — 潮汐球的水下特效跟着球一起滚动
 
 作者 2026-11-01：「潮汐球的水下特效会跟着球一起滚动」。
