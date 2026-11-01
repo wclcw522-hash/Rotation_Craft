@@ -135,7 +135,6 @@ public class BallProjectile extends BallPhysicsCore {
         // 主人已不在（下线 / 换维度 / 已死），或回归超时 ——
         // 必须把「恼鬼三件套」和记账状态一起还原，否则球会一直穿墙飘着
         this.homingBack = false;
-        this.homingPhysicsActive = false;   // 交还正常物理
         this.noPhysics = false;
         this.setNoGravity(false);
         this.wasInsideBlock = false;
