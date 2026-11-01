@@ -1,6 +1,0 @@
-{
-    "parent":  "rotation_craft:item/ball3d_echo",
-    "textures":  {
-                     "0":  "rotation_craft:block/ball3d/echo_quarter_2"
-                 }
-}

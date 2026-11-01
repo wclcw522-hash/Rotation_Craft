@@ -1,6 +1,0 @@
-{
-    "parent":  "rotation_craft:item/ball3d_amethyst",
-    "textures":  {
-                     "0":  "rotation_craft:block/ball3d/amethyst_quarter_3"
-                 }
-}

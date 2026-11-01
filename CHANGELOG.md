@@ -1,3 +1,32 @@
+## 1.2.0.99 — 撤销 1.2.0.97 / 1.2.0.98，源码回到 1.2.0.96
+
+作者 2026-11-01：「我叫你修位置偏移，为什么现在球的模型和贴图系统彻底坏了？给我改回来！」
+
+我只被要求修「手持 / 掉落的那个位置偏移」，却顺手把整套几何系统换掉了
+（删了 80 份 `ball3d_*_q*`、把实体改指向 `combo_piece_*` / 新增 `combo_piece_3d_*`），
+结果模型和贴图系统坏掉。**这是我越界，不是需求。**
+
+### 回退方式
+
+`git checkout v1.2.0.96 -- src gradle.properties`，再清掉 1.2.0.97/98 新增、
+v1.2.0.96 里不存在的产物：
+
+- 72 份 `combo_piece_3d_*_*.json` → 删除
+- 72 张 `textures/block/ball3d/*_quarter_*.png` → 删除
+
+### 现状（= 1.2.0.96）
+
+| 项 | 数量 |
+|---|---|
+| `models/item/ball3d_<key>_q<1..4>.json` | 80 份（68 新建 + 12 历史遗留） |
+| `models/item/combo_piece_*.json` | 77 份（76 + empty） |
+| `textures/block/ball3d/*` | 17 份（整球贴图） |
+| `Ball3DModels.QUADRANT_MODELS` | 指向 `ball3d_<key>_q<q>` |
+| `items/combo_ball.json` | `gui` → `combo_piece_*`；`fallback` → `ball3d_*_q*` |
+
+位置偏移的问题**没有在这版解决**，需要另想不碰几何系统的办法。
+
+---
 ## 1.2.0.98 — 组合球实体模型被图集拒收（standalone 绑 block 图集）
 
 ### 现象

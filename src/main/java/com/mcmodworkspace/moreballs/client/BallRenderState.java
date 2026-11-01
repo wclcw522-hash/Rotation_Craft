@@ -48,7 +48,7 @@ public class BallRenderState extends ThrownItemRenderState {
      *
      * <p>{@code null} 整个数组 = 这不是组合球（或读不出数据），走普通球那条路。</p>
      */
-    public int[] comboQuadrantSources = null;
+    public String[] comboQuadrantKeys = null;
     /** 【潮涌】是否激活 —— 球在水里时由服务端的同步位置位，决定要不要画那圈环绕水纹 */
     public boolean tidalSurge = false;
 

@@ -1,6 +1,0 @@
-{
-    "parent":  "rotation_craft:item/ball3d_preserve",
-    "textures":  {
-                     "0":  "rotation_craft:block/ball3d/preserve_quarter_2"
-                 }
-}

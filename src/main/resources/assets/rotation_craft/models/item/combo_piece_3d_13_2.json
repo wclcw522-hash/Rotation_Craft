@@ -1,6 +1,0 @@
-{
-    "parent":  "rotation_craft:item/ball3d_dripstone",
-    "textures":  {
-                     "0":  "rotation_craft:block/ball3d/dripstone_quarter_2"
-                 }
-}
