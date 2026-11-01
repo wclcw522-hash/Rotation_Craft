@@ -1,3 +1,37 @@
+## 1.2.0.96 — 组合球实体位置修正（同一批几何被两种渲染路径共用）
+
+作者 2026-11-01：「修坏了，现在手上位置正常，但是实体的碰撞箱和模型偏了，
+这俩好像被你一起调了」。
+
+### 根因
+
+那 68 份 `ball3d_<key>_q*` 被**两条完全不同的渲染路径**共用，而它们对坐标的要求相反：
+
+| 用途 | 路径 | 是否经过 `ItemTransform` | 需要 +8 |
+|---|---|---|---|
+| 物品模型（`items/combo_ball.json` 的 fallback，含第一人称手持） | `minecraft:composite` | **是**（`translate(-0.5,-0.5,-0.5)`） | **要** |
+| 球实体（`Ball3DModels` 的 standalone 模型） | `submitBlockModel` | **否** | **不要** |
+
+1.2.0.95 为了让手持回原位把 json 整体 +8，手持正常了、实体却整体偏出去。
+
+### 修
+
+json 保持 +8（服务物品模型），在**实体渲染分支**里补一次 −0.5 格把几何拉回球心原点：
+
+```java
+if (state instanceof BallRenderState comboState && comboState.comboQuadrantKeys != null) {
+    poseStack.pushPose();
+    this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+    poseStack.translate(-0.5D, -0.5D, -0.5D);   // ← 抵消物品模型口径的 +8
+    this.rollVisual.applyRoll(comboState.rollOrientation, comboState.rollPivotY, poseStack);
+    // ...提交四象限
+}
+```
+
+于是同一批几何在两条路径下都落在正确位置：物品模型经过它自己的 −8 抵消，
+实体这里手工 −8 抵消。碰撞箱与模型重新对齐。
+
+---
 ## 1.2.0.95 — 组合球手持位置整体偏移（象限几何缺 +8 居中补偿）
 
 作者 2026-11-01：「组合球拿在手里时的模型歪了，靠正常位置的左下放挺远，主视角跑到屏幕中央下方了」

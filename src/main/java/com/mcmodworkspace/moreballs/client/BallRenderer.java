@@ -109,6 +109,18 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             poseStack.pushPose();
             // 水纹先画（不受滚动影响，见 submitSurge 的说明）
             this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+            // ⚠️⚠️ **把几何拉回原点 −8 单位 = −0.5 格**（作者 2026-11-01：
+            // 「实体的碰撞箱和模型偏了，这俩好像被你一起调了」）。
+            //
+            //   那 68 份 `ball3d_<key>_q*` 的坐标是**按物品模型口径**生成的（整体 +8），
+            //   用来抵消物品模型必经的 `ItemTransform` 居中平移（`translate(-0.5,-0.5,-0.5)`）。
+            //
+            //   而实体这边是 **standalone 模型**（`submitBlockModel`），**不走 ItemTransform**
+            //   —— 直接把 +8 之后的坐标交出去，整颗球就会跑到「右上 + 上面」。
+            //
+            //   所以这里补一次 −0.5：几何回到球心为原点的坐标系，与球的碰撞箱、
+            //   与整球 `ball3d_<key>` 的坐标完全一致。
+            poseStack.translate(-0.5D, -0.5D, -0.5D);
             // 滚动姿态：四块几何一起转，拼出来的整球就像在滚
             this.rollVisual.applyRoll(comboState.rollOrientation, comboState.rollPivotY, poseStack);
             int comboLight = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
