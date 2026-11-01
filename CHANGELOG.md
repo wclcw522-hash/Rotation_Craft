@@ -1,3 +1,33 @@
+## 1.2.0.103 — 组合球：手持用 2D 分片贴图，实体用 1.2.0.94 的原始坐标几何
+
+作者指示：「手持的图换回 2d 版的，然后把实体的模型调成我说不偏的那版」。
+
+「我说不偏的那版」= **1.2.0.94** —— 那一版实体位置正常（原始坐标、无 +8 偏移），
+只是手持偏。所以这次把两条渲染路径各取各自正确的那一版：
+
+| 路径 | 走什么 | 取自 |
+|---|---|---|
+| 物品模型（GUI / **手持** / 掉落物 / 固定） | `combo_piece_<source>_<q>` — 2D 分片贴图合成 | `1.2.0.93` 的 `gui` case |
+| 球实体（standalone 模型） | `ball3d_<key>_q<1..4>` — 原始坐标几何 | `1.2.0.94` |
+
+### 具体改动
+
+1. `items/combo_ball.json` 的 **`fallback` 换成与 `gui` 完全相同的 composite**
+   （`combo_piece_*`），于是手持 / 地面 / 固定架全部走 2D 分片贴图。
+   改前 `ball3d_` 80 处 + `combo_piece_` 80 处 → 改后 `ball3d_` **0** 处、`combo_piece_` **160** 处。
+2. 从 `24a5867`（1.2.0.94）取回三件 Java 文件：
+   `BallRenderer.java`（**无** `translate(-0.5D)`、有 `comboQuadrant` 分支）、
+   `BallRenderState.java`（`comboQuadrantKeys`）、
+   `Ball3DModels.java`（`QUADRANT_MODELS` 指向 `ball3d_<key>_q<q>`）。
+3. 从 `24a5867` 取回 80 份 `ball3d_*_q*.json` —— **原始坐标**（`wooden_q1` 第一个 cuboid 是 `from=-1,4,-1`，不是 +8 后的 `7,12,7`）。
+
+### 与 1.2.0.95~1.2.0.101 的区别
+
+那几版统一在 json 里加 +8 偏移、再在实体分支补 −0.5，两条路径强行共用一份坐标。
+本版**不共用**：物品模型用 2D 分片贴图（`combo_piece_*`，走 `ItemTransform` 自带居中），
+实体用原始坐标几何（standalone 不走 `ItemTransform`）—— 各自用自己正确的那份，互不干扰。
+
+---
 ## 1.2.0.101 — 组合球：删掉自造的分片模型，直接用回已有的 combo_piece_*
 
 作者 2026-11-01：「为什么又不回归到已有代码而是乱写？」并报了两个现象：

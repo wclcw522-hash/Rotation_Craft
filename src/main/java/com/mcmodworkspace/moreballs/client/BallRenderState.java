@@ -41,6 +41,14 @@ public class BallRenderState extends ThrownItemRenderState {
      * 那时渲染器会退回原版 {@code ThrownItemRenderer} 的 2D 物品图标路径。</p>
      */
     public String ball3dKey = null;
+
+    /**
+     * <b>组合球的四象限材质 key</b>（作者 2026-11-01 的 3D 组合方案）——
+     * 下标 0..3 对应象限 1..4（左上 / 右上 / 左下 / 右下），{@code null} 表示该象限空。
+     *
+     * <p>{@code null} 整个数组 = 这不是组合球（或读不出数据），走普通球那条路。</p>
+     */
+    public String[] comboQuadrantKeys = null;
     /** 【潮涌】是否激活 —— 球在水里时由服务端的同步位置位，决定要不要画那圈环绕水纹 */
     public boolean tidalSurge = false;
 
