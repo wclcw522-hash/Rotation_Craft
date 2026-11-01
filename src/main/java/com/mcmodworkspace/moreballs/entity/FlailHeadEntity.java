@@ -1100,32 +1100,18 @@ public class FlailHeadEntity extends BallProjectile {
         //   现在线长是**独立的自由度**：只在回收时递减，由下面的位移段统一维护。
 
         if (!this.isRetrieving()) {
-            // 松开右键：原地落下 —— **但不能穿进方块**（作者 2026-10-31：「下沉的问题又出现了」）。
+            // ===== 松手中断回收（作者 2026-11-01：「回收过程中中断会导致绳长拖拽不生效」）=====
             //
-        //   RETURNING 阶段不跑父类 tick（1.2.0.68 起），也就没有 move() 的方块碰撞。
-            //   原来这里只改速度、不判碰撞，锤头会一路穿进地面。
-            // ⚠️ **松手要释放绳长**（作者 2026-10-31：「暂停回收后远离锤头，再次回收时锤头瞬移」）。
+            //   根因：松手后锤头**还留在 RETURNING 阶段**，而超长拖拽（applyRopeConstraint）
+            //   只在 tickFlying 里调用 —— 于是中断一次之后，线长上限这条逻辑就再也不跑了，
+            //   锤头可以拖到任意远。
             //
-            //   绳长上限在回收时被一路收紧，松手后如果就那么锁着，人走远了它还是旧值；
-            //   再按右键，约束会把锤头一把钳回那个旧半径 —— 表现为瞬移。
-            //
-            // 松手 = 绳子重新放松，但**上限永远是 MAX_LINE**（作者 2026-11-01）。
-            //
-            // 之后再也判不到「超出线长」，超长拖拽整条失效。
-            // 1.2.0.73 让 ropeLimit 无上限地跟随实际距离，人一走远它就被撑到 30 格以上，
-            // 取 min(MAX_LINE, max(旧值, 实际距离))：
-            //   · 贴得近时跟着实际距离收缩，不会瞬移；
-            //   · 走远了最多放松到 30 格，超出照样被拽回来。
+            //   正确做法：松手 = 这次回收结束，把阶段交还给 FLYING。
+            //   之后重力、方块碰撞、超长拖拽全部由正常流程接管，不需要在这里手写落下。
+            //   绳长同时放松到实际距离（但不超过上限），避免再次回收时瞬移。
+            this.setStage(Stage.FLYING);
             this.ropeLimit = Math.min(this.maxRopeLength,
                     Math.max(this.ropeLimit, this.distanceToOwner()));
-
-            Vec3 fall = this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D);
-            Vec3 fallTo = this.position().add(fall);
-            if (this.isFreeAt(fallTo)) {
-                this.setPos(fallTo.x, fallTo.y, fallTo.z);
-            } else {
-                this.setDeltaMovement(Vec3.ZERO);   // 贴住就停，不再往下压
-            }
             return;
         }
 

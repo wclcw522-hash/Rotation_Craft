@@ -1,3 +1,35 @@
+## 1.2.0.78 — 回收中断后超长拖拽失效
+
+### 原因
+
+松手中断回收时，锤头**还留在 `RETURNING` 阶段**：
+
+```java
+if (!this.isRetrieving()) {
+    ...只让锤头落下...
+    return;
+}
+```
+
+而超长拖拽（`applyRopeConstraint()`）只在 `tickFlying()` 里调用。于是中断一次之后，
+线长上限这条逻辑就再也不跑了 —— 锤头可以拖到任意远、不再被绳子拽回。
+
+### 修
+
+松手 = 这次回收结束，把阶段交还给 `FLYING`：
+
+```java
+if (!this.isRetrieving()) {
+    this.setStage(Stage.FLYING);
+    this.ropeLimit = Math.min(this.maxRopeLength,
+            Math.max(this.ropeLimit, this.distanceToOwner()));
+    return;
+}
+```
+
+之后重力、方块碰撞、超长拖拽全部由正常流程接管，不再需要在这里手写「落下且不穿方块」那套。
+
+---
 ## 1.2.0.77 — 超长拖拽失效（绳长被撑过 30）、绳长上限改为可变
 
 ### ① 绳长超长拖拽失效
