@@ -1,3 +1,45 @@
+## 1.2.0.87 — 全量通读收尾：注释失真三处
+
+这一版只改注释与文档，**零行为变更**。全部 112 个源文件（35427 行）已逐行读完，
+过程中修正了三处与实际不符的注释，避免后来者照着错误描述改代码。
+
+### ① `ModEntities.FLAIL_HEAD`
+
+原文写「它是独立实体类，**不是** `BallProjectile` 的子类」——
+实际声明是 `public class FlailHeadEntity extends BallProjectile`；尺寸注释写「0.3 见方」，
+实际 `sized(0.5F, 0.5F)`。
+
+按作者 2026-11-01 的口径（球与锤头**可以互相交互、代码可以重叠**，
+「球就是球、锤头就是锤头」只针对**实体种类不能相同**、注释表述要分清），
+改成事实描述，并列出**所有需要显式排除锤头的地方**：
+
+| 位置 | 做什么 |
+|---|---|
+| `BallPhysicsCore.enforceBallCap` | 球上限清理 |
+| `BallMobAI.tryCatchBall` | 怪物接球 |
+| `BallMobAI.tryPickUpBall` | 怪物顺手捡球 |
+| `BallPouchCurios.autoCollect` | 收纳袋自动收纳 |
+| `BallPouchCurios.autoCollect` | 收纳袋自动收纳 |
+
+以后再写「批量处理球」的逻辑，照着这份清单检查。
+
+### ② `BallPouchMenu.POUCH_COLUMNS`
+
+原文写「作者 2026-10-17 指定改成 **18**」，实际值是 **15**；
+同文件 `PLAYER_INSET` 的注释却又是按「袋子 15 列宽 284」推的，两处互相打架。
+改成事实，并补上「改这个值必须同步改底图与 `PLAYER_INSET` 的居中推算」的提醒
+（后者是 `(284-168)/2 + 4` 算出来的，列数一动就错位）。
+
+### ③ `network/ModNetwork`
+
+原文写「目前有**两个**」，实际注册了三个（漏了 `TidyBallsPayload`）。改成完整列表。
+
+### ④ `client/BallPouchScreen.isRowVisible`
+
+上面挂着一整段「光标拿着球时画小加号」的 javadoc，而那个功能实现并不在本类
+（在 `BallClusterDecorator`），本类从未画过加号 —— 错位残留，已删并注明去处。
+
+---
 ## 1.2.0.86 — 金属储存块会被判定成可烤爆（缓存串用）
 
 ### 问题

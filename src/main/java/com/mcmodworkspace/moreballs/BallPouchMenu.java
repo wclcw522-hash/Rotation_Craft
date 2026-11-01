@@ -39,15 +39,19 @@ import net.minecraft.world.item.ItemStack;
 public class BallPouchMenu extends AbstractContainerMenu {
 
     /**
-     * <b>袋子自身每行的槽位数</b> —— 作者 2026-10-17 指定改成 <b>18</b>。
+     * <b>袋子自身每行的槽位数</b> —— 当前是 <b>15</b>。
      *
      * <p>⚠️⚠️ 这个**不能**和玩家背包的列数共用一个常量（原来两者共用一个 `COLUMNS = 9`）：
-     * 玩家背包与快捷栏是**原版固定 9 列**，袋子如果改成 18 列、玩家那两段也跟着变，
+     * 玩家背包与快捷栏是**原版固定 9 列**，袋子如果改列数、玩家那两段也跟着变，
      * 整个背包区就会排错。所以拆成两个常量：</p>
      * <ul>
-     *   <li>{@link #POUCH_COLUMNS} = 袋子（弹药段 / 转运段）的列数 —— 作者要的 18；</li>
+     *   <li>{@link #POUCH_COLUMNS} = 袋子（弹药段 / 转运段）的列数 —— 当前 15；</li>
      *   <li>{@link #PLAYER_COLUMNS} = 玩家背包 / 快捷栏的列数 —— 原版固定 9，永远不动。</li>
      * </ul>
+     *
+     * <p>作者 2026-10-17 曾要求改成 18，后来定在 <b>15</b>（界面宽 284）。
+     * 改这里的值必须同步改底图 {@code ball_pouch.png} 与 {@link #PLAYER_INSET} 的居中推算
+     * （后者按「284 宽里居中放原版 9 列」算出来的，列数一动它就错位）。</p>
      */
     public static final int POUCH_COLUMNS = 15;
 

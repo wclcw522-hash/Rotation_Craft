@@ -260,13 +260,9 @@ public class BallPouchScreen extends AbstractContainerScreen<BallPouchMenu> {
      * <p>⚠️ 这是纯防御判断：**它的存在不会改变任何正常情况下的绘制**
      * （窗口够高时恒为 true）。它只在窗口被压得极小、或者坐标因为 resize 竞态
      * 落到屏幕外时才拦一下，避免把越界的几何交给 26.2 的 scissor 而崩掉整帧。</p>
-     */
-    /**
-     * <b>「光标拿着球、这个球堆能收下它」⇒ 右下角画个小加号</b>（作者 2026-10-18 要求）。
      *
-     * <p>判据与 {@code BallPouchMenu.clicked} 里那段右键放入<b>完全一致</b>：
-     * 光标上是球、槽里是球堆、{@code hasRoom()} 且 {@code matches()}。
-     * 两处必须同一套条件，否则会出现「画了加号却放不进去」。</p>
+     * <p>（原先这上面还挂着一段「光标拿着球时画小加号」的说明 —— 那是错位的：
+     * 那个功能实现 {@code BallClusterDecorator} 里，本类从未画过加号。）</p>
      */
     private static boolean isRowVisible(int y, int height) {
         final int screenHeight = net.minecraft.client.Minecraft.getInstance()

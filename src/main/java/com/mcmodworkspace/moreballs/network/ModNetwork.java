@@ -9,7 +9,12 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 /**
  * 网络包注册。
  *
- * <p>目前有两个：客户端按 G 键开袋、径向菜单选弹药。</p>
+ * <p>目前三个，全是「客户端 → 服务端」的请求：</p>
+ * <ul>
+ *   <li>{@link OpenPouchPayload} —— 按 G 键请求打开饰品栏里的收纳袋</li>
+ *   <li>{@link SelectAmmoPayload} —— 径向菜单里选中某种弹药</li>
+ *   <li>{@link TidyBallsPayload} —— 一键整理（背包界面那个小按钮）</li>
+ * </ul>
  */
 @EventBusSubscriber(modid = MoreBalls.MOD_ID)
 public final class ModNetwork {
