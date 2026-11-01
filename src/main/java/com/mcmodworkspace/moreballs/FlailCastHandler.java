@@ -175,7 +175,12 @@ public final class FlailCastHandler {
             }
         }
         if (origin >= 0 && inventory.getSelectedSlot() != origin) {
-            inventory.setSelectedSlot(origin);
+            FlailItem.SLOT_SET_BYPASS = true;
+            try {
+                inventory.setSelectedSlot(origin);
+            } finally {
+                FlailItem.SLOT_SET_BYPASS = false;
+            }
             // 诊断（作者 2026-10-30：「无法切换物品栏的功能未实现」——先确认这段到底有没有跑）
             MoreBalls.LOGGER.info("[flail] 锁定物品栏：{} → {}（锤头 stage={}）",
                     inventory.getSelectedSlot(), origin, head.stage());

@@ -1,3 +1,58 @@
+## 1.2.0.105 — 锤头不在手中时锁死物品栏切换
+
+作者 2026-11-02：「流星锤在锤头不在手中时不能通过任何方式切换物品栏这一条功能没有实现」。
+
+### 之前为什么没实现
+
+`FlailCastHandler` 里只有一段「主动把槽位拨回原来那一格」的代码，那是**拉回**，
+不是**锁住** —— 玩家照样能用数字键 / 滚轮切走，切走之后 `FLAIL_CASTING` 标记被清，
+锤头就开始回收。等于换个物品栏格子就能把锤头骗回来。
+
+### 打在哪
+
+新建 `mixin/InventoryMixin`，注入 `Inventory.setSelectedSlot(int)` 的 `HEAD`。
+
+选这个点是因为它是**所有**切槽路径的汇合点：
+
+| 路径 | 最终都落到 |
+|---|---|
+| 数字键 1–9 | `LocalPlayer` 按键处理 → `Inventory.setSelectedSlot` |
+| 鼠标滚轮 | 同上 |
+| 服务端包 `ServerboundSetCarriedItemPacket` | `ServerPlayer` → 同上 |
+
+挡在这里才叫「任何方式」。挡在 `LocalPlayer` 或某个按键处理器上只能覆盖一部分。
+
+**放在 common 而不是 client**：客户端会本地预测切槽、服务端才是权威，两边走同一个
+`Inventory` 类 —— 只在 client 挡会出现「客户端看着切了、服务端没切」的跳动。
+
+### 判据
+
+主物品栏里只要有一把流星锤还带着 `FLAIL_CASTING` 标记（= 锤头已经扔出去），就拒绝切槽。
+
+**不查副手** —— 副手上的流星锤跟「主手能不能切」无关，查了会误伤
+（副手放流星锤、主手正常用镐子，那就该能切）。
+
+### 自己人不拦自己人
+
+`FlailCastHandler` 在锤头飞出去之后要把槽位拨回原格 —— 那正是这个功能要的效果，
+必须放行。新增 `FlailItem.SLOT_SET_BYPASS` 静态标志，调用处用 try/finally 置位与复位：
+
+```java
+FlailItem.SLOT_SET_BYPASS = true;
+try {
+    inventory.setSelectedSlot(origin);
+} finally {
+    FlailItem.SLOT_SET_BYPASS = false;
+}
+```
+
+### 为什么用 Mixin
+
+`Inventory.setSelectedSlot` **没有任何 NeoForge 官方扩展点**（查过：没有对应事件、
+没有可以让子类覆写的钩子）。按「侵入手段优先级」逐条排除后只剩 Mixin，
+且只用了 `@Inject`、带 `require = 0`（原版改签名时安静跳过而不是崩游戏）。
+
+---
 ## 1.2.0.104 — 组合球禁止对半切（吞物品）；回归落地后等 0.5 秒再起飞
 
 作者 2026-11-02：

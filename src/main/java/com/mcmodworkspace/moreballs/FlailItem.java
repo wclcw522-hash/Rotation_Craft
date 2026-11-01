@@ -209,6 +209,18 @@ public class FlailItem extends Item {
         return isFlail(stack) && Boolean.TRUE.equals(stack.get(ModComponents.FLAIL_CASTING.get()));
     }
 
+    /**
+     * <b>放行一次 {@code Inventory.setSelectedSlot}</b> —— 给 {@code FlailCastHandler} 回位用。
+     *
+     * <p>{@code InventoryMixin} 会在「主物品栏里有流星锤带着 {@code FLAIL_CASTING} 标记」时
+     * 拒绝一切切槽（作者 2026-11-02：「锤头不在手中时不能通过任何方式切换物品栏」）。
+     * 但锤头飞出去的瞬间，{@code FlailCastHandler} 自己要把槽位拨回原来那一格 ——
+     * 那正是这个功能要的效果，所以必须放行，否则它自己就被自己挡住了。</p>
+     *
+     * <p>调用方一律用 try/finally 置位与复位，别留下烫手状态。</p>
+     */
+    public static boolean SLOT_SET_BYPASS = false;
+
     /** 设置「已扔出」状态；传 false 恢复成带球的图标 */
     /**
      * 玩家身上**有没有任何一把流星锤还带着 {@code FLAIL_CASTING} 标记**。
