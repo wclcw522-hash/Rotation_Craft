@@ -153,7 +153,16 @@ public class FlailHeadEntity extends BallProjectile {
      * <p>· 回收阶段 = 从当前实际距离一路收紧到 0 —— <b>这就是「回收」</b>：</p>
      * <p>  玩家把绳子往回收，锤头被绳子拽着带回来，而不是自己飞回来。</p>
      */
-    private double ropeLimit = MAX_LINE;
+    /**
+     * <b>绳子的最大长度上限</b>（格）—— 可变，作者 2026-11-01：「这个上限不要写成不可改变的，
+     * 后边可能会用到」。</p>
+     *
+     * <p>默认取 {@link FlailItem#MAX_LINE_LENGTH}（30 格）。后续要加「更长的绳子」这类机制
+     * （附魔、词条、材料差异……）时，只要调 {@link #setMaxRopeLength(double)}，
+     * 约束、拖拽、回收全部自动跟着变，不需要再改别处。</p>
+     */
+    private double maxRopeLength = FlailItem.MAX_LINE_LENGTH;
+    private double ropeLimit = FlailItem.MAX_LINE_LENGTH;
 
     /**
      * 锤头最长寿命（刻）= 5 分钟。
@@ -629,7 +638,7 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //   之后 tick() 的 FLYING 分支也会设 false，但那是下一 tick 的事，来不及。
         this.noPhysics = false;
-        this.ropeLimit = MAX_LINE;      // 绳子拉满 30 格
+        this.ropeLimit = this.maxRopeLength;      // 绳子拉满 30 格
         this.setRetrieving(false);
 
         Vec3 dir = shooter.getLookAngle();
@@ -782,6 +791,27 @@ public class FlailHeadEntity extends BallProjectile {
      *
      * <p>飞行阶段用 {@link #MAX_LINE} 当上限，同一个函数就实现了「超出线长被拉动」。</p>
      */
+    /** 当前绳子的最大长度上限（格）。 */
+    public double maxRopeLength() {
+        return this.maxRopeLength;
+    }
+
+    /**
+     * 设置绳子的最大长度上限（格）。
+     *
+     * <p>给后续机制留的入口：附魔/词条/etc 想让绳子更长，调这里就行，
+     * 约束与回收会自动跟随。</p>
+     *
+     * <p>下限保护到 1 格；如果当前正在回收（{@code ropeLimit} 已经收得更短），
+     * 不会因为调大上限而把它撑回去。</p>
+     */
+    public void setMaxRopeLength(double value) {
+        this.maxRopeLength = Math.max(1.0D, value);
+        if (this.ropeLimit > this.maxRopeLength) {
+            this.ropeLimit = this.maxRopeLength;
+        }
+    }
+
     private void applyRopeConstraint() {
         if (!(this.getOwner() instanceof net.minecraft.world.entity.LivingEntity ropeOwner)) {
             return;
@@ -860,7 +890,7 @@ public class FlailHeadEntity extends BallProjectile {
 
 
         // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
-        if (this.lineLength() >= MAX_LINE && !this.lineCapConsumed) {
+        if (this.lineLength() >= this.maxRopeLength && !this.lineCapConsumed) {
             this.lineCapConsumed = true;
 
             // 【尖啸】的「弹射」：到线长上限等同于撞到东西，交给 shriekLand 结算一次。
@@ -990,7 +1020,7 @@ public class FlailHeadEntity extends BallProjectile {
         this.consumeOneToughness("开始回收");
         // 回收开始：绳长上限从**当前实际距离**开始收紧（不是从 30 格）
         // 回收开始：绳长上限从最大值起算（作者 2026-10-31 进阶思路）
-        this.ropeLimit = MAX_LINE;
+        this.ropeLimit = this.maxRopeLength;
     }
 
     /**
@@ -1079,8 +1109,15 @@ public class FlailHeadEntity extends BallProjectile {
             //   绳长上限在回收时被一路收紧，松手后如果就那么锁着，人走远了它还是旧值；
             //   再按右键，约束会把锤头一把钳回那个旧半径 —— 表现为瞬移。
             //
-            //   松手 = 绳子重新放松：让上限跟随实际距离（只增不减，不会把锤头往远处推）。
-            this.ropeLimit = Math.max(this.ropeLimit, this.distanceToOwner());
+            // 松手 = 绳子重新放松，但**上限永远是 MAX_LINE**（作者 2026-11-01）。
+            //
+            // 之后再也判不到「超出线长」，超长拖拽整条失效。
+            // 1.2.0.73 让 ropeLimit 无上限地跟随实际距离，人一走远它就被撑到 30 格以上，
+            // 取 min(MAX_LINE, max(旧值, 实际距离))：
+            //   · 贴得近时跟着实际距离收缩，不会瞬移；
+            //   · 走远了最多放松到 30 格，超出照样被拽回来。
+            this.ropeLimit = Math.min(this.maxRopeLength,
+                    Math.max(this.ropeLimit, this.distanceToOwner()));
 
             Vec3 fall = this.getDeltaMovement().scale(0.6D).add(0.0D, -0.04D, 0.0D);
             Vec3 fallTo = this.position().add(fall);

@@ -1,3 +1,49 @@
+## 1.2.0.77 — 超长拖拽失效（绳长被撑过 30）、绳长上限改为可变
+
+### ① 绳长超长拖拽失效
+
+1.2.0.73 为修「松手瞬移」，让 `ropeLimit` 跟随实际距离，但**没有封顶**：
+
+```java
+this.ropeLimit = Math.max(this.ropeLimit, this.distanceToOwner());
+```
+
+人一走远，`ropeLimit` 被撑到 30 格以上 —— 之后锤头再也判不到「超出线长」，
+`applyRopeConstraint()` 与线长上限两条逻辑整条失效。
+
+**修**：松手只是把绳子放松，但上限永远是绳长上限
+
+```java
+this.ropeLimit = Math.min(this.maxRopeLength,
+        Math.max(this.ropeLimit, this.distanceToOwner()));
+```
+
+贴得近时跟着实际距离收缩（不会瞬移），走远了最多放松到上限（超出照样被拽回来）。
+
+### ② 绳长上限改为可变（作者要求：「这个上限不要写成不可改变的，后边可能会用到」）
+
+新增实例字段，默认取原来的 30 格：
+
+```java
+private double maxRopeLength = FlailItem.MAX_LINE_LENGTH;
+
+public double maxRopeLength() { return this.maxRopeLength; }
+
+public void setMaxRopeLength(double value) {
+    this.maxRopeLength = Math.max(1.0D, value);
+    if (this.ropeLimit > this.maxRopeLength) {
+        this.ropeLimit = this.maxRopeLength;
+    }
+}
+```
+
+原来直接引用静态常量 `MAX_LINE` 的四处（`launch()` 复位、线长上限判定、松手释放、`applyRopeConstraint` 之外）
+全部改为 `this.maxRopeLength`。
+
+后续要加「更长的绳子」这类机制（附魔、词条、材料差异），只要调 `setMaxRopeLength()`，
+约束、拖拽、回收全部自动跟着变。
+
+---
 ## 1.2.0.76 — 落地判定、清掉两个死常量
 
 ### ① 锤头落地后往方块里钻（作者：球落地就是落地了，锤头却会）
