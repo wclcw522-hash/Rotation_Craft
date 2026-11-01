@@ -1,3 +1,51 @@
+## 1.2.0.98 — 组合球实体模型被图集拒收（standalone 绑 block 图集）
+
+### 现象
+
+`runClient` 日志刷满：
+
+```
+Rejecting block model rotation_craft:item/combo_piece_6_1,
+since it contains sprites from outside of supported atlas:
+{minecraft:textures/atlas/items.png=[rotation_craft:item/copper_ball_quarter_1]}
+```
+
+组合球实体的四块几何全被拒收，等于不显示。
+
+### 根因
+
+`Ball3DModels` 用 `SimpleUnbakedStandaloneModel.simpleModelWrapper` 烘焙 standalone 模型，
+**它绑的是方块图集（block atlas）**；而 `combo_piece_<source>_<q>.json` 里写的贴图是
+`rotation_craft:item/<key>_ball_quarter_<q>` —— 在 **item 图集**里。跨图集直接拒收。
+
+（这条坑 `Ball3DModels` 的类注释里本来就写着：「必须走 block 图集
+`textures/block/ball3d/`，引用 item 图集里的贴图会被直接拒收」。）
+
+### 修
+
+**物品模型**和**实体模型**需要两套 json，贴图分别落在各自图集：
+
+| 用途 | json | 贴图位置 |
+|---|---|---|
+| 物品模型（GUI / 手持 / 掉落物） | `combo_piece_<source>_<q>.json`（原样不动） | `textures/item/` |
+| 球实体（standalone） | **新增** `combo_piece_3d_<source>_<q>.json` | `textures/block/ball3d/` |
+
+具体两步：
+
+1. 把 72 张 `*_ball_quarter_*.png` 复制进 `textures/block/ball3d/<key>_quarter_<q>.png`
+2. 生成 72 份 `combo_piece_3d_<source>_<q>.json`：
+
+```json
+{ "parent": "rotation_craft:item/ball3d_<key>",
+  "textures": { "0": "rotation_craft:block/ball3d/<key>_quarter_<q>" } }
+```
+
+`Ball3DModels` 的 `QUADRANT_MODELS` 改指这套（`combo_piece_3d_*`），
+`QUADRANT_SOURCE_COUNT` 收到 17（`ender_pearl` / `slime` 没有分片贴图）。
+
+几何仍与整球完全相同 ⇒ 四层必然重合，接缝与偏移依旧不可能出现。
+
+---
 ## 1.2.0.97 — 组合球回归正解：完整整球几何 + 分片贴图（撤销自切几何）
 
 作者 2026-11-01：「扔地上的还是偏的」。

@@ -84,7 +84,7 @@ public final class Ball3DModels {
     private static final Map<String, StandaloneModelKey<BlockStateModelPart>> QUADRANT_MODELS = new HashMap<>();
 
     /** 组合球能出现的来源个数（{@code combo_piece_<source>_<q>} 覆盖 0..SIZE-1） */
-    public static final int QUADRANT_SOURCE_COUNT = 19;
+    public static final int QUADRANT_SOURCE_COUNT = 17;
 
     private static final Map<String, StandaloneModelKey<BlockStateModelPart>> MODELS = new HashMap<>();
     private static final Map<String, Identifier> TEXTURES = new HashMap<>();
@@ -103,7 +103,7 @@ public final class Ball3DModels {
                 String qk = src + "_" + q;
                 int srcF = src; int qF = q;
                 QUADRANT_MODELS.put(qk, new StandaloneModelKey<>(
-                        () -> "rotation_craft:item/combo_piece_" + srcF + "_" + qF));
+                        () -> "rotation_craft:item/combo_piece_3d_" + srcF + "_" + qF));
             }
         }
     }
@@ -131,7 +131,7 @@ public final class Ball3DModels {
             for (int q = 1; q <= 4; q++) {
                 String qk = src + "_" + q;
                 event.register(QUADRANT_MODELS.get(qk), SimpleUnbakedStandaloneModel.simpleModelWrapper(
-                        Identifier.fromNamespaceAndPath("rotation_craft", "item/combo_piece_" + qk)));
+                        Identifier.fromNamespaceAndPath("rotation_craft", "item/combo_piece_3d_" + qk)));
             }
         }
     }

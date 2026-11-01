@@ -1,0 +1,6 @@
+{
+    "parent":  "rotation_craft:item/ball3d_lapis",
+    "textures":  {
+                     "0":  "rotation_craft:block/ball3d/lapis_quarter_1"
+                 }
+}

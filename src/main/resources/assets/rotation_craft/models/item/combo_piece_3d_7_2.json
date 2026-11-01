@@ -1,0 +1,6 @@
+{
+    "parent":  "rotation_craft:item/ball3d_hollow_copper",
+    "textures":  {
+                     "0":  "rotation_craft:block/ball3d/hollow_copper_quarter_2"
+                 }
+}
