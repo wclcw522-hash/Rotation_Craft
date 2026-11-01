@@ -1,3 +1,42 @@
+## 1.2.0.100 — 组合球：手持用 2D 贴图，实体用原始坐标
+
+作者 2026-11-01：「组合球手中贴图和普通球一样换回 2d 的贴图，然后把实体回调到不偏移的那一版」。
+
+两件事拆开处理，互不影响。
+
+### ① 实体：回调到不偏移的那一版
+
+68 份 `ball3d_<key>_q<1..4>.json` 重新生成，**坐标不加任何偏移**（回到 1.2.0.94 的写法）：
+
+```
+原球 cuboid:  from=-1,4,-1  to=0,8,1
+象限 q1 裁切: from=-1,4,-1  to=0,8,1     ← 就是原坐标
+```
+
+同时删掉 `BallRenderer` 组合球分支里那句 `poseStack.translate(-0.5D, -0.5D, -0.5D)`
+（那是为抵消 +8 而加的，现在几何没有偏移了，不需要）。
+
+standalone 实体模型不走 `ItemTransform`，几何写什么世界坐标就是什么 —— 与整球
+`ball3d_<key>` 完全一致，也与碰撞箱对齐。
+
+### ② 手持 / 物品：换回真正的 2D 贴图
+
+组合球原来是「3D 整球几何 + 1/4 分片贴图」，`combo_piece_*` 的 `parent` 指向
+`item/ball3d_<key>`（3D）。现在改成**纯 2D 平面**：
+
+新增 72 份 `combo_piece_2d_<source>_<q>.json`：
+
+```json
+{ "parent": "minecraft:item/generated",
+  "textures": { "layer0": "rotation_craft:item/<key>_ball_quarter_<q>" } }
+```
+
+`items/combo_ball.json` 重建为单个 `composite`（4 个 `select`，按 `combo_slot_N`
+选 `combo_piece_2d_<source>_<q>`），**不再按 `display_context` 分叉** ——
+GUI / 手持 / 掉落物 / 展示框全部走这一套 2D，和普通球同一个观感。
+
+（`combo_piece_<source>_<q>.json` 那 76 份旧的 3D 包装原样保留，未被引用，不影响。）
+---
 ## 1.2.0.99 — 撤销 1.2.0.97 / 1.2.0.98，源码回到 1.2.0.96
 
 作者 2026-11-01：「我叫你修位置偏移，为什么现在球的模型和贴图系统彻底坏了？给我改回来！」

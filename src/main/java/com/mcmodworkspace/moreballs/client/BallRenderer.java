@@ -120,7 +120,6 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             //
             //   所以这里补一次 −0.5：几何回到球心为原点的坐标系，与球的碰撞箱、
             //   与整球 `ball3d_<key>` 的坐标完全一致。
-            poseStack.translate(-0.5D, -0.5D, -0.5D);
             // 滚动姿态：四块几何一起转，拼出来的整球就像在滚
             this.rollVisual.applyRoll(comboState.rollOrientation, comboState.rollPivotY, poseStack);
             int comboLight = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
