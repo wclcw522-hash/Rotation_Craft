@@ -65,20 +65,26 @@ public final class Ball3DModels {
     /**
      * <b>象限模型</b> —— 组合球的 3D 组合渲染用（作者 2026-11-01）。
      *
-     * <h2>为什么要有它</h2>
-     * <p>组合球以前是「先把四张贴图在 CPU 上合成一张 2D，再贴到一个面上」，
-     * 看起来不像正常物品的颜色组合。作者要的是<b>先渲染各部分完整的切球建模，再组合</b>
-     * —— 也就是把球拆成四块真几何拼起来，从二维贴图升级成三维建模。</p>
+     * <h2>★ 它是「完整整球几何 + 只有 1/4 不透明的分片贴图」</h2>
+     * <p>直接复用资源里早就有的 {@code combo_piece_<source>_<q>.json} ——
+     * 那种 json 只有两个字段：</p>
+     * <pre>
+     * { "parent": "rotation_craft:item/ball3d_&lt;key&gt;",       // ← 完整整球几何
+     *   "textures": { "0": "...&lt;key&gt;_quarter_&lt;q&gt;" } }      // ← 只有该象限不透明
+     * </pre>
+     * <p>所以<b>四层几何完全相同、必然重合</b>，接缝与偏移在数学上不可能出现，
+     * 每层只是各自把「自己那 1/4」画出来。这是 1.2.0.48 就定下的正解。</p>
      *
-     * <h2>怎么来的</h2>
-     * <p>把 {@code ball3d_<key>.json} 那 30 个 cuboid 按 <b>x=0 / y=4</b> 切成四个象限
-     * （{@code q1} 左上 / {@code q2} 右上 / {@code q3} 左下 / {@code q4} 右下），
-     * 跨越切面的 cuboid 直接裁开，<b>贴图仍引用原球贴图</b>（不重新画）。
-     * 于是每个象限是「球的一个真角」，四个拼回去就是整颗球。</p>
-     *
-     * <p>作者明确接受这个代价：「会让有一边只能看到比较长的切球侧面，我要的就是这样」。</p>
+     * <h2>⚠️ 不要再自己切几何</h2>
+     * <p>1.2.0.94 我按 x=0 / y=4 把球模型切成四份残缺子模型（68 份
+     * {@code ball3d_*_q*}），结果：切面会露出「较长的切球侧面」、而且作为物品模型
+     * 还要额外补偿 {@code ItemTransform} 的居中，手持与掉落物位置双双偏移。
+     * <b>那条路是错的</b>，那 68 份文件已删除。</p>
      */
     private static final Map<String, StandaloneModelKey<BlockStateModelPart>> QUADRANT_MODELS = new HashMap<>();
+
+    /** 组合球能出现的来源个数（{@code combo_piece_<source>_<q>} 覆盖 0..SIZE-1） */
+    public static final int QUADRANT_SOURCE_COUNT = 19;
 
     private static final Map<String, StandaloneModelKey<BlockStateModelPart>> MODELS = new HashMap<>();
     private static final Map<String, Identifier> TEXTURES = new HashMap<>();
@@ -91,11 +97,13 @@ public final class Ball3DModels {
             // 引用 item 图集里的贴图会被直接拒收（日志：Rejecting block model ... outside of supported atlas）。
             TEXTURES.put(k, Identifier.fromNamespaceAndPath("rotation_craft", "block/ball3d/" + k));
         }
-        // 象限模型：ball3d_<key>_q<1..4>，几何由脚本从整球裁出来
-        for (String k : KEYS) {
+        // 象限模型：直接复用资源里已有的 combo_piece_<source>_<q>（完整整球几何 + 1/4 分片贴图）
+        for (int src = 0; src < QUADRANT_SOURCE_COUNT; src++) {
             for (int q = 1; q <= 4; q++) {
-                String qk = k + "_q" + q;
-                QUADRANT_MODELS.put(qk, new StandaloneModelKey<>(() -> "rotation_craft:ball3d_" + qk));
+                String qk = src + "_" + q;
+                int srcF = src; int qF = q;
+                QUADRANT_MODELS.put(qk, new StandaloneModelKey<>(
+                        () -> "rotation_craft:item/combo_piece_" + srcF + "_" + qF));
             }
         }
     }
@@ -118,12 +126,12 @@ public final class Ball3DModels {
             event.register(MODELS.get(k), SimpleUnbakedStandaloneModel.simpleModelWrapper(
                     Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + k)));
         }
-        // 象限模型（组合球用）：ball3d_<key>_q<1..4>
-        for (String k : KEYS) {
+        // 象限模型（组合球用）：combo_piece_<source>_<1..4>
+        for (int src = 0; src < QUADRANT_SOURCE_COUNT; src++) {
             for (int q = 1; q <= 4; q++) {
-                String qk = k + "_q" + q;
+                String qk = src + "_" + q;
                 event.register(QUADRANT_MODELS.get(qk), SimpleUnbakedStandaloneModel.simpleModelWrapper(
-                        Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + qk)));
+                        Identifier.fromNamespaceAndPath("rotation_craft", "item/combo_piece_" + qk)));
             }
         }
     }
@@ -131,15 +139,15 @@ public final class Ball3DModels {
     /**
      * 取某个象限的烘焙模型（组合球的 3D 组合渲染用）。
      *
-     * @param key 材质 key（{@link #KEYS} 里的那 17 个）
-     * @param q   象限 1..4（1 左上 / 2 右上 / 3 左下 / 4 右下）
+     * @param source 来源球在 {@code BallFragments.sources()} 里的下标（0..18）
+     * @param q      象限 1..4（1 左上 / 2 右上 / 3 左下 / 4 右下）
      * @return 模型；不存在或还没烘焙好时返回 {@code null}
      */
-    public static BlockStateModelPart quadrantPart(String key, int q) {
-        if (q < 1 || q > 4) {
+    public static BlockStateModelPart quadrantPart(int source, int q) {
+        if (q < 1 || q > 4 || source < 0 || source >= QUADRANT_SOURCE_COUNT) {
             return null;
         }
-        StandaloneModelKey<BlockStateModelPart> k = QUADRANT_MODELS.get(key + "_q" + q);
+        StandaloneModelKey<BlockStateModelPart> k = QUADRANT_MODELS.get(source + "_" + q);
         if (k == null) {
             return null;
         }

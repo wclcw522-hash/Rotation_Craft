@@ -64,7 +64,7 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             //  组合球没有单一材质，以前是「四张 2D 贴图先合成一张再贴一个面」，
             //  颜色组合看着很怪。现在改成「四块真几何拼起来」，所以这里要把
             //  每个象限的来源球映射成 Ball3DModels 的材质 key，交给 submit 分别提交。
-            ballState.comboQuadrantKeys = comboQuadrantKeys(entity.getItem());
+            ballState.comboQuadrantSources = comboQuadrantSources(entity.getItem());
             // 视觉滚动：中心/半径取**模型几何**的尺寸，不是碰撞箱。
             //
             // 作者 2026-10-29 重绘模型后，球直径是 0.5 格（8 单位），
@@ -105,7 +105,7 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         //
         // ⚠️ 必须放在 `part == null` 那条 2D 兜底之前 —— 组合球的 ball3dKey 本来就是 null
         //    （`combo_ball` 去掉 `_ball` 得到 `combo`，不在 KEYS 里），否则会掉进 2D。
-        if (state instanceof BallRenderState comboState && comboState.comboQuadrantKeys != null) {
+        if (state instanceof BallRenderState comboState && comboState.comboQuadrantSources != null) {
             poseStack.pushPose();
             // 水纹先画（不受滚动影响，见 submitSurge 的说明）
             this.submitSurge(state, poseStack, collector, LIGHT_FULL);
@@ -120,16 +120,15 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
             //
             //   所以这里补一次 −0.5：几何回到球心为原点的坐标系，与球的碰撞箱、
             //   与整球 `ball3d_<key>` 的坐标完全一致。
-            poseStack.translate(-0.5D, -0.5D, -0.5D);
             // 滚动姿态：四块几何一起转，拼出来的整球就像在滚
             this.rollVisual.applyRoll(comboState.rollOrientation, comboState.rollPivotY, poseStack);
             int comboLight = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
             for (int q = 1; q <= 4; q++) {
-                String qKey = comboState.comboQuadrantKeys[q - 1];
-                if (qKey == null) {
+                int qSrc = comboState.comboQuadrantSources[q - 1];
+                if (qSrc < 0) {
                     continue;                       // 该象限是空的（二合一球的下半）
                 }
-                BlockStateModelPart quadrant = Ball3DModels.quadrantPart(qKey, q);
+                BlockStateModelPart quadrant = Ball3DModels.quadrantPart(qSrc, q);
                 if (quadrant == null) {
                     continue;                       // 模型还没烘焙好，跳过这一块
                 }
@@ -226,28 +225,28 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
      *
      * <p>不是组合球、或者四个象限都读不出材质时返回 {@code null}（走普通球那条路）。</p>
      */
-    private static String[] comboQuadrantKeys(net.minecraft.world.item.ItemStack stack) {
+    /**
+     * 组合球的四象限**来源下标**（下标 0..3 = 象限 1..4；-1 = 该象限空）。
+     *
+     * <p>不是组合球、或四个象限都读不出来时返回 {@code null}（走普通球那条路）。</p>
+     */
+    private static int[] comboQuadrantSources(net.minecraft.world.item.ItemStack stack) {
         if (stack.isEmpty()
                 || stack.getItem() != com.mcmodworkspace.moreballs.ModItems.COMBO_BALL.get()) {
             return null;
         }
-        java.util.List<net.minecraft.world.item.Item> sources =
-                com.mcmodworkspace.moreballs.BallFragments.sources();
-        String[] keys = new String[4];
+        int[] srcs = new int[] { -1, -1, -1, -1 };
         boolean any = false;
         for (int q = 0; q < 4; q++) {
             Integer src = stack.get(com.mcmodworkspace.moreballs.ModComponents.COMBO_SLOTS.get(q).get());
-            if (src == null || src < 0 || src >= sources.size()) {
+            if (src == null || src < 0
+                    || src >= Ball3DModels.QUADRANT_SOURCE_COUNT) {
                 continue;
             }
-            // 用「那颗来源球的物品栈」问 keyOf，顺序与 Ball3DModels.KEYS 天然对齐
-            String k = Ball3DModels.keyOf(new net.minecraft.world.item.ItemStack(sources.get(src)));
-            if (k != null) {
-                keys[q] = k;
-                any = true;
-            }
+            srcs[q] = src;
+            any = true;
         }
-        return any ? keys : null;
+        return any ? srcs : null;
     }
 
     /** 【潮涌】的环绕水纹 —— 球在水里时套在外面那一圈（几何与纹理都来自原版激流） */
