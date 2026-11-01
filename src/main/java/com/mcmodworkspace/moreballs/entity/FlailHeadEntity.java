@@ -146,6 +146,17 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double SLACK_TAKE_UP_SPEED = 4.0D;
 
     /**
+     * 手动回收时叠加到收线速度上的倍率（作者 2026-11-01：「回收动作只会叠加【忠诚】锤头的回收速度」）。
+     *
+     * <p>自动回收（【忠诚】/【空气动力球】）自己慢慢收；玩家按住右键时**不打断它**，
+     * 只是在原有速度上再叠一层，收得更快。</p>
+     */
+    private static final double MANUAL_RECOVER_BOOST = 2.5D;
+
+    /** 玩家此刻是否按着右键在手动收线（由 use() 置位、松手/finishReturn 清除）。 */
+    private boolean manualRetrieving;
+
+    /**
      * <b>当前绳长上限</b>（格）。回收就是把这条上限一点点收紧（作者 2026-10-31）。
      *
      * <p>锤头始终被约束在「以手部锚点为球心、半径 = 这个值」的球面上。</p>
@@ -270,6 +281,15 @@ public class FlailHeadEntity extends BallProjectile {
 
     public boolean isRetrieving() {
         return this.getEntityData().get(RETRIEVING);
+    }
+
+    /** 手动回收标志：按住右键置 true，松手或回收结束时清 false。 */
+    public void setManualRetrieving(boolean value) {
+        this.manualRetrieving = value;
+    }
+
+    public boolean isManualRetrieving() {
+        return this.manualRetrieving;
     }
 
     /** 线另一端坐标（渲染拴绳用） */
@@ -1129,6 +1149,10 @@ public class FlailHeadEntity extends BallProjectile {
         //
         // 回收过程不扣耐久（扣耐久只在「飞行时撞到线长上限」那一条）。
         double basePerTick = FlailItem.recoverSpeed(this.profile()) / TICKS_PER_SECOND;
+        // 手动按住右键 ⇒ 在自动回收的速度上再叠一层（作者 2026-11-01：只叠加，不打断）
+        if (this.manualRetrieving) {
+            basePerTick *= MANUAL_RECOVER_BOOST;
+        }
 
         // ===== 两段式收线（作者 2026-10-31 进阶思路）=====
         //

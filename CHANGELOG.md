@@ -1,3 +1,39 @@
+## 1.2.0.80 — 手动回收叠加加速、潮汐流星锤补上水下特效
+
+### ① 手动回收不打断自动回收，只叠加速度
+
+`beginReturning()` 本来就有 `stage == RETURNING` 的提前返回，所以【忠诚】的自动回收
+不会被手动按下打断。缺的是「叠加加速」这一半。
+
+新增：
+
+```java
+private static final double MANUAL_RECOVER_BOOST = 2.5D;
+private boolean manualRetrieving;
+```
+
+- `FlailItem.use()` 的回收分支里 `head.setManualRetrieving(true)`
+- `releaseUsing()` 里清 false
+- `tickReturning()` 里 `basePerTick *= MANUAL_RECOVER_BOOST`
+
+于是自动回收按自己的速度慢慢收；玩家按住右键时在**同一个回收**上加速，
+不会重新开始、也不会重置绳长。
+
+### ② 潮汐流星锤水下特效丢失
+
+`【潮涌】` 的那圈激流水纹画在 `BallRenderer` 里，只对球实体生效。锤头用的是
+独立的 `FlailHeadRenderer`，从来没接过这段。
+
+**修**（三处）：
+
+1. `TidalSurgeModel` 的泛型从 `EntityModel<BallRenderState>` 放宽到
+   `EntityModel<EntityRenderState>` —— 球的调用完全兼容，锤头也能复用同一个模型；
+2. `FlailHeadRenderState` 加 `tidalSurge` / `surgeYaw` / `surgePitch`；
+3. `FlailHeadRenderer` 里懒加载同一个模型，`extractRenderState` 读
+   `entity.isTidalSurge()` 与速度方向，`submit` 里在画绳之前叠加环绕（朝向、光照、纹理
+   与球那边完全一致）。
+
+---
 ## 1.2.0.79 — 带【忠诚】的流星锤一扔出去就开始回收
 
 ### 原因

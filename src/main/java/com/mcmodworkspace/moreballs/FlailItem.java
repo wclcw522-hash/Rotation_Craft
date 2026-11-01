@@ -516,6 +516,7 @@ public class FlailItem extends Item {
                     head.beginReturning(player);    // 首次按住 ⇒ 进入回收并扣 1 耐久
                 }
                 head.setRetrieving(true);           // 按住才拉
+                head.setManualRetrieving(true);    // 手动叠加加速（不打断自动回收）
                 markRetrieving(stack, true);        // 动画变 NONE，不做蓄力动作
             }
             player.startUsingItem(hand);            // 借用「使用中」状态来检测松开
@@ -655,6 +656,8 @@ public class FlailItem extends Item {
             return false;
         }
         if (head.stage() != com.mcmodworkspace.moreballs.entity.FlailHeadEntity.Stage.SPIN) {
+        head.setManualRetrieving(false);
+
             head.setRetrieving(false);       // 松开 ⇒ 停止回收
             markRetrieving(stack, false);    // 动画恢复 BOW（否则永远是 NONE）
             return true;

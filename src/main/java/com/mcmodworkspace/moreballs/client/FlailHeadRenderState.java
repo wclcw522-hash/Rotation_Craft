@@ -26,6 +26,15 @@ public class FlailHeadRenderState extends ThrownItemRenderState {
     /** 是否该画线（掷出者不在了就不画） */
     public boolean hasLine;
 
+    /** 【潮涌】是否激活 —— 锤头在水里时由服务端的同步位置位，决定要不要画那圈环绕水纹 */
+    public boolean tidalSurge;
+
+    /** 【潮涌】环绕要对齐的**速度方向** —— 偏航角（度） */
+    public float surgeYaw;
+
+    /** 【潮涌】环绕要对齐的**速度方向** —— 俯仰角（度） */
+    public float surgePitch;
+
     /** 线另一端（掷出者主手）相对锤头的偏移 */
     public float anchorX;
     public float anchorY;

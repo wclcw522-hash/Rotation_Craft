@@ -18,7 +18,7 @@ import net.minecraft.util.Mth;
  * 而球的渲染管线给它的是 {@link BallRenderState}。所以这里只把「壳」换成球的，
  * 几何与转速一个字不改。</p>
  */
-public class TidalSurgeModel extends EntityModel<BallRenderState> {
+public class TidalSurgeModel extends EntityModel<net.minecraft.client.renderer.entity.state.EntityRenderState> {
 
     /** 原版激流的环绕纹理（玩家身边那圈水纹用的就是它） */
     public static final Identifier TEXTURE =
@@ -35,7 +35,7 @@ public class TidalSurgeModel extends EntityModel<BallRenderState> {
     }
 
     @Override
-    public void setupAnim(BallRenderState state) {
+    public void setupAnim(net.minecraft.client.renderer.entity.state.EntityRenderState state) {
         super.setupAnim(state);
         for (int i = 0; i < this.boxes.length; i++) {
             float angle = state.ageInTicks * -(45 + (i + 1) * 5);

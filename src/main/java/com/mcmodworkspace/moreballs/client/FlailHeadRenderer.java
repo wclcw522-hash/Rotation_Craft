@@ -38,6 +38,18 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
     /** 光照兜底：`state.lightCoords` 为 0 时用全亮，避免整颗锤头全黑 */
     private static final int LIGHT_FULL = 0x00F000F0;
 
+    /** 【潮涌】的环绕模型 —— 和球共用同一个（作者 2026-11-01：「潮汐流星锤水下特效丢失」） */
+    private TidalSurgeModel surgeModel;
+
+    private TidalSurgeModel surgeModel() {
+        if (this.surgeModel == null) {
+            this.surgeModel = new TidalSurgeModel(
+                    net.minecraft.client.Minecraft.getInstance().getEntityModels()
+                            .bakeLayer(net.minecraft.client.model.geom.ModelLayers.PLAYER_SPIN_ATTACK));
+        }
+        return this.surgeModel;
+    }
+
     public FlailHeadRenderer(EntityRendererProvider.Context context) {
         // 缩放参数用 1.0：锤头的「球」大小由物品图标本身决定，
         // 与球的实体缩放（金球那套 entityScale）无关。
@@ -64,6 +76,17 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
 
         // 锤头的外观 = 内嵌那颗球的 3D 模型（2026-10-29）。
         flailState.ball3dKey = Ball3DModels.keyOf(entity.getItem());
+
+        // 【潮涌】：锤头在水里时也要画那圈激流水纹（作者 2026-11-01）
+        flailState.tidalSurge = entity.isTidalSurge();
+        Vec3 surgeVelocity = entity.getDeltaMovement();
+        if (surgeVelocity.lengthSqr() > 1.0E-6D) {
+            flailState.surgeYaw = (float) (net.minecraft.util.Mth.atan2(surgeVelocity.x, surgeVelocity.z)
+                    * 180.0D / Math.PI);
+            flailState.surgePitch = (float) (net.minecraft.util.Mth.atan2(surgeVelocity.y,
+                    Math.sqrt(surgeVelocity.x * surgeVelocity.x + surgeVelocity.z * surgeVelocity.z))
+                    * 180.0D / Math.PI);
+        }
 
         Entity owner = entity.getOwner();
         if (owner == null) {
@@ -128,6 +151,19 @@ public class FlailHeadRenderer extends ThrownItemRenderer<FlailHeadEntity> {
             poseStack.popPose();
         } else {
             super.submit(state, poseStack, collector, cameraState);
+        }
+
+        // 【潮涌】环绕水纹（与球同一套模型/纹理，朝向对齐速度方向）
+        if (state instanceof FlailHeadRenderState flailSurge && flailSurge.tidalSurge) {
+            TidalSurgeModel model = this.surgeModel();
+            model.setupAnim(state);
+            int surgeLight = state.lightCoords == 0 ? LIGHT_FULL : state.lightCoords;
+            poseStack.pushPose();
+            poseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(flailSurge.surgeYaw));
+            poseStack.mulPose(com.mojang.math.Axis.XP.rotationDegrees(90.0F - flailSurge.surgePitch));
+            collector.submitModel(model, state, poseStack, TidalSurgeModel.TEXTURE,
+                    surgeLight, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0, null);
+            poseStack.popPose();
         }
 
         if (!(state instanceof FlailHeadRenderState flailState) || !flailState.hasLine) {
