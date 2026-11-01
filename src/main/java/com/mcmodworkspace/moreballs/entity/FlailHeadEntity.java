@@ -53,7 +53,7 @@ public class FlailHeadEntity extends BallProjectile {
     public enum Stage {
         /** 手持蓄力，绕掷出者做圆周运动 */
         SPIN,
-        /** 已脱手，按球的物理飞行 */
+    /** 已脱手，按自由飞行的弹道运动 */
         FLYING,
         /** 被回收中，朝掷出者飞回 */
         RETURNING
@@ -137,7 +137,7 @@ public class FlailHeadEntity extends BallProjectile {
     /**
      * 回收阶段的手动重力（格/tick）。
      *
-     * <p>RETURNING 不跑球的物理（否则 move() 会和 setPos 对着拉），
+     * <p>RETURNING 若跑父类 tick（会自己改位置），就会和 setPos 对着拉，
      * 所以重力要自己加 —— 不加的话锤头会悬在半空。</p>
      */
     private static final double RETURN_GRAVITY_PER_TICK = 0.08D;
@@ -448,12 +448,12 @@ public class FlailHeadEntity extends BallProjectile {
                 // 重力也照常生效，两个问题同时消失。
                 this.noPhysics = false;      // 恢复方块碰撞（防下沉）
                 this.setNoGravity(false);    // 恢复重力（防悬空）
-                super.tick();                // 球物理：重力 + move() 碰撞解算
+                super.tick();                // 父类 tick：施加重力 + move() 做碰撞解算
                 tickReturning();
             }
             case FLYING -> {
                 this.noPhysics = false;
-                super.tick();      // 球的完整 tick（含 BallRoll 的滚动阻力）
+                super.tick();      // 父类 tick（含 BallPhysicsCore 那层的词条与静止判定）
                 tickFlying();
 
                 // ===== 掷出者走近 ⇒ 自动开始回收（作者 2026-10-30 指定）=====
@@ -585,7 +585,7 @@ public class FlailHeadEntity extends BallProjectile {
         }
         return pos;
     }
-    /** 松手：以球的物理飞出（作者：与球逻辑相同的运动方式） */
+    /** 松手：按弹道飞出（作者：与普通投掷物一致的运动方式） */
     /**
      * 松手：<b>无论锤头此刻在圆周的哪个位置，先瞬移到「最高点」，再按准心方向飞出</b>
      * （作者 2026-10-19 指定）。
@@ -619,7 +619,7 @@ public class FlailHeadEntity extends BallProjectile {
         }
         this.setPos(top.x, top.y, top.z);
 
-        // ② 按球的物理飞出：物理速度 × 蓄力倍率
+        // ② 按弹道飞出：物理速度 × 蓄力倍率
         BallBehavior.BallProfile profile = this.profile();
         float speed = (float) (profile.physicalVelocity() * Math.max(0.1F, velocityMultiplier));
         this.launchSpeed = speed;
@@ -681,8 +681,18 @@ public class FlailHeadEntity extends BallProjectile {
      */
     private Vec3 launchOrigin(net.minecraft.world.entity.LivingEntity shooter) {
         Vec3 look = shooter.getLookAngle();
+        // ⚠️ **必须在掷出者碰撞箱之外**（作者 2026-11-01：「首次掷出后还是会下坠」）。
+        //
+        //   父类的 tick 是这样移动的（ThrowableProjectile.tick）：
+        //     HitResult r = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        //     setPos(r.getType() != MISS ? r.getLocation() : position().add(getDeltaMovement()));
+        //   它会把位置**直接设成命中点**，也不看 noPhysics。
+        //
+        //   出手点原来只往前 0.35 格 —— 玩家碰撞箱半宽就有 0.3，射线第一个 tick 立刻命中自己，
+        //   位置被钉住、速度被吃掉，看起来就是「刚扔出去就往下掉」。
+        // 0.8 格就能稳定脱出碰撞箱，同时还在视线正前方，不会改变手感。
         return shooter.getEyePosition()
-                .add(look.scale(0.35D))
+                .add(look.scale(0.8D))
                 .add(0.0D, -0.1D, 0.0D);
     }
 
@@ -826,7 +836,7 @@ public class FlailHeadEntity extends BallProjectile {
         //
         //     if (settled && this.isNoGravity()) { SETTLED = false; return; }
         //
-        // 无重力时它会**拒绝进入静止态**，于是球的物理继续每 tick 施加原版重力，
+        // 无重力时它会**拒绝进入静止态**，于是父类 tick 里的重力继续每 tick 往下压，
         // 把锤头一路往方块里压 —— 1.2.0.61/62 加的 setNoGravity(true) 就是这么把
         // 「偶尔下沉」变成「必定下沉」的。
         //
@@ -1053,7 +1063,7 @@ public class FlailHeadEntity extends BallProjectile {
         if (!this.isRetrieving()) {
             // 松开右键：原地落下 —— **但不能穿进方块**（作者 2026-10-31：「下沉的问题又出现了」）。
             //
-            //   RETURNING 阶段不跑球的物理（1.2.0.68 起），也就没有 move() 的方块碰撞。
+        //   RETURNING 阶段不跑父类 tick（1.2.0.68 起），也就没有 move() 的方块碰撞。
             //   原来这里只改速度、不判碰撞，锤头会一路穿进地面。
             // ⚠️ **松手要释放绳长**（作者 2026-10-31：「暂停回收后远离锤头，再次回收时锤头瞬移」）。
             //
@@ -1468,7 +1478,7 @@ public class FlailHeadEntity extends BallProjectile {
         if (this.traitsDisabled()) {
             return;   // 首次回收后不再造成伤害
         }
-        // 交给球那套完整逻辑（伤害 + 全部词条）
+        // 交给 BallPhysicsCore 那层的完整命中逻辑（伤害 + 全部词条）
         super.onHitEntity(hitResult);
 
         // 锤头专属：额外击退（球没有这个参数）

@@ -1,3 +1,46 @@
+## 1.2.0.74 — 首次掷出下坠的真正原因：出手点在掷出者碰撞箱内
+
+### 上一版改错了地方
+
+1.2.0.73 我在 `launch()` 里恢复了 `noPhysics = false`，**这一改动毫无作用**。
+翻 `ThrowableProjectile.tick()` 的源码：
+
+```java
+HitResult result = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+Vec3 newPosition;
+if (result.getType() != MISS && !onProjectileImpact(this, result)) {
+    newPosition = result.getLocation();          // ← 位置直接设成命中点
+} else {
+    newPosition = this.position().add(this.getDeltaMovement());
+}
+this.setPos(newPosition);
+```
+
+它**根本不看 `noPhysics`**，而且命中就把位置钉在命中点上。
+`noPhysics` 只影响 `Entity.move()` 的方块碰撞，对这段射线移动没有作用。
+
+### 真正的原因
+
+出手点原来只往前 **0.35 格**：
+
+```java
+return shooter.getEyePosition().add(look.scale(0.35D)).add(0, -0.1D, 0);
+```
+
+玩家碰撞箱半宽就有 **0.3**。射线从眼睛发出、沿视线走 0.35 格，第一个 tick 立刻命中掷出者自己，
+于是 `newPosition = result.getLocation()` 把锤头钉在原地，速度被吃掉 —— 看起来就是「刚扔出去就往下掉」。
+
+### 修
+
+```java
+return shooter.getEyePosition().add(look.scale(0.8D)).add(0, -0.1D, 0);
+```
+
+0.8 格稳定脱出碰撞箱，仍在视线正前方，手感不变。
+
+`launch()` 里那句 `noPhysics = false` 保留（无害，且能让 `move()` 的碰撞从第一刻就生效）。
+
+---
 ## 1.2.0.73 — 首次掷出下坠、松手后绳长未释放
 
 ### ① 首次掷出后锤头往下掉
