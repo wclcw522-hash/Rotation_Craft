@@ -1,3 +1,60 @@
+## 1.2.0.90 — 锤头的「回归」与「回收」彻底分开（这才是回归慢的根因）
+
+作者 2026-11-01：「回收和回归不是一个概念」「回归是效果或附魔导致的自动飞回，
+这个根本就没修，还是非常非常慢。与此同时球的回归是正常的」。
+
+### 两个概念
+
+| | 触发 | 走哪条路 |
+|---|---|---|
+| **回归** | 【忠诚】/【魔法】回收 /【空气动力球】附魔 | `homingToOwner0()` —— 和球**完全同一套**（加速、穿墙、到达判定） |
+| **回收** | 掷出者按右键拽线 | `beginReturning()` + `tickReturning()` —— 线的收线速度 |
+
+### 两处堵塞，回归一直没机会跑
+
+**① `homingToOwner0()` 被整个覆写成 `return false`**（1.2.0.51，提交 `9e71c15`）
+
+那一版为修「回响流星锤撞掷出者时地上掉一个回响球」，直接把锤头的回归关掉了。
+根因其实不是「有回归」，而是 `deliverToOwner` 的收尾是 `spawnAtLocation`（把内嵌球丢成掉落物）。
+
+修法：**保留回归、只换到达动作**。把 `deliverToOwner` 放开成 `protected`，
+锤头覆写它、到家时调 `finishReturn(owner)`（归还手上那把流星锤）：
+
+```java
+@Override
+protected void deliverToOwner(ServerLevel level, LivingEntity owner) {
+    this.finishReturn(owner);
+}
+```
+
+飞行动作完整继承球的回归，到家那一刻换成收线归位 —— 两条路不再打架，也不掉球。
+
+**② `tickFlying` 把这三个词条接到了「回收」**
+
+```java
+// 改前（错）：一落定就被拽进收线
+if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
+        && settleReady && this.autoRetrieveWanted()) {
+    this.beginReturning(autoOwner);
+    ...
+}
+
+// 改后：只置位，让它走回归
+if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
+    this.setReturnToOwner(true);
+}
+```
+
+`autoRetrieveWanted()` 判的正是回归的三个触发条件（`loyalty()` / `TRAIT_MAGIC_RECOVER` /
+`AERODYNAMIC_BALL` 附魔）—— 它们本来就该走回归，却全被导到了回收上。
+因此「回归非常非常慢」= 实际走的是线的收线速度。
+
+### 顺带
+
+`tickReturning()` 已按 `1.2.0.23` 大改动之前的原始实现恢复（1.2.0.89）——
+每刻 `setPos` 直接推进一整步，不再靠 `ropeLimit` 收紧 + 投影（那会隔刻才动一次）。
+
+---
 ## 1.2.0.89 — 锤头回收「一动一停、速度减半」的真正根因
 
 作者定位：「重点在流星锤这边」「回复球还是保留收线的功能」「在空中也会重置速度」。

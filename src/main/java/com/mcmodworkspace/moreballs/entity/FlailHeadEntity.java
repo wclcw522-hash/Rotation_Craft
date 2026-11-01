@@ -746,31 +746,27 @@ public class FlailHeadEntity extends BallProjectile {
         return super.effectiveSpeed();
     }
     /**
-     * <b>锤头永远不「飞回主人」</b>（作者 2026-10-30：「回响流星锤会在与掷出者碰撞的时候
-     * 在掷出者身上掉落一个回响球」）。
+     * <b>锤头到达主人时的动作 = 收线归位，而不是「把球交出去」</b>
+     * （作者 2026-11-01：「回归和回收不是一个概念」）。
      *
-     * <h2>根因</h2>
-     * <p>回响球带【忠诚】，而 {@code homingToOwner0()} 里有一段交付逻辑：</p>
+     * <h2>★ 锤头必须有「回归」</h2>
+     * <p>「回归」= 词条/附魔触发的<b>自动飞回</b>（{@code homingToOwner0}，和球同一套）——
+     * 【忠诚】【空气动力球】靠它。原先前任为了修「回响流星锤撞到掷出者时在地上掉一个
+     * 回响球」（1.2.0.51），把 {@code homingToOwner0()} 整个覆写成 {@code return false}，
+     * <b>等于把锤头的回归彻底关掉了</b> —— 只剩「线拽着收回来」那条路，
+     * 于是回归变成走线的速度，又慢又顿。</p>
      *
-     * <pre>
-     * if (toOwner.length() &lt;= RETURN_ARRIVE_DISTANCE) {
-     *     this.deliverToOwner(serverLevel, living);   // ← 把球交回玩家 / 掉在脚边
-     *     return true;
-     * }
-     * </pre>
-     *
-     * <p>锤头继承了球的整套词条，于是它一飞到掷出者身边就被判成「回归到达」，
-     * 把内嵌那颗回响球交了出去 —— 表现就是「碰到掷出者时在身上掉一个回响球」。</p>
-     *
-     * <h2>为什么整个关掉</h2>
-     * <p>锤头有自己的回收系统（{@code RETURNING} 状态 + {@code finishReturn}），
-     * 走的是「线拉回手里」而不是「球自己飞回来」。两条路径并存只会打架：
-     * 一条要交付、一条要收线，谁先到谁说了算。所以这里直接返回 false，
-     * 让锤头的生命周期完全由自己的三态机掌控。</p>
+     * <h2>正确的做法：保留回归，只换到达动作</h2>
+     * <p>掉回响球的根因从来不是「有回归」，而是 {@code deliverToOwner} 的收尾是
+     * {@code spawnAtLocation}（把内嵌球丢成掉落物）。锤头到家时该做的是
+     * {@link #finishReturn}（归还手上那把流星锤），所以这里只覆写这一个方法：
+     * 回归的<i>飞行动作</i>完整继承（速度、加速、穿墙、到达判定都是球那一套），
+     * 到家那一刻换成收线归位。两条路不再打架。</p>
      */
     @Override
-    protected boolean homingToOwner0() {
-        return false;
+    protected void deliverToOwner(net.minecraft.server.level.ServerLevel level,
+                                  net.minecraft.world.entity.LivingEntity owner) {
+        this.finishReturn(owner);
     }
     /** 这个位置放得下锤头吗？（碰撞箱与方块不相交） */
     private boolean isFreeAt(Vec3 pos) {
@@ -940,28 +936,24 @@ public class FlailHeadEntity extends BallProjectile {
         //    于是 FlailCastHandler 的收尾逻辑（它只看物品组件）对自动回收完全不生效：
         //    锤头飞回来了、实体也 discard 了，物品却停在「扔出中」的形态，
         //    非得再按一次右键（走一遍手动路径）才把状态补齐。
-        // ===== 自动回收类词条 ⇒ 自动收线（作者 2026-11-01：「带【忠诚】的流星锤一扔出去就开始回收」）=====
+        // ===== 自动返回类词条 ⇒ 交给「回归」，**不是**收线回收 =====
         //
-        //   【忠诚】在球身上的语义是「**落定之后**自己飞回主人」—— 飞行途中它老老实实按弹道走。
-        //   这里原来只判了「过了 10 刻冷却」就收线，于是带【忠诚】的流星锤一扔出去、
-        //   冷却一到立刻被拽回来，根本飞不出去。
+        // ⚠️⚠️ 作者 2026-11-01：「回收和回归不是一个概念」。
         //
-        //   补上「已经落地或基本停下」这一条，语义就对齐了：飞完、停下、再收线。
-        boolean settleReady = this.onGround()
-                || this.getDeltaMovement().horizontalDistanceSqr() < 0.0025D;
-        if (this.stage() == Stage.FLYING && this.tickCount >= RECOVER_LOCK_TICKS
-                && settleReady
-                && this.autoRetrieveWanted()) {
-            if (this.getOwner() instanceof net.minecraft.world.entity.LivingEntity autoOwner) {
-                this.beginReturning(autoOwner);
-                this.setRetrieving(true);
-                if (autoOwner instanceof Player autoPlayer) {
-                    net.minecraft.world.item.ItemStack heldFlail = autoPlayer.getMainHandItem();
-                    if (FlailItem.isFlail(heldFlail)) {
-                        FlailItem.markRetrieving(heldFlail, true);
-                    }
-                }
-            }
+        //   · **回归** = 【忠诚】/【魔法】/【空气动力球】触发的**自己飞回主人** ——
+        //     走 {@code homingToOwner0()}，和球完全是同一套（加速、穿墙、到达判定），
+        //     速度快、连续。
+        //   · **回收** = 掷出者拽着绳子把锤头拉回来 —— 走 {@code beginReturning} +
+        //     {@code tickReturning}，那是「线的收线速度」，本来就慢。
+        //
+        //   这里原先写的是 `if (settleReady && autoRetrieveWanted()) beginReturning(...)`
+        //   —— 于是带这三个词条的锤头一落定就被拽进**回收**，回归永远轮不到，
+        //   表现就是「回归非常非常慢」（其实是走了收线）。
+        //
+        //   现在只把 `returnToOwner` 置位，让它走球那条回归；回归到家时由
+        //   {@link #deliverToOwner} 换成 {@link #finishReturn} 收线归位。
+        if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()) {
+            this.setReturnToOwner(true);
         }
 
         // ===== ③ 绳子的物理约束（作者 2026-10-29：「要有被绳子拽着的物理效果」）=====

@@ -4288,7 +4288,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     /**
      * 回到主人身边：先结算那一下伤害，再把球放进发射者的背包。
      */
-    private void deliverToOwner(ServerLevel level, LivingEntity owner) {
+    protected void deliverToOwner(ServerLevel level, LivingEntity owner) {
         // 【魔法】（青金石球）—— <b>回收成功</b>时对主人施加随机正面效果；
         // 另有 0.1% 概率改判成大奖（60 秒【不灭】+ 不死图腾的音效与粒子）。
         //
