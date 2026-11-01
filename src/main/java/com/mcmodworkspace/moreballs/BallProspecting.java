@@ -194,6 +194,14 @@ public final class BallProspecting {
      */
     private static final Map<BlockState, Boolean> HEAT_CACHE = new ConcurrentHashMap<>();
 
+    /**
+     * 「会被烤爆」的独立缓存（第三张表）。
+     *
+     * <p>⚠️ 与 {@link #HEAT_CACHE} 分开的理由见 {@code isBreakableOre} ——
+     * 两者是不同语义的判定，共用一张表会让金属储存块被判成可破坏。</p>
+     */
+    private static final Map<BlockState, Boolean> BREAK_CACHE = new ConcurrentHashMap<>();
+
     /** 一次矿物扫描的结果 —— 只统计与收集位置，磁吸目标另由 bestMagnetTarget 竞争得出 */
     public record ScanResult(int metalBlocks, List<BlockPos> orePositions) {
 
@@ -388,7 +396,17 @@ public final class BallProspecting {
         // 缓存 —— 这个方法在热路径上（每刻对热表里每格方块的邻居跑一遍），
         // 而 heatProduct 要查熔炼配方（RecipeManager 的多次哈希查找）。
         // 结论只跟方块类型有关、跟坐标无关，所以可以安全缓存。
-        return HEAT_CACHE.computeIfAbsent(state, s ->
+        //
+        // ⚠️⚠️ **必须用独立的缓存，不能复用 HEAT_CACHE**（作者 2026-11-01 通读时发现）。
+        //
+        //    「能吸热」（isHeatAbsorbing）与「会被烤爆」（本方法）是**两个不同语义**的判定：
+        //      能吸热 = 矿 || 储存块
+        //      会被烤爆 = !储存块 && 矿 && 有产物
+        //    共用一张表就会串味：铁块先被 isHeatAbsorbing 问到时缓存成 true，
+        //    之后本方法拿到那个 true 直接返回 ⇒ **金属储存块又被当成可破坏**，
+        //    攒够热量就被 destroyBlock 掉 —— 正是注释里记录过的「铁块被烤热后会被破坏」。
+        //    分开两张表之后两边互不干扰（与上面 METAL_CACHE / HEAT_CACHE 分开同一个道理）。
+        return BREAK_CACHE.computeIfAbsent(state, s ->
                 !isMetalStorageBlock(s)
                         && isMetalOre(level, s)
                         && !heatProduct(level, s).isEmpty());
@@ -717,5 +735,6 @@ public final class BallProspecting {
     public static void clearCache() {
         METAL_CACHE.clear();
         HEAT_CACHE.clear();
+        BREAK_CACHE.clear();
     }
 }

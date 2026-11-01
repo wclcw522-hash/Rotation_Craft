@@ -1,3 +1,43 @@
+## 1.2.0.86 — 金属储存块会被判定成可烤爆（缓存串用）
+
+### 问题
+
+`BallProspecting` 里两个**语义不同**的判定共用同一张缓存 `HEAT_CACHE`：
+
+```java
+// 能吸热 = 矿 || 储存块
+public static boolean isHeatAbsorbing(...) {
+    return HEAT_CACHE.computeIfAbsent(state, s ->
+            isMetalOre(level, s) || isMetalStorageBlock(s));
+}
+
+// 会被烤爆 = !储存块 && 矿 && 有产物
+public static boolean isBreakableOre(...) {
+    return HEAT_CACHE.computeIfAbsent(state, s ->
+            !isMetalStorageBlock(s) && isMetalOre(level, s) && !heatProduct(level, s).isEmpty());
+}
+```
+
+铁块 / 金块 / 下界合金块 / 铜的一整族先被 `isHeatAbsorbing` 问到时缓存成 `true`，
+之后 `isBreakableOre` 拿到那个 `true` 直接返回 —— **金属储存块被判定成可破坏**，
+攒够热量就被 `destroyBlock` 掉，掉出金属块本身。这正是文件注释里记录过的
+「铁块被烤热后会被破坏」那个 bug 又绕回来了。
+
+同一文件里 `METAL_CACHE` 与 `HEAT_CACHE` 分开的理由写得很清楚（递归更新 `ConcurrentHashMap`
+会抛 `IllegalStateException: Recursive update`），但第三张表漏了。
+
+### 修
+
+新增 `BREAK_CACHE`，`isBreakableOre` 改用它，`clearCache()` 一并清。
+
+```java
+private static final Map<BlockState, Boolean> BREAK_CACHE = new ConcurrentHashMap<>();
+...
+return BREAK_CACHE.computeIfAbsent(state, s ->
+        !isMetalStorageBlock(s) && isMetalOre(level, s) && !heatProduct(level, s).isEmpty());
+```
+
+---
 ## 1.2.0.85 — ModEntities 里锤头的注释与实际不符
 
 ### 问题
