@@ -746,6 +746,32 @@ public class FlailHeadEntity extends BallProjectile {
         return super.effectiveSpeed();
     }
     /**
+     * <b>锤头只在 FLYING 阶段允许「回归」</b>（作者 2026-11-01：
+     * 「会回归的球没法蓄力了，应该是蓄力阶段转圈的时候就被回收了」）。
+     *
+     * <h2>为什么需要这道闸</h2>
+     * <p>{@code homingToOwner0()} 是在 {@code ballTickPost()} 里被调的，而 SPIN /
+     * RETURNING 两段**也跑 {@code super.tick()} → {@code ballTickPost()}**。
+     * 上一版我把 {@code tickFlying} 里的自动回收改成「置 {@code returnToOwner} 就交给回归」，
+     * 但没限定阶段 —— 于是带【忠诚】/【空气动力球】的锤头<b>一进入蓄力（SPIN）就被判成该回家</b>，
+     * 转着圈就往主人身上扑，压根蓄不了力。</p>
+     *
+     * <p>三个阶段该不该回归：</p>
+     * <ul>
+     *   <li><b>SPIN</b> —— 不该。位置由公式算、正在蓄力，回家就是打断蓄力</li>
+     *   <li><b>FLYING</b> —— <b>该</b>。这才是「扔出去之后落定、自己飞回来」</li>
+     *   <li><b>RETURNING</b> —— 不该。那已经是线在拽了，两套并存会打架</li>
+     * </ul>
+     */
+    @Override
+    protected boolean homingToOwner0() {
+        if (this.stage() != Stage.FLYING) {
+            return false;
+        }
+        return super.homingToOwner0();
+    }
+
+    /**
      * <b>锤头到达主人时的动作 = 收线归位，而不是「把球交出去」</b>
      * （作者 2026-11-01：「回归和回收不是一个概念」）。
      *
@@ -1353,7 +1379,7 @@ public class FlailHeadEntity extends BallProjectile {
             return;
         }
         BallBehavior.BallProfile profile = this.profile();
-        int max = profile.toughness();
+        int max = com.mcmodworkspace.moreballs.FlailItem.flailMaxToughness(this.flailStack());
         if (max == BallBehavior.TOUGH_FOREVER || max <= BallBehavior.NOT_TOUGH) {
             return;   // 永久坚固 / 不坚固 ⇒ 没有耐久可扣
         }
@@ -1677,7 +1703,7 @@ public class FlailHeadEntity extends BallProjectile {
         // ③ 球的 consumeDurability 可能又动了实体字段 —— 以物品账本为准重置回去
         if (!this.isRemoved()) {
             Integer leftComp = this.flailStack().get(ModComponents.TOUGHNESS_LEFT.get());
-            int max = this.profile().toughness();
+            int max = com.mcmodworkspace.moreballs.FlailItem.flailMaxToughness(this.flailStack());
             this.setToughness(leftComp == null ? max : leftComp);
         }
     }

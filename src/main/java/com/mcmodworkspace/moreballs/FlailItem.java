@@ -399,8 +399,26 @@ public class FlailItem extends Item {
     private static final int BAR_COLOR_LOW = 0xFFFF3000;
     private static final int BAR_FULL_WIDTH = 13;
 
-    private static int flailMaxToughness(ItemStack stack) {
-        return profileOf(stack).toughness();
+    /**
+     * 这把流星锤的耐久上限。
+     *
+     * <p><b>「不坚固」的球（{@code toughness <= 0}）做成流星锤时给 1 点</b>
+     * （作者 2026-11-01：「那种不坚固的球做的流星锤耐久就设置成 1 点」）。</p>
+     *
+     * <p>为什么不是 0：{@code toughness == 0} 在球那边的语义是「一碰就碎」
+     * （{@code isTough()} 为 false ⇒ 撞什么都直接 {@code burst()}），
+     * 照搬到流星锤上就是「扔出去立刻碎」—— 那不是玩家想要的东西。
+     * 给它 1 点，等于「挨一下就没了」，既保留「不坚固」的手感，又至少能用一次。</p>
+     *
+     * <p>{@code TOUGH_FOREVER}（{@code -1}，永久坚固）原样返回 —— 它是哨兵值，
+     * 表示永不消耗，不能被 {@code Math.max(1, ...)} 抬成 1。</p>
+     */
+    public static int flailMaxToughness(ItemStack stack) {
+        int toughness = profileOf(stack).toughness();
+        if (toughness == BallBehavior.TOUGH_FOREVER) {
+            return toughness;          // 哨兵值原样透传
+        }
+        return Math.max(1, toughness); // 不坚固（<= 0）⇒ 1 点
     }
 
     private static int flailRemainingToughness(ItemStack stack, int max) {
@@ -620,7 +638,12 @@ public class FlailItem extends Item {
         //
         //   补上之后：铁球 `3 → 11`、绿宝石 `3 → 2`，再加上速度比，直觉就对了。
         head.setDamage(startProfile.damage());
-        head.setToughness(startProfile.toughness());
+        // ⚠️ 耐久灌的是**流星锤口径**的上限（不坚固的球 → 1 点），不是球的裸 toughness。
+        //
+        //   球的 `toughness == 0` 语义是「一碰就碎」（`isTough()` false ⇒ 撞什么都 burst），
+        //   直接灌进去 ⇒ 锤头刚碰到东西就碎。作者 2026-11-01 定的是「不坚固的球做的流星锤
+        //   耐久就设置成 1 点」—— 能挨一下。见 flailMaxToughness。
+        head.setToughness(flailMaxToughness(stack));
         head.setWeight(startProfile.weight());
         head.setBounce(startProfile.bounce());
         head.setPierceLevel((byte) startProfile.penetration());

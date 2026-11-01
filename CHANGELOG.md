@@ -1,3 +1,58 @@
+## 1.2.0.92 — 蓄力时被回归打断；不坚固的球做的流星锤耐久 1 点
+
+### ① 会回归的球没法蓄力了
+
+作者 2026-11-01：「会回归的球没法蓄力了，应该是蓄力阶段转圈的时候就被回收了」。
+
+`homingToOwner0()` 是在 `ballTickPost()` 里被调的，而 SPIN / RETURNING 两段**也跑
+`super.tick()` → `ballTickPost()`**。1.2.0.90 我把 `tickFlying` 里的自动回收改成
+「置 `returnToOwner` 就交给回归」，但**没限定阶段** —— 于是带【忠诚】/【空气动力球】的
+锤头一进入蓄力（SPIN）就被判成该回家，转着圈就往主人身上扑。
+
+修法：锤头覆写 `homingToOwner0()`，只允许 FLYING 阶段回归：
+
+```java
+@Override
+protected boolean homingToOwner0() {
+    if (this.stage() != Stage.FLYING) {
+        return false;
+    }
+    return super.homingToOwner0();
+}
+```
+
+三个阶段：SPIN（位置由公式算、正在蓄力）不回归；FLYING **该**回归；
+RETURNING（线已经在拽）不回归。
+
+### ② 不坚固的球做的流星锤，耐久设成 1 点
+
+作者 2026-11-01：「那种不坚固的球做的流星锤耐久就设置成 1 点」。
+
+球的 `toughness == 0` 语义是「一碰就碎」（`isTough()` false ⇒ 撞什么都 `burst()`），
+直接搬到流星锤上就是「扔出去立刻碎」。给它 1 点 = 「挨一下就没了」，
+既保留「不坚固」的手感，又至少能用一次。
+
+`FlailItem.flailMaxToughness()` 统一口径（已放开成 `public static`，锤头复用）：
+
+```java
+public static int flailMaxToughness(ItemStack stack) {
+    int toughness = profileOf(stack).toughness();
+    if (toughness == BallBehavior.TOUGH_FOREVER) {
+        return toughness;          // 哨兵值原样透传（永久坚固）
+    }
+    return Math.max(1, toughness); // 不坚固（<= 0）⇒ 1 点
+}
+```
+
+三处调用点一并改成这个口径：
+
+| 位置 | 原来 | 现在 |
+|---|---|---|
+| `FlailItem` 创建锤头 `head.setToughness(...)` | 裸 `profile.toughness()` | `flailMaxToughness(stack)` |
+| `FlailHeadEntity.consumeOneToughness()` | 裸 `profile.toughness()`（0 ⇒ 不扣） | `flailMaxToughness(...)`（1 ⇒ 扣一次就碎） |
+| `FlailHeadEntity.onHit()` 重置实体字段 | 裸 `profile().toughness()`（0 ⇒ 一碰就碎） | `flailMaxToughness(...)` |
+
+---
 ## 1.2.0.91 — 回归速度不再受重量影响（回响流星锤回归慢的根因）
 
 作者 2026-11-01：「回归速度不应该被重量影响吧」。
