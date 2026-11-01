@@ -1,3 +1,49 @@
+## 1.2.0.75 — 砸地后嵌进方块：命中点落在方块表面
+
+### 现场（作者 2026-11-01 的补充说明）
+
+> 我说的是扔出去之后砸在地上会沉到方块里。
+> 后续回收中断的下坠都正常落地，只有第一次掷出后会嵌入地面然后以一个缓慢的速度下沉。
+
+「只有第一次」和「缓慢下沉」这两条把范围锁死了。
+
+### 原因
+
+父类的移动是射线式的：
+
+```java
+HitResult r = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+this.setPos(r.getType() != MISS ? r.getLocation() : position().add(getDeltaMovement()));
+```
+
+命中点就在**方块表面**上，而它把锤头的**中心**设到那一点。碰撞箱 0.5 格，
+于是一半埋在方块里。
+
+`tick()` 末尾那句 `move(SELF, Vec3.ZERO)` 救不回来 —— `Entity.move()` 只解算
+「这一 tick 的位移」撞到的东西，位移是零就什么都检测不到，**已经嵌进去的部分它推不出来**。
+于是每 tick 被重力往下压一点，表现就是「缓慢下沉」。
+
+回收阶段之所以正常：`applyRopeConstraint()` 会先 `setPos` 把锤头挪到球面上，位置动过，
+再解算就有效。
+
+### 修
+
+`onHit` 里对方块命中做一次沿法线的弹出：
+
+```java
+if (!this.level().isClientSide() && hitResult instanceof BlockHitResult blockHit) {
+    Direction face = blockHit.getDirection();
+    Vec3 nudge = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ())
+            .scale(this.getBbHeight() * 0.5D + 0.02D);
+    this.setPos(this.position().add(nudge));
+    this.setDeltaMovement(Vec3.ZERO);
+}
+```
+
+推出「半个碰撞箱 + 0.02 余量」，并把速度清零 —— 速度归零后下 tick 的射线长度为零，
+不会再把它钉回方块表面。
+
+---
 ## 1.2.0.74 — 首次掷出下坠的真正原因：出手点在掷出者碰撞箱内
 
 ### 上一版改错了地方

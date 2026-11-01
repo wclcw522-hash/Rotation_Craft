@@ -1572,6 +1572,51 @@ public class FlailHeadEntity extends BallProjectile {
 
     @Override
     protected void onHit(HitResult hitResult) {
+        // ===== 方块命中 ⇒ 沿法线弹出（作者 2026-11-01）=====
+        //
+        //   作者的原话：「只有第一次掷出后会嵌入地面然后以一个缓慢的速度下沉，
+        //   后续回收中断的下坠都正常落地」。
+        //
+        //   父类的移动是射线式的：
+        //     HitResult r = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        //     setPos(r.getType() != MISS ? r.getLocation() : ...);
+        //   命中点就在**方块表面**上，而它把锤头的**中心**设到那一点 ——
+        //   碰撞箱 0.5 格，于是一半埋在方块里。
+        //
+        //   为什么 tick() 末尾那句 move(SELF, ZERO) 救不回来：
+        //   Entity.move() 只解算「这一 tick 的位移」撞到的东西，位移是零就什么都检测不到，
+        //   已经嵌进去的部分它推不出来 —— 于是每 tick 被重力往下压一点，表现为缓慢下沉。
+        //   （回收阶段之所以正常，是因为 applyRopeConstraint 先 setPos 挪过位置，再解算就有效。）
+        //
+        //   这里沿命中面的法线把它推出「半个碰撞箱 + 余量」，并把速度清零：
+        //   速度归零后下 tick 的射线长度为零，不会再把它钉回方块表面。
+        if (!this.level().isClientSide() && hitResult instanceof net.minecraft.world.phys.BlockHitResult blockHit) {
+            net.minecraft.core.Direction face = blockHit.getDirection();
+            Vec3 nudge = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ())
+                    .scale(this.getBbHeight() * 0.5D + 0.02D);
+            this.setPos(this.position().add(nudge));
+            this.setDeltaMovement(Vec3.ZERO);
+        }
+
+        // ===== 方块命中 ⇒ 沿法线弹出（作者 2026-11-01：「扔出去之后砸在地上会沉到方块里」）=====
+        //
+        //   父类的移动方式是射线：
+        //     HitResult r = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+        //     setPos(r.getType() != MISS ? r.getLocation() : ...);
+        //   命中点就在**方块表面**上，而它是把锤头的**中心**设到那个点 ——
+        //   碰撞箱有 0.5 格，于是有一半埋在方块里，看上去就是「砸在地上沉进去」。
+        //   而且之后每 tick 都判定成卡在方块中，一直扣耐久。
+        //
+        //   这里沿命中面的法线把它推出去「半个碰撞箱 + 一点余量」，再把速度清零：
+        //   速度归零之后下 tick 的射线长度就是 0，不会再钉回方块里。
+        if (!this.level().isClientSide() && hitResult instanceof net.minecraft.world.phys.BlockHitResult blockHit) {
+            net.minecraft.core.Direction face = blockHit.getDirection();
+            Vec3 nudge = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ())
+                    .scale(this.getBbHeight() * 0.5D + 0.02D);
+            this.setPos(this.position().add(nudge));
+            this.setDeltaMovement(Vec3.ZERO);
+        }
+
         if (this.stage() == Stage.SPIN) {
             // ===== 蓄力中：只放行「碰生物」，方块碰撞整段跳过（作者 2026-10-29）=====
             //
