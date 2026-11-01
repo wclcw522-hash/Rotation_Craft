@@ -62,24 +62,6 @@ public final class Ball3DModels {
     /** 这三个用的是单独生成的「填满版」贴图（在 textures/item/ball3d/ 下），不是原版球图标 */
     private static final Set<String> SPECIAL_TEX = Set.of("tidal", "preserve", "talisman");
 
-    /**
-     * <b>象限模型</b> —— 组合球的 3D 组合渲染用（作者 2026-11-01）。
-     *
-     * <h2>为什么要有它</h2>
-     * <p>组合球以前是「先把四张贴图在 CPU 上合成一张 2D，再贴到一个面上」，
-     * 看起来不像正常物品的颜色组合。作者要的是<b>先渲染各部分完整的切球建模，再组合</b>
-     * —— 也就是把球拆成四块真几何拼起来，从二维贴图升级成三维建模。</p>
-     *
-     * <h2>怎么来的</h2>
-     * <p>把 {@code ball3d_<key>.json} 那 30 个 cuboid 按 <b>x=0 / y=4</b> 切成四个象限
-     * （{@code q1} 左上 / {@code q2} 右上 / {@code q3} 左下 / {@code q4} 右下），
-     * 跨越切面的 cuboid 直接裁开，<b>贴图仍引用原球贴图</b>（不重新画）。
-     * 于是每个象限是「球的一个真角」，四个拼回去就是整颗球。</p>
-     *
-     * <p>作者明确接受这个代价：「会让有一边只能看到比较长的切球侧面，我要的就是这样」。</p>
-     */
-    private static final Map<String, StandaloneModelKey<BlockStateModelPart>> QUADRANT_MODELS = new HashMap<>();
-
     private static final Map<String, StandaloneModelKey<BlockStateModelPart>> MODELS = new HashMap<>();
     private static final Map<String, Identifier> TEXTURES = new HashMap<>();
 
@@ -90,13 +72,6 @@ public final class Ball3DModels {
             // standalone 模型用 simpleModelWrapper 烘焙时绑的是方块图集，
             // 引用 item 图集里的贴图会被直接拒收（日志：Rejecting block model ... outside of supported atlas）。
             TEXTURES.put(k, Identifier.fromNamespaceAndPath("rotation_craft", "block/ball3d/" + k));
-        }
-        // 象限模型：ball3d_<key>_q<1..4>，几何由脚本从整球裁出来
-        for (String k : KEYS) {
-            for (int q = 1; q <= 4; q++) {
-                String qk = k + "_q" + q;
-                QUADRANT_MODELS.put(qk, new StandaloneModelKey<>(() -> "rotation_craft:ball3d_" + qk));
-            }
         }
     }
 
@@ -118,37 +93,6 @@ public final class Ball3DModels {
             event.register(MODELS.get(k), SimpleUnbakedStandaloneModel.simpleModelWrapper(
                     Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + k)));
         }
-        // 象限模型（组合球用）：ball3d_<key>_q<1..4>
-        for (String k : KEYS) {
-            for (int q = 1; q <= 4; q++) {
-                String qk = k + "_q" + q;
-                event.register(QUADRANT_MODELS.get(qk), SimpleUnbakedStandaloneModel.simpleModelWrapper(
-                        Identifier.fromNamespaceAndPath("rotation_craft", "item/ball3d_" + qk)));
-            }
-        }
-    }
-
-    /**
-     * 取某个象限的烘焙模型（组合球的 3D 组合渲染用）。
-     *
-     * @param key 材质 key（{@link #KEYS} 里的那 17 个）
-     * @param q   象限 1..4（1 左上 / 2 右上 / 3 左下 / 4 右下）
-     * @return 模型；不存在或还没烘焙好时返回 {@code null}
-     */
-    public static BlockStateModelPart quadrantPart(String key, int q) {
-        if (q < 1 || q > 4) {
-            return null;
-        }
-        StandaloneModelKey<BlockStateModelPart> k = QUADRANT_MODELS.get(key + "_q" + q);
-        if (k == null) {
-            return null;
-        }
-        return Minecraft.getInstance().getModelManager().getStandaloneModel(k);
-    }
-
-    /** 象限模型该用的 RenderType —— 与整球同一个图集 */
-    public static net.minecraft.client.renderer.rendertype.RenderType quadrantRenderType() {
-        return net.minecraft.client.renderer.Sheets.cutoutBlockItemSheet();
     }
 
 
