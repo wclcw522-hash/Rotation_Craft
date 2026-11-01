@@ -544,14 +544,35 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     /** 【空气动力球】离主人多近算「到家」（格） */
     private static final double RETURN_ARRIVE_DISTANCE = 1.8D;
 
-    /** 找绕行路线时，最多往主人上方试探几格 */
+    /** 直飞被挡时，往主人上方逐格试探的最大步数（每步 1 格） */
     private static final int RETURN_CLIMB_STEPS = 8;
 
-    /** 检测「这条路通不通」时的采样步长（格） */
+    /** 视线/穿墙采样的步长（格） */
     private static final double PATH_SAMPLE_STEP = 0.5D;
-
-    /** 回归时每隔几刻重算一次路线 —— 逐刻重算会让球在障碍边缘左右横跳 */
-    private static final int RETURN_RETARGET_INTERVAL = 5;
+    /**
+     * 回归方向的重新计算间隔（刻）。
+     *
+     * <p>⚠️⚠️ <b>必须是 1</b>（作者 2026-11-01 报「【忠诚】一顿一顿、飞得特别慢、终点像钉在旧位置」，
+     * 通读全文件后定位）。</p>
+     *
+     * <p>原值是 5，而 {@code homingToOwner0()} 里的速度是：</p>
+     * <pre>
+     *   double nextSpeed = Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL);
+     *   this.setDeltaMovement(this.returnDirection.scale(nextSpeed));   // ← 每刻都用它
+     * </pre>
+     * <p>{@code returnDirection} 每 5 刻才更新一次、却在<b>每一刻</b>被拿去设速度 ⇒
+     * 中间 4 刻用的都是 5 刻前算出的旧方向。玩家一移动，球就沿着
+     * 「5 刻前主人所在的位置」那个方向飞 —— 于是：</p>
+     * <ul>
+     *   <li>斜着飞，朝主人的径向分量小 ⇒ 净靠近速率极低（<b>特别慢</b>）；</li>
+     *   <li>每 5 刻方向突变一次 ⇒（<b>一顿一顿</b>）；</li>
+     *   <li>到达时方向长期滞后 ⇒ 看起来没对准人（<b>终点像固定在旧位置</b>）。</li>
+     * </ul>
+     *
+     * <p>改成每刻重算之后，方向始终指向主人的当前位置。代价只是一次减法 + 一次 normalize
+     * 加一次短距离视线采样，可以忽略。</p>
+     */
+    private static final int RETURN_RETARGET_INTERVAL = 1;
 
     /**
      * 「悬空」总兜底的计时上限（刻）。
@@ -662,6 +683,21 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
 
     /** 上一刻是否在实心里 —— 用来把「连续实心段」和「被空气隔开的另一段」区分开 */
     protected boolean wasInsideBlock;
+
+    /**
+     * <b>回归途中是否由回归逻辑接管位置</b>（作者 2026-11-01 修【忠诚】异常）。
+     *
+     * <p>为什么需要它：父类 {@code ThrowableProjectile.tick()} 的移动是<b>射线式</b>的 ——
+     * 用 {@code ProjectileUtil.getHitResultOnMoveVector} 找一个命中点，然后
+     * {@code setPos(命中点)}；<b>它根本不看 {@code noPhysics}</b>。
+     * 所以「回归期间设 noPhysics = true 来穿墙」这个思路对这段移动完全无效：
+     * 球一撞到方块就被钉在交点，下一刻回归逻辑再设一次朝主人的速度、又撞一次，
+     * 净位移被吃掉大半 —— 表现就是「一顿一顿、飞得特别慢」，贴着墙时干脆卡死不动。
+     *</p>
+     *
+     * <p>置位期间 {@link #tick()} 会跳过父类 tick，直接按速度推进位置。</p>
+     */
+    protected boolean homingPhysicsActive;
 
     /** 当前这一段回归用的方向（隔几刻才重算一次，见 RETURN_RETARGET_INTERVAL） */
     private Vec3 returnDirection;
@@ -1445,8 +1481,18 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
      * <b>不产生任何掉落物</b> —— 这正是作者要的「无掉落消失」。</p>
      */
     protected static void enforceBallCap(net.minecraft.server.level.ServerLevel server) {
+        // ⚠️⚠️ **锤头不能计入这里、更不能被清掉**（作者 2026-11-01 明确要求）。
+        //
+        //   锤头继承了 BallProjectile 以复用物理与词条，所以按类型会被这里捞出来 ——
+        //   但它的生命周期绑在掷出者与那条线上，被「球很多」这条防堆积机制顺手 discard
+        //   就等于凭空吞掉一件武器，绝不允许。
+        //
+        //   作者的原话：「锤头不能被球上限删掉，仅此而已」。
         java.util.List<BallProjectile> all =
-                server.getEntitiesOfClass(BallProjectile.class, WHOLE_LEVEL_BOX);
+                server.getEntitiesOfClass(BallProjectile.class, WHOLE_LEVEL_BOX)
+                        .stream()
+                        .filter(b -> !(b instanceof FlailHeadEntity))
+                        .toList();
         int overflow = all.size() - BALL_CAP;
         if (overflow <= 0) {
             return;
@@ -1613,7 +1659,21 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         ballTickPre();
 
         // 父类 tick —— 物理、移动、碰撞检测都在里面
-        super.tick();
+        // ===== 回归途中：**不跑父类 tick**（作者 2026-11-01）=====
+        //
+        //   父类的移动是射线式的，撞到方块就把位置钉在交点，且**不看 noPhysics** ——
+        //   回归期间只设 noPhysics 并不能穿墙，反而每刻撞一次、净位移被吃掉，
+        //   表现就是「一顿一顿、飞得特别慢」。这里完全接管位置。
+        //
+        //   仍然要维护 xo/yo/zo（客户端插值靠它），所以先搬一次再推进。
+        if (this.homingPhysicsActive) {
+            this.xo = this.getX();
+            this.yo = this.getY();
+            this.zo = this.getZ();
+            this.setPos(this.position().add(this.getDeltaMovement()));
+        } else {
+            super.tick();
+        }
         ballTickPost();
 
         // ⚠️ **主 tick 也要补一次「这一步的位移」判定**（作者 2026-10-17 报「路径上的音波消失了」）。
@@ -4001,6 +4061,19 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
     }
 
     protected boolean homingToOwner0() {
+        // ===== 诊断日志（作者 2026-11-01 报「【忠诚】词条严重异常」，先用日志定位到底走到哪一步）=====
+        // 定位后删除。
+        if (this.level() instanceof net.minecraft.server.level.ServerLevel && this.tickCount % 10 == 0) {
+            net.minecraft.world.entity.Entity diagOwner = this.getOwner();
+            double diagDist = (diagOwner == null) ? -1.0D : diagOwner.distanceTo(this);
+            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                    "[homing] t={} ret={} back={} ticks={} settled={} dist={} vel={} dir={}",
+                    this.tickCount, this.returnToOwner, this.homingBack, this.homingTicks,
+                    this.isSettled(), String.format("%.2f", diagDist),
+                    String.format("%.2f", this.getDeltaMovement().length()),
+                    this.returnDirection == null ? "null" : String.format("%.2f", this.returnDirection.length()));
+        }
+
         // 【多重射击的附属弹】—— **永远不真的回家**。
         //
         // returnToOwner 对它是 true（见 ballTickPre），但那只是为了拿到回收体系的兜底：
@@ -4066,6 +4139,7 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         }
 
         this.homingBack = true;
+        this.homingPhysicsActive = true;   // 从这一刻起位置由回归逻辑接管（见字段说明）
         this.setSettled(false);
 
         // 回归期间照抄「恼鬼三件套」（作者给出的思路）：

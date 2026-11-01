@@ -1,3 +1,86 @@
+## 1.2.0.81 — 投球崩溃、锤头被球上限误删、【忠诚】回归一顿一顿
+
+### ① 扔球就崩溃
+
+`BallProjectile` 构造器链：
+
+```java
+public BallProjectile(Level level, LivingEntity shooter, ItemStack stack) {
+    super(level, shooter, stack);   // ← 父类构造器里就会调 this.setItem(...)
+    ...
+}
+```
+
+而 `setItem` 被覆写过：
+
+```java
+@Override
+public void setItem(ItemStack stack) {
+    super.setItem(stack);
+    this.refreshDimensions();   // ← 在父类构造器执行期间就被调到
+}
+```
+
+虚方法分派让这个覆写在**子类还没构造完**时执行，那一刻实体尺寸/追踪器状态尚未就绪。
+
+**修**：加构造完成标志
+
+```java
+private boolean fullyConstructed;
+
+@Override
+public void setItem(ItemStack stack) {
+    super.setItem(stack);
+    if (this.fullyConstructed) {
+        this.refreshDimensions();
+    }
+}
+```
+
+（不能用 `this.level() != null` 当判据 —— `Entity(type, level)` 是更早的父层，那时 level 早就挂上了。）
+
+### ② 锤头会被球上限删掉
+
+`enforceBallCap()` 按类型捞 `BallProjectile`，锤头继承了它就一并被算进去，
+球多的时候会把锤头当「最旧的球」`discard()` —— 等于凭空吞掉一件武器。
+
+**修**：
+
+```java
+java.util.List<BallProjectile> all =
+        server.getEntitiesOfClass(BallProjectile.class, WHOLE_LEVEL_BOX)
+                .stream()
+                .filter(b -> !(b instanceof FlailHeadEntity))
+                .toList();
+```
+
+作者 2026-11-01 明确：球与锤头**可以互相交互、代码可以重叠**，
+「球就是球、锤头就是锤头」只针对**实体种类不能相同**、注释表述要分清，
+外加**锤头不能被球上限删掉**这三点。
+
+### ③ 【忠诚】/【空气动力球】回归：一顿一顿、特别慢、终点像钉在旧位置
+
+读遍 `BallPhysicsCore` 4522 行后定位到 `homingToOwner0()`：
+
+```java
+double nextSpeed = Math.min(RETURN_MAX_SPEED, currentSpeed + RETURN_ACCEL);
+this.setDeltaMovement(this.returnDirection.scale(nextSpeed));   // 每刻都用它
+```
+
+而 `returnDirection` 的重算条件带着 `RETURN_RETARGET_INTERVAL = 5` ——
+**方向每 5 刻才更新一次，却在每一刻都被拿去设速度**。中间 4 刻用的全是 5 刻前算出的旧方向：
+玩家一移动，球就沿着「5 刻前主人所在的位置」飞，于是斜飞（净靠近慢）、
+每 5 刻方向突变（一顿一顿）、到达时长期滞后（终点像固定在旧位置）。
+
+**修**：`RETURN_RETARGET_INTERVAL = 1`，方向每刻重算。
+
+### 另
+
+- `homingPhysicsActive`：回归途中父类 tick 的移动是射线式的、且**不看 `noPhysics`**，
+  撞到方块会把球钉在交点。置位期间完全接管位置（`setPos(position + delta)`）。
+- `homingToOwner0()` 里加了一条诊断日志（每 10 刻一次），用于后续核对回归状态。
+
+---
 ## 1.2.0.80 — 手动回收叠加加速、潮汐流星锤补上水下特效
 
 ### ① 手动回收不打断自动回收，只叠加速度

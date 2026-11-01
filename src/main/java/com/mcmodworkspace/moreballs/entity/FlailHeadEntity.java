@@ -451,20 +451,17 @@ public class FlailHeadEntity extends BallProjectile {
                 tickSpin();
             }
             case RETURNING -> {
-                // ===== 回收阶段：**重新启动运动状态**（作者 2026-10-31）=====
+                // ===== 回收：**只由绳子驱动**（作者 2026-11-01：「【忠诚】老是一顿一顿的并且飞得特别慢」）=====
                 //
-                // 作者原话：「防止下沉和悬空的话，让回收启动和结束时分别重新启动和终止
-                // 运动状态不就行了吗」
+                //   原来这里是 super.tick() + tickReturning()：
+                //     · super.tick() 里有原版重力 → 每 tick 把锤头往下拉 0.08、move() 下移一点；
+                //     · 紧接着 tickReturning() 的约束又 setPos 把它拉回球面。
+                //   两者每 tick 对着拉一次，表现就是「一顿一顿」。
                 //
-                // 对。之前为了躲开「move() 和 setPos 对着拉」把 super.tick() 摘掉了，
-                // 代价是**重力与方块碰撞一起没了** —— 于是锤头悬空或嵌进地面。
-                //
-                // 正确做法是反过来：把这个阶段当成**正常的物理阶段**重新启动，
-                // 然后用「速度」而不是 setPos 去驱动它 —— 这样 move() 会带着碰撞走，
-                // 重力也照常生效，两个问题同时消失。
-                this.noPhysics = false;      // 恢复方块碰撞（防下沉）
-                this.setNoGravity(false);    // 恢复重力（防悬空）
-                super.tick();                // 父类 tick：施加重力 + move() 做碰撞解算
+                //   回收的位移本来就完全由 ropeLimit 收紧 + applyRopeConstraint 决定，
+                //   不需要重力参与 —— 关掉它，绳子说了算。
+                //   （不会因此悬空：约束会一路把它拉到主人手边。）
+                this.setNoGravity(true);
                 tickReturning();
             }
             case FLYING -> {
@@ -1165,7 +1162,10 @@ public class FlailHeadEntity extends BallProjectile {
         //
         // 这样分的好处：绳长是一个可以独立读写、独立调节的状态，
         // 以后要加「绳长相关的机制」（比如被拉长后需要额外收线）直接改这一处就够了。
-        double actual = this.distanceToOwner();
+        // ⚠️ 必须与 applyRopeConstraint 用**同一个锚点**（手部）。
+        //    原来这里用 distanceToOwner()（到**眼睛**的距离），而约束用的是 handAnchor（到手部），
+        //    两者差 0.3~0.5 格 —— 收紧与约束互相打架，也是「一顿一顿」的来源之一。
+        double actual = handAnchor(living).distanceTo(this.position());
         if (this.ropeLimit > actual) {
             // 松弛段：极快收掉
             this.ropeLimit = Math.max(actual, this.ropeLimit - SLACK_TAKE_UP_SPEED);

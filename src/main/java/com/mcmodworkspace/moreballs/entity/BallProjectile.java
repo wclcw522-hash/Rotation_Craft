@@ -37,14 +37,29 @@ public class BallProjectile extends BallPhysicsCore {
      * 的行为表。实体的 {@code dimensions} 字段只在构造和 {@code refreshDimensions()}
      * 时更新，所以换球（金球 ↔ 普通球）必须主动刷一次，否则碰撞箱会停在上一个球的尺寸。</p>
      */
+    /**
+     * 构造是否已经跑完（作者 2026-11-01 报「扔球就崩溃」）。
+     *
+     * <p>父类 {@code ThrowableItemProjectile} 的构造器里就会调 {@code this.setItem(...)}，
+     * 而那是**虚方法分派** —— 下面那个覆写会在子类还没构造完时被执行。
+     * 那一刻实体尺寸/追踪器相关的状态尚未就绪，{@code refreshDimensions()} 会去碰它。</p>
+     *
+     * <p>⚠️ 不能用 {@code this.level() != null} 当判据：{@code Entity(type, level)} 是更早的父层，
+     * 到这一步 level 早就挂上了，判不出来。</p>
+     */
+    private boolean fullyConstructed;
+
     @Override
     public void setItem(ItemStack stack) {
         super.setItem(stack);
-        this.refreshDimensions();
+        if (this.fullyConstructed) {
+            this.refreshDimensions();
+        }
     }
 
     public BallProjectile(EntityType<? extends BallProjectile> type, Level level) {
         super(type, level);
+        this.fullyConstructed = true;
     }
 
     /** 球间弹性碰撞 —— 只有球才做 */
@@ -120,6 +135,7 @@ public class BallProjectile extends BallPhysicsCore {
         // 主人已不在（下线 / 换维度 / 已死），或回归超时 ——
         // 必须把「恼鬼三件套」和记账状态一起还原，否则球会一直穿墙飘着
         this.homingBack = false;
+        this.homingPhysicsActive = false;   // 交还正常物理
         this.noPhysics = false;
         this.setNoGravity(false);
         this.wasInsideBlock = false;
@@ -130,6 +146,7 @@ public class BallProjectile extends BallPhysicsCore {
         // 弩在装填/发射时会往被消耗的弹药上打「intangible_projectile」（不可回收）标记，
         // 原版箭在 AbstractArrow 构造里主动移除了它 —— 我们的球是可以被捡回来的，
         // 不清掉的话捡回来的球会显示「不可回收」，而且因为多了一个数据组件而叠不进普通堆。
+        this.fullyConstructed = true;   // 先置位，下面这次 setItem 才会真的刷新碰撞箱
         ItemStack held = this.getItem();
         BallItem.stripIntangible(held);
         this.setItem(held);
