@@ -130,6 +130,14 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         // 不走 ItemTransform、没有 -0.5 格的居中夹层 —— 位置和旋转中心都不会再漂。
         poseStack.pushPose();
 
+        // 【潮涌】环绕水纹 —— **必须在施加滚动姿态之前画**（作者 2026-11-01：
+        // 「潮汐球的水下特效会跟着球一起滚动」）。
+        //
+        //   水纹是「球外面那一圈激流」，它应该始终对齐**速度方向**、不随球的滚动翻面。
+        //   原先这里把它放在 applyRoll 之后 ⇒ 球滚多少度、水纹就被转多少度，
+        //   看起来像是水纹长在球皮上一起翻。挪到滚动姿势之前即可。
+        this.submitSurge(state, poseStack, collector, LIGHT_FULL);
+
         // 视觉滚动：绕碰撞箱中心转
         if (state instanceof BallRenderState rollState) {
             this.rollVisual.applyRoll(rollState.rollOrientation, rollState.rollPivotY, poseStack);
@@ -154,7 +162,6 @@ public class BallRenderer extends ThrownItemRenderer<BallProjectile> {
         if (scale != 1.0F) {
             poseStack.popPose();
         }
-        this.submitSurge(state, poseStack, collector, LIGHT_FULL);
         poseStack.popPose();
     }
 

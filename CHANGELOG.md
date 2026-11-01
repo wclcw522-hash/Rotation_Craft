@@ -1,3 +1,26 @@
+## 1.2.0.93 — 潮汐球的水下特效跟着球一起滚动
+
+作者 2026-11-01：「潮汐球的水下特效会跟着球一起滚动」。
+
+`BallRenderer.submit` 里 `submitSurge()` 是在 `applyRoll()` **之后**调用的，
+于是那圈激流水纹被球的滚动姿态一起转了 —— 看起来像水纹长在球皮上跟着翻面。
+
+水纹应该始终对齐**速度方向**、不随滚动翻面，所以把它挪到施加滚动姿势之前：
+
+```java
+poseStack.pushPose();
+
+this.submitSurge(state, poseStack, collector, LIGHT_FULL);   // ← 先画水纹（未受滚动影响）
+
+if (state instanceof BallRenderState rollState) {
+    this.rollVisual.applyRoll(rollState.rollOrientation, rollState.rollPivotY, poseStack);
+}
+// ... 再画球体
+```
+
+2D 兜底分支（`part == null`）里那次 `submitSurge` 不受影响（那条路本来就没有滚动姿态）。
+
+---
 ## 1.2.0.92 — 蓄力时被回归打断；不坚固的球做的流星锤耐久 1 点
 
 ### ① 会回归的球没法蓄力了
