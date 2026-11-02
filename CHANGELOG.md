@@ -1,3 +1,100 @@
+## 1.2.0.119 — 球堆六项行为：逐颗切球 / Q键逐颗扔 / 一键扔后拆散 / 不再被秒收 / 不挤成一个 / 中键整理静默
+
+### ① 叠在一起的组合球被整叠吞掉
+
+`moreballs$cutBalls` 里的根因，两处叠加：
+
+**a. 一轮把整栈当成了「一个」**
+
+```java
+} else {
+    one = material;                // 整栈
+    rest = ItemStack.EMPTY;        // 认为没有剩余
+}
+boolean hasRest = cluster && ...;  // 非球堆恒为 false
+```
+
+配方按「1 个」算，`clickMenuButton` 只消耗 1 颗；而收尾的
+`inputSlot.set(hasRest ? rest : EMPTY)` 因为 `hasRest` 恒为 false，**把整个栈清空**。
+
+现在只取 1 颗：
+
+```java
+one = material.copy();
+one.setCount(1);
+rest = material.copy();
+rest.shrink(1);
+...
+boolean hasRest = cluster
+        ? !BallClusterItem.contents(rest).isEmpty()
+        : !rest.isEmpty();
+```
+
+**b. 材料格没有每轮重取**
+
+`material` 在方法开头取了一次，`continue` 之后用的还是最初那一整叠（而材料格此时已经是 `rest`）。
+循环开头补上 `material = inputSlot.getItem();`。
+
+**c. 组合球无条件 break**
+
+改成按 shift 区分：光标点击只切一颗、Shift 把整个栈切完。
+
+**d. 收尾清空产物槽的时机**
+
+`StonecutterMenu.broadcastChanges()` 会按材料格重算产物槽，先清后 broadcast 等于白清 ⇒
+槽里又冒出一份，继续 shift 就再多拿一份。改成 broadcast **之后**再清。
+
+### ② Q 键扔球堆 → 一颗一颗扔
+
+原版 Q 键走 `ServerPlayer.drop(boolean)`：
+
+```java
+ItemStack removed = inventory.removeFromSelected(all);   // 整个栈 = 整个壳
+```
+
+球堆 `stacksTo(1)`，所以一按 Q 就把装着几十颗球的壳整个扔出去。
+新增 `mixin/ServerPlayerMixin` 在 `drop(Z)V` 的 HEAD 拦下：取一颗（耐久最低那颗）丢出去，壳留在原格。
+
+**为什么拦这里能区分「背包一键扔出」**：两者最终都走
+`Player.drop(ItemStack, boolean)` → `onPlayerTossEvent`，光看那个分不出来；
+但 `ServerPlayer.drop(boolean)` **只有 Q 键（和 Ctrl+Q）会调**，背包一键是遍历背包逐格调
+`drop(stack, ...)`。所以这个点是精确的「Q 键」。
+
+### ③ 背包一键扔出 → 扔出后拆散
+
+`BallClusterDropHandler`：球堆作为掉落物出现时拆成一颗颗散球。
+
+分两步做，不能合并：
+- `EntityJoinLevelEvent` 只**登记 UUID**（那个事件在原版遍历区块实体列表时触发，
+  在里面增删实体会 `ConcurrentModificationException` 崩世界）
+- `ServerTickEvent.Post` 里再真正拆
+
+### ⑤ 背包批量扔出「一堆球变成一个」
+
+原来所有 `ItemEntity` 都生成在壳的**同一个坐标**，初速只有 ±0.06；
+原版 `ItemEntity#mergeWithNeighbors` 会把「距离近 + 同物品 + 同组件 + 可堆叠」的合并成计数栈——
+同档位的球耐久恰好相同，于是几十个实体并回一个。
+
+改成按**黄金角**（≈137.5°）把每颗摆到壳周围一圈，半径 0.6 格（远大于合并判定半径）。
+
+### ④ 扔出后被立即回收
+
+拆散出来的每颗球都是「用过的球」（带 `TOUGHNESS_LEFT`），而 `BallPickupHandler` 会在
+`ItemEntityPickupEvent.Pre` 里把它们**自动套壳塞回背包**。原来的 `setDefaultPickUpDelay()`
+只有 10 tick，玩家还站在旁边 ⇒ 半秒后就被吸回去。
+
+改成 `setPickUpDelay(40)`（2 秒）。
+
+### ⑥ 中键整理静默
+
+```java
+private static final boolean TIDY_ON_CLICK_ENABLED = false;
+```
+
+`specialClicks` 里的 `PICKUP_ALL` 接管、以及 `canTakeItemForPickAll` 覆写，都受这个开关控制。
+`moreballs$tidyIntoCarried` 与 `moreballs$absorbInto` 一条没删，改回 `true` 即恢复。
+
+---
 ## 1.2.0.118 — 叠在一起的组合球被整叠切掉；点击整理静默
 
 ### ① 叠在一起的完整组合球被一下全都切掉

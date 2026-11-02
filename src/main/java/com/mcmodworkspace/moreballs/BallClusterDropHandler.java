@@ -85,11 +85,35 @@ public final class BallClusterDropHandler {
     }
 
     /**
+     * <b>球堆拾取延迟</b>（tick）。40 = 2 秒。
+     *
+     * <p>作者 2026-11-02：「这两种情况现在还会因为物品状态变化，导致扔出后被立即回收」。</p>
+     *
+     * <p>根因：拆散出来的每颗球都是「用过的球」（带 {@code TOUGHNESS_LEFT} 组件），
+     * 而 {@code BallPickupHandler} 会在 {@code ItemEntityPickupEvent.Pre} 里把它们
+     * <b>自动套壳塞回玩家背包</b>。原来的 {@code setDefaultPickUpDelay()} 只有 10 tick，
+     * 玩家还站在旁边 ⇒ 半秒后就被吸回去，看起来就是「扔出去立刻被回收」。
+     * 给 2 秒，玩家能看见它们散在地上。</p>
+     */
+    private static final int DROP_PICKUP_DELAY = 40;
+
+    /** 散开半径（格）。必须 > 原版 {@code ItemEntity} 的合并判定半径，否则会并成一个计数栈。 */
+    private static final double SCATTER_RADIUS = 0.6D;
+
+    /**
      * 把一个球堆掉落物拆成一颗颗散球。
      *
      * <p>用 {@link BallClusterItem#takeOne(ItemStack)} 逐颗取（它取的是**耐久最低**那颗，
-     * 与右键取球同一口径），每颗生成一个 {@link ItemEntity} ——
-     * 于是落地物看起来就是「一堆球散在地上」，捡起来也是散球。</p>
+     * 与右键取球同一口径），每颗生成一个 {@link ItemEntity}。</p>
+     *
+     * <h2>为什么不直接全生成在原坐标</h2>
+     * <p>作者 2026-11-02：「背包内批量扔出还会导致一堆球变成一个」。</p>
+     *
+     * <p>原来所有 {@code ItemEntity} 都生成在壳的**同一个坐标**上，初速只有 ±0.06，
+     * 而原版 {@code ItemEntity#mergeWithNeighbors} 会把「距离近 + 同物品 + 同组件 +
+     * 可堆叠」的物品合并成一个计数栈 —— 同档位的球耐久恰好相同，于是 64 个实体会
+     * 并回一个。所以这里**按黄金角把每颗摆到壳周围一圈**，
+     * 相邻间距远大于合并半径。</p>
      */
     private static void scatter(ServerLevel level, ItemEntity shellEntity) {
         ItemStack shell = shellEntity.getItem().copy();
@@ -98,22 +122,31 @@ public final class BallClusterDropHandler {
         }
 
         boolean any = false;
+        int index = 0;
         // 上限保护：球堆最多 MAX_BALLS 颗，多给一点余量防止意外死循环
         for (int guard = 0; guard < BallClusterContents.MAX_BALLS + 1; guard++) {
             ItemStack one = BallClusterItem.takeOne(shell);
             if (one.isEmpty()) {
                 break;
             }
+
+            // 黄金角（≈137.5°）铺开，任意相邻两颗都拉得开，配合 SCATTER_RADIUS 避免合并
+            double angle = index * 2.39996D;
+            double dx = Math.cos(angle) * SCATTER_RADIUS;
+            double dz = Math.sin(angle) * SCATTER_RADIUS;
+
             ItemEntity drop = new ItemEntity(level,
-                    shellEntity.getX(), shellEntity.getY(), shellEntity.getZ(), one);
-            // 给一点随机初速，散开而不是全部叠在一个点上
-            drop.setDeltaMovement(
-                    (level.getRandom().nextDouble() - 0.5D) * 0.12D,
-                    0.10D + level.getRandom().nextDouble() * 0.06D,
-                    (level.getRandom().nextDouble() - 0.5D) * 0.12D);
-            drop.setDefaultPickUpDelay();
+                    shellEntity.getX() + dx,
+                    shellEntity.getY() + 0.15D,
+                    shellEntity.getZ() + dz,
+                    one);
+            // 沿各自的方向轻轻弹出去，落点更自然（也进一步防止重合）
+            drop.setDeltaMovement(dx * 0.12D, 0.12D + level.getRandom().nextDouble() * 0.06D, dz * 0.12D);
+            // 2 秒内不许被拾取 —— 否则会被 BallPickupHandler 立即套壳收走
+            drop.setPickUpDelay(DROP_PICKUP_DELAY);
             level.addFreshEntity(drop);
             any = true;
+            index++;
         }
 
         if (any) {

@@ -5,7 +5,8 @@
   "mixins": [
     "CrossbowItemMixin",
     "AbstractContainerMenuMixin",
-    "InventoryMixin"
+    "InventoryMixin",
+    "ServerPlayerMixin"
   ],
   "client": [
     "LocalPlayerMixin"

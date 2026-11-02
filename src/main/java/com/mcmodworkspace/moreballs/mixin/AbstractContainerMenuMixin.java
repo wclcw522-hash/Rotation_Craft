@@ -352,10 +352,16 @@ public abstract class AbstractContainerMenuMixin {
 
         int made = 0;
         for (int n = 0; n < rounds; n++) {
+            // ⚠️ 材料格每轮都会变（上一轮已经把 rest 写回去了），所以必须重取。
+            //    不重取的话，shift 第二圈读到的还是最初那一整叠，
+            //    切出来的仍是第一颗的内容，而 rest 会按错误的基数再减一次 ——
+            //    表现就是「叠在一起的组合球被一下全都切掉，只有一份产物」。
+            material = inputSlot.getItem();
+
             // ===== 这一轮消耗的目标 =====
             //  · 材料是球堆 → 取走壳里耐久最低那一颗，剩余的壳暂存在局部变量里
             //    （不落地也不进背包 —— 那样会凭空多出第二份）
-            //  · 材料是组合球本体 → 就是它自己，切完材料格清空
+            //  · 材料是可叠的球栈 → 只取 1 颗，剩下 N-1 颗留在 rest
             ItemStack one;
             ItemStack rest;
             if (cluster) {
@@ -367,14 +373,32 @@ public abstract class AbstractContainerMenuMixin {
                 one = BallClusterItem.takeOne(shell);
                 rest = shell.copy();
             } else {
-                one = material;
-                rest = ItemStack.EMPTY;
+                // ===== 普通球 / 组合球本体也可能叠成栈 =====
+                //
+                // 作者 2026-11-02：「现在叠在一起的完整组合球会被一下全都切掉，只有一份产物，
+                // 这种单物品的、符合原版逻辑合成配方怎么会做成这个样子？」
+                //
+                // 根因就在这三行。原来写的是：
+                //     one = material;                // 整栈当成「这一轮要切的那一个」
+                //     rest = ItemStack.EMPTY;        // 而且认为没有剩余
+                // 配方是按「1 个」算的，`clickMenuButton` 只消耗 1 颗；而收尾的
+                // `inputSlot.set(hasRest ? rest : EMPTY)` 因为 `hasRest` 恒为 false，
+                // 直接把**整个栈清空** —— N 颗球只出 1 份产物，其余全消失。
+                //
+                // 正确做法与上面球堆分支同构：只取 1 颗当目标，剩下 N-1 颗留在 rest 里。
+                one = material.copy();
+                one.setCount(1);
+                rest = material.copy();
+                rest.shrink(1);
             }
             if (one.isEmpty()) {
                 break;
             }
             boolean isCombo = one.is(com.mcmodworkspace.moreballs.ModItems.COMBO_BALL.get());
-            boolean hasRest = cluster && !BallClusterItem.contents(rest).isEmpty();
+            // ⚠️ `hasRest` 不能再写死「只有球堆才有剩余」—— 普通球/组合球的可叠栈同样会剩。
+            boolean hasRest = cluster
+                    ? !BallClusterItem.contents(rest).isEmpty()
+                    : !rest.isEmpty();
 
             // ===== 那颗球进材料格 → 重新选中配方 → 算产物 =====
             // （材料换了物品，原版 slotsChanged 会把配方列表重置，所以必须重选）
