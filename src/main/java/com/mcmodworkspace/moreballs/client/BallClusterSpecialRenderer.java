@@ -261,38 +261,6 @@ public class BallClusterSpecialRenderer implements SpecialModelRenderer<ItemStac
             vertex(buffer, pose, MIN, MIN, 0.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
             vertex(buffer, pose, MIN, MAX, 0.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
 
-            // ===== 四个侧面：围出 1 单位的厚度（作者 2026-11-02）=====
-            //
-            // 作者原话：「球堆在掉落物形态只有薄薄一层贴图没有厚度，正常的球应该是有一两个
-            // 像素的厚度的」。
-            //
-            // 根因：上面只画了正反两个面 —— 从侧面看就是**零厚度**，薄得像张纸。
-            // 原版 `ItemModelGenerator` 给 `item/generated` 额外生成四个侧面（各取边缘
-            // 一条 UV），那才是物品「有厚度」的来源。这里照同样做法补上。
-
-            // 左（x = MIN）
-            vertex(buffer, pose, (float) MIN, (float) MAX, 0.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MIN, (float) MIN, 0.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MIN, (float) MIN, 0.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MIN, (float) MAX, 0.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-
-            // 右（x = MAX）
-            vertex(buffer, pose, (float) MAX, (float) MAX, 1.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MIN, 1.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MIN, 1.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MAX, 1.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-
-            // 下（y = MIN）
-            vertex(buffer, pose, (float) MIN, (float) MIN, 0.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MIN, 1.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MIN, 1.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MIN, (float) MIN, 0.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-
-            // 上（y = MAX）
-            vertex(buffer, pose, (float) MIN, (float) MAX, 0.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MAX, 1.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
-            vertex(buffer, pose, (float) MAX, (float) MAX, 1.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
-            vertex(buffer, pose, (float) MIN, (float) MAX, 0.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
         });
     }
 

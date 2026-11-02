@@ -54,6 +54,9 @@ import java.util.List;
 @Mixin(AbstractContainerMenu.class)
 public abstract class AbstractContainerMenuMixin {
 
+    /** 切球诊断只打一次（定位完删掉） */
+    private static boolean DIAG_CUT = false;
+
     @Inject(method = "clicked", at = @At("HEAD"), cancellable = true, require = 0)
     private void moreballs$specialClicks(int slotId, int button, ContainerInput input,
                                          Player player, CallbackInfo ci) {
@@ -396,6 +399,16 @@ public abstract class AbstractContainerMenuMixin {
             // 产物槽里只放得下「与第一份同来源的那几份」（同来源可以叠），
             // 其余份在这里发出去；背包塞不下就直接扔地上（作者指定）。
             if (isCombo) {
+                // 一次性诊断（作者 2026-11-02：「用光标一个一个点产物槽都不会多产物，
+                // 为什么 shift 一键合成就会多呢？」——先看清 shift 这条路上到底发生了什么）
+                if (!DIAG_CUT) {
+                    DIAG_CUT = true;
+                    com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                            "[切球诊断] quickMove={} pickUp={} product={}x{} keptSource={} 材料={}",
+                            quickMove, pickUp, product.getItem(), product.getCount(),
+                            product.get(com.mcmodworkspace.moreballs.ModComponents.FRAGMENT_SOURCE.get()),
+                            one.getItem());
+                }
                 moreballs$giveRestPieces(player, one, product);
             }
 
@@ -409,20 +422,11 @@ public abstract class AbstractContainerMenuMixin {
                 inputSlot.set(ItemStack.EMPTY);
             }
             made++;
-            // ⚠️⚠️ **产物槽必须清空**（作者 2026-11-02：「切组合球第一象限的产物还是多一倍」）。
-            //
-            //   `clickMenuButton(player, selected)`（上面那句）会让服务端**重新算一次产物**
-            //   并写回产物槽。我们把那份 copy 走发给玩家之后，**槽里的还在** ——
-            //   玩家再点一次产物槽就能白拿一份「第一象限的四分之一球」，
-            //   表现正是「第一象限的产物多一倍」。
-            //
-            //   两条 break 路径都要清：组合球本体只切一次、球堆最后一颗切完。
+            // ⚠️ 产物槽要清，但**不能在这里清** —— 见下面 `broadcastChanges()` 之后的说明。
             if (!cluster) {
-                resultSlot.set(ItemStack.EMPTY);
                 break;   // 组合球本体只切一次
             }
             if (!hasRest) {
-                resultSlot.set(ItemStack.EMPTY);
                 break;   // 最后一颗切完 → 收工
             }
         }
@@ -430,7 +434,20 @@ public abstract class AbstractContainerMenuMixin {
         if (made == 0) {
             return false;
         }
+        // ===== 产物槽清空 + 同步（作者 2026-11-02）=====
+        //
+        // 作者原话：「用光标一个一个点产物槽都不会多产物，为什么 shift 一键合成就会多呢？」
+        //
+        // 根因就在这两句的**顺序**上。`StonecutterMenu.broadcastChanges()` 会把产物槽
+        // 按当前材料格+选中配方**重新算一遍**写回去 —— 所以先清、后 broadcast，等于白清：
+        // 槽里又冒出一份第一象限的四分之一球，玩家继续 shift 点产物槽就又能拿一份。
+        //
+        // 光标点击之所以看不出来：那份直接进了光标，玩家一般不会在同一格上连点。
+        // shift 则是一次接一次往背包塞，多出来的那份立刻表现为「多一倍」。
+        //
+        // 正确顺序：先让原版同步完，**最后**再把产物槽压成空，然后才返回。
         self.broadcastChanges();
+        resultSlot.set(ItemStack.EMPTY);
         return true;
     }
 

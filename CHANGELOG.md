@@ -1,3 +1,41 @@
+## 1.2.0.116 — 球堆掉落即拆散；切球诊断；回退厚度
+
+作者 2026-11-02 三项指示：
+1. 「球堆那个不要搞球堆的厚度了，改成球堆用任何方式扔出去之后，自动将掉落物的部分变成球」
+2. 「第一象限多一倍产物还是没有解决……用光标一个一个点产物槽都不会多产物，为什么 shift 一键合成就会多呢？」
+3. 「先按这个思路修试试，日志加上以防万一」
+
+### ① 回退厚度 + 掉落即拆散
+
+`BallClusterSpecialRenderer.drawQuad` 里我上一版加的左/右/上/下四个侧面已删除，
+回到只画正反两面。
+
+新增 `BallClusterDropHandler`：球堆作为掉落物出现时**自动拆成一颗颗散球**。
+
+- 监听 `EntityJoinLevelEvent`，只**登记 UUID**，不动实体
+  （那个事件在原版遍历区块实体列表时触发，在里面 `addFreshEntity`/`discard` 会抛
+  `ConcurrentModificationException` 崩世界 —— AGENTS 里记过这个坑）
+- `ServerTickEvent.Post` 里再真正拆：逐颗 `takeOne`（取最低耐久），
+  每颗生成一个 `ItemEntity` 并给一点随机初速散开，最后 `discard` 原来那个壳
+
+于是「地上躺着一个壳」这种形态不再出现，捡到的都是散球。
+
+### ② 切球诊断日志
+
+按作者思路加一次性日志，直接看 shift 那条路上到底发生了什么：
+
+```java
+[切球诊断] quickMove={} pickUp={} product={}x{} keptSource={} 材料={}
+```
+
+`quickMove` 是 shift、`pickUp` 是光标点击。**两边跑同一段代码**，
+唯一差别只在产物怎么交给玩家 —— 日志能直接看出 `product.getCount()` 与 `keptSource` 在
+shift 时是否与点击时不同。
+
+同时把产物槽清空挪到了 `broadcastChanges()` **之后**
+（`StonecutterMenu.broadcastChanges` 会按材料格重算产物槽，先清后 broadcast 等于白清）。
+
+---
 ## 1.2.0.115 — shift 切球份数彻底固定；HUD 数量右移下移；球堆掉落物补侧面
 
 ### ① shift 一键合成时第一象限产物多一倍
