@@ -104,7 +104,16 @@ public class BallCuttingRecipe extends StonecutterRecipe {
             int firstSource = comboPieceSource(probe, 0, quarter);
             if (firstSource >= 0) {
                 product.set(ModComponents.FRAGMENT_SOURCE.get(), firstSource);
-                product.setCount(1);   // 恒 1 份，其余全由 giveRestPieces 补（作者 2026-11-02）
+                // 产物槽放「与第一象限同来源的那几份」——同来源可以叠成一栈，
+                // 补发侧按 product.getCount() 精确跳过同样多份（作者 2026-11-02 要求两边严格对齐）
+                int total = quarter ? 4 : 2;
+                int same = 0;
+                for (int k = 0; k < total; k++) {
+                    if (comboPieceSource(probe, k, quarter) == firstSource) {
+                        same++;
+                    }
+                }
+                product.setCount(Math.max(1, same));
             }
             return product;
         }

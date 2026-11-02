@@ -57,6 +57,22 @@ public abstract class AbstractContainerMenuMixin {
                                          Player player, CallbackInfo ci) {
         AbstractContainerMenu self = (AbstractContainerMenu) (Object) this;
 
+        // ===== ⓪ 双击一键全部拿起（原版 PICKUP_ALL）对球堆生效（作者 2026-11-02）=====
+        //
+        // 原版双击的真实协议**不是** slotId == -999，而是：
+        //   AbstractContainerScreen.mouseClicked L405 判 doubleclick + canTakeItemForPickAll，
+        //   成立后 L419 发 ContainerInput.PICKUP_ALL。
+        //
+        // 球堆是 stacksTo(1) 的自定义物品，原版那套对它没意义（会把整个壳撒出去）。
+        // 另外 canTakeItemForPickAll 对 stacksTo(1) 会返回 false、连 PICKUP_ALL 都不发，
+        // 所以下面还附加了一个覆写把它放行。
+        if (input == ContainerInput.PICKUP_ALL) {
+            if (moreballs$tidyIntoCarried(self, player)) {
+                ci.cancel();
+                return;
+            }
+        }
+
         // ===== ① 切石机：材料格是球堆 / 组合球时，点产物槽自己接管 =====
         // 见 moreballs$cutBalls 的注释（作者 2026-10-16 的方案）
         if (moreballs$cutBalls(self, slotId, button, input, player)) {
@@ -440,16 +456,17 @@ public abstract class AbstractContainerMenuMixin {
                 || product.is(com.mcmodworkspace.moreballs.ModItems.BALL_QUARTER.get());
         int total = quarter ? 4 : 2;
         // 产物槽只代表 1 份，所以这里**只跳过一次**（作者 2026-11-02）
-        boolean skippedKept = false;
+        // 产物槽已经发了几份同来源的，这里就跳过几份 —— 两边必须用同一个数字（作者 2026-11-02）
+        int keptLeft = keptSource == null ? 0 : product.getCount();
         for (int i = 0; i < total; i++) {
             int source = com.mcmodworkspace.moreballs.BallCuttingRecipe
                     .comboPieceSource(combo, i, quarter);
             if (source < 0) {
                 continue;   // 这个象限本来就是空的
             }
-            if (!skippedKept && keptSource != null && source == keptSource) {
-                skippedKept = true;
-                continue;   // 产物槽那一份已经代表它了
+            if (keptSource != null && source == keptSource && keptLeft > 0) {
+                keptLeft--;
+                continue;   // 产物槽里那一份已经代表它了
             }
             ItemStack piece = new ItemStack(quarter
                     ? com.mcmodworkspace.moreballs.ModItems.BALL_QUARTER.get()
@@ -459,5 +476,94 @@ public abstract class AbstractContainerMenuMixin {
                 player.drop(piece, false);
             }
         }
+    }
+
+    /**
+     * 让原版双击对球堆放行（作者 2026-11-02）。
+     *
+     * <p>原版 {@code AbstractContainerScreen.mouseClicked} 的双击分支要求
+     * {@code canTakeItemForPickAll} 为 true 才会发 {@code PICKUP_ALL}。
+     * 球堆是 {@code stacksTo(1)} 的自定义物品，原版这套判据对它返回 false，
+     * 双击于是什么都不发生 —— 这就是「双击整理对球堆没反应」的真正原因。</p>
+     *
+     * <p>这里对球堆一律放行，随后的 {@code PICKUP_ALL} 由
+     * {@code moreballs$specialClicks} 接管。</p>
+     */
+    @Inject(method = "canTakeItemForPickAll", at = @At("HEAD"), cancellable = true, require = 0)
+    private void moreballs$allowDoubleClickOnCluster(ItemStack carried, Slot slot,
+                                                     org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        if (slot != null && BallClusterItem.isCluster(slot.getItem())) {
+            cir.setReturnValue(true);
+        }
+    }
+
+    /**
+     * 双击一键收纳球堆（作者 2026-11-02）。
+     *
+     * <p>作者原话：「原版的光标拿着物品双击一键收纳的功能要对球堆也生效，
+     * 光标拿着球堆的时候，双击将符合条件的球和球堆内的球整理到光标处；
+     * 手里拿着球的时候，先瞬间新建一个符合条件的球堆把光标处的球放进去再进行整理」。</p>
+     *
+     * @return true = 这次点击已被接管（调用方要 ci.cancel()）
+     */
+    private static boolean moreballs$tidyIntoCarried(AbstractContainerMenu self, Player player) {
+        ItemStack carried = self.getCarried();
+        if (carried.isEmpty()) {
+            return false;
+        }
+
+        boolean tidied = false;
+
+        if (BallClusterItem.isCluster(carried)) {
+            // 情况 A：光标上已经是壳 —— 直接往壳里收
+            tidied = moreballs$absorbInto(player, carried);
+        } else if (com.mcmodworkspace.moreballs.BallAmmo.isBall(carried)
+                && com.mcmodworkspace.moreballs.BallClusterTier.of(carried).isClustered()) {
+            // 情况 B：光标上是「用过的球」—— 先就地封成壳放进光标，再收
+            ItemStack shell = BallClusterItem.clusterize(carried.copy());
+            if (BallClusterItem.isCluster(shell)) {
+                self.setCarried(shell);
+                tidied = moreballs$absorbInto(player, shell);
+            }
+        }
+
+        if (tidied) {
+            self.broadcastChanges();
+        }
+        return tidied;
+    }
+
+    /**
+     * 把背包里所有能并进 target 这个壳的球 / 球堆并进去，并清空那些来源槽。
+     *
+     * @return 有没有真的并进去过东西
+     */
+    private static boolean moreballs$absorbInto(Player player, ItemStack target) {
+        boolean changed = false;
+        var inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack slot = inventory.getItem(i);
+            if (slot.isEmpty()) {
+                continue;
+            }
+            // 壳 → 取出它装的那颗当探针；散球 → 直接自己
+            ItemStack probe = BallClusterItem.asBall(slot);
+            if (probe.isEmpty()) {
+                continue;
+            }
+            BallClusterContents existing = BallClusterItem.contents(target);
+            if (!existing.hasRoom() || !existing.matches(probe)) {
+                continue;
+            }
+            // withAdded 失败会静默返回 this —— 必须核对结果再动来源槽，否则凭空销毁玩家的球
+            BallClusterContents after = existing.withAdded(probe);
+            if (after == existing) {
+                continue;
+            }
+            BallClusterItem.setContents(target, after);
+            inventory.setItem(i, ItemStack.EMPTY);
+            changed = true;
+        }
+        return changed;
     }
 }

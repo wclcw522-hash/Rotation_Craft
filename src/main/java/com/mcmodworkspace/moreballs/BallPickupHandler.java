@@ -131,6 +131,8 @@ public final class BallPickupHandler {
         if (BallClusterTier.of(stack).isClustered()) {
             // 先并进背包里**已有的**同档球堆（作者 2026-11-02：优先已有，不新建）
             if (BallClusterItem.mergeIntoExisting(player, stack)) {
+                // 原版摆臂动作（作者 2026-11-02：捡球时要有摆臂）
+                player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
                 event.setCanPickup(TriState.FALSE);
                 if (stack.isEmpty()) {
                     itemEntity.discard();
