@@ -409,10 +409,20 @@ public abstract class AbstractContainerMenuMixin {
                 inputSlot.set(ItemStack.EMPTY);
             }
             made++;
+            // ⚠️⚠️ **产物槽必须清空**（作者 2026-11-02：「切组合球第一象限的产物还是多一倍」）。
+            //
+            //   `clickMenuButton(player, selected)`（上面那句）会让服务端**重新算一次产物**
+            //   并写回产物槽。我们把那份 copy 走发给玩家之后，**槽里的还在** ——
+            //   玩家再点一次产物槽就能白拿一份「第一象限的四分之一球」，
+            //   表现正是「第一象限的产物多一倍」。
+            //
+            //   两条 break 路径都要清：组合球本体只切一次、球堆最后一颗切完。
             if (!cluster) {
+                resultSlot.set(ItemStack.EMPTY);
                 break;   // 组合球本体只切一次
             }
             if (!hasRest) {
+                resultSlot.set(ItemStack.EMPTY);
                 break;   // 最后一颗切完 → 收工
             }
         }
@@ -549,18 +559,54 @@ public abstract class AbstractContainerMenuMixin {
             if (slot.isEmpty()) {
                 continue;
             }
-            // 壳 → 取出它装的那颗当探针；散球 → 直接自己
+
+            if (BallClusterItem.isCluster(slot)) {
+                // ===== 球堆：**先逐颗取出再合并**（作者 2026-11-02）=====
+                //
+                // 作者原话：「双击拿起会把球堆合并，应该是先取出球再合并，
+                // 也要注意总量超过 64 时应当把耐久最高的留在原位置不参与合并」。
+                //
+                // `takeOne` 每次都取**耐久最低**那颗，所以：
+                //   · 目标壳满了就停 → 留在原槽里的自然就是**耐久最高**的那些，且位置不变；
+                //   · 一颗都没并进去时不动这个槽。
+                ItemStack shell = slot.copy();
+                boolean any = false;
+                while (true) {
+                    BallClusterContents cur = BallClusterItem.contents(target);
+                    if (!cur.hasRoom()) {
+                        break;                       // 满了 → 剩下的留在原位置
+                    }
+                    ItemStack one = BallClusterItem.takeOne(shell);   // 取最低耐久
+                    if (one.isEmpty()) {
+                        break;
+                    }
+                    BallClusterContents after = cur.withAdded(one);
+                    if (after == cur) {
+                        break;                       // 加不进去 → 停
+                    }
+                    BallClusterItem.setContents(target, after);
+                    any = true;
+                    changed = true;
+                }
+                if (any) {
+                    inventory.setItem(i, BallClusterItem.contents(shell).isEmpty()
+                            ? ItemStack.EMPTY : shell);
+                }
+                continue;
+            }
+
+            // ===== 散球：直接并 =====
             ItemStack probe = BallClusterItem.asBall(slot);
             if (probe.isEmpty()) {
                 continue;
             }
-            BallClusterContents existing = BallClusterItem.contents(target);
-            if (!existing.hasRoom() || !existing.matches(probe)) {
+            BallClusterContents cur = BallClusterItem.contents(target);
+            if (!cur.hasRoom() || !cur.matches(probe)) {
                 continue;
             }
             // withAdded 失败会静默返回 this —— 必须核对结果再动来源槽
-            BallClusterContents after = existing.withAdded(probe);
-            if (after == existing) {
+            BallClusterContents after = cur.withAdded(probe);
+            if (after == cur) {
                 continue;
             }
             BallClusterItem.setContents(target, after);

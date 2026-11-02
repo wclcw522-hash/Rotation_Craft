@@ -79,6 +79,17 @@ public final class BallPouchHud implements GuiLayer {
             return;
         }
 
+        // ===== 【球堆】快捷栏里的数量（作者 2026-11-02）=====
+        //
+        // 作者原话：「球堆右下角数字在背包能看见，但是物品栏看不见」。
+        //
+        // 根因：`IItemDecorator` 只挂在容器界面（`AbstractContainerScreen`）物品格的
+        // `itemDecorations` 上；**HUD 的快捷栏是 `Gui` 自己画的**，不走那条路，
+        // 所以同一个装饰器在背包里有、在快捷栏没有。
+        //
+        // 必须在下面那堆 `return` 之前调 —— 这里跟「手上是不是弩」无关。
+        renderHotbarClusterCounts(graphics, minecraft, player);
+
         // 只用弩时才显示 —— 这个格子本来就是给「用弩选弹」服务的
         if (!(player.getMainHandItem().getItem() instanceof CrossbowItem)) {
             return;
@@ -145,5 +156,52 @@ public final class BallPouchHud implements GuiLayer {
         String amount = String.valueOf(count);
         graphics.text(minecraft.font, amount,
                 x + 24 - minecraft.font.width(amount), y + 13, 0xFFFFFFFF, true);
+    }
+
+    /**
+     * <b>快捷栏（HUD）里球堆的数量</b>（作者 2026-11-02：「球堆右下角数字在背包能看见，
+     * 但是物品栏看不见」）。
+     *
+     * <h2>为什么背包有、快捷栏没有</h2>
+     * <p>{@code BallClusterDecorator} 是 {@code IItemDecorator}，只在容器界面
+     * （{@code AbstractContainerScreen}）物品格的 {@code itemDecorations} 里被调用。
+     * <b>HUD 的快捷栏是 {@code Gui} 自己画的</b>，不走那条路 —— 所以同一个装饰器
+     * 在背包里生效、在快捷栏里完全没机会执行。</p>
+     *
+     * <h2>坐标</h2>
+     * <p>照搬原版快捷栏的布局：整条宽 {@code HOTBAR_WIDTH}、贴着底边
+     * {@code screenHeight - HOTBAR_HEIGHT}，每格 {@code SLOT_WIDTH = 20}。
+     * 数字落点与 {@code GuiGraphicsExtractor#itemCount} 一致
+     * （{@code x + 19 - 2 - 宽度}、{@code y + 6 + 3}），白色带阴影。</p>
+     */
+    private static void renderHotbarClusterCounts(GuiGraphicsExtractor graphics,
+                                                  Minecraft minecraft, LocalPlayer player) {
+        int screenWidth = minecraft.getWindow().getGuiScaledWidth();
+        int screenHeight = minecraft.getWindow().getGuiScaledHeight();
+        // 窗口太小就别画 —— 避免把几何递交到渲染区外（26.2 的 enableScissor 不做 clamp）
+        if (screenHeight < HOTBAR_HEIGHT || screenWidth < HOTBAR_WIDTH) {
+            return;
+        }
+
+        int left = screenWidth / 2 - HOTBAR_WIDTH / 2;
+        int top = screenHeight - HOTBAR_HEIGHT;
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack.isEmpty() || !com.mcmodworkspace.moreballs.BallClusterItem.isCluster(stack)) {
+                continue;
+            }
+            com.mcmodworkspace.moreballs.BallClusterContents contents =
+                    com.mcmodworkspace.moreballs.BallClusterItem.contents(stack);
+            if (contents.isEmpty()) {
+                continue;
+            }
+            String amount = String.valueOf(contents.size());
+            // 原版快捷栏每格 20px（HOTBAR_WIDTH 182 ≈ 9×20 + 边距），
+            // 不能用 SLOT_WIDTH —— 那个 29 是弹药提示格的尺寸，跟快捷栏无关。
+            int x = left + i * 20;
+            graphics.text(minecraft.font, amount,
+                    x + 19 - 2 - minecraft.font.width(amount), top + 6 + 3, 0xFFFFFFFF, true);
+        }
     }
 }

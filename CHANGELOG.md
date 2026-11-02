@@ -1,3 +1,63 @@
+## 1.2.0.113 — 产物槽清空；回收路径补回「优先已有球堆」；双击先取球再合并；快捷栏数字
+
+### ① 切组合球第一象限产物多一倍
+
+`cutBalls` 里 `menu.clickMenuButton(player, selected)` 会让服务端**重新算一次产物**并写回产物槽，
+那份 copy 走发给玩家之后，**槽里的还在** —— 玩家再点一次产物槽就能白拿一份第一象限的四分之一球。
+
+两个 `break` 前都补 `resultSlot.set(ItemStack.EMPTY)`（组合球本体、球堆最后一颗）。
+
+### ② 收球优先并进已有球堆 —— 这版「修坏了」的原因
+
+1.2.0.112 只改了 `BallPickupHandler`（空手拾取），**漏了 `BallPhysicsCore` 的两处回收交付**
+（`deliverToOwner` 与另一条回收路径）。上一版之所以是好的，正是因为那两处也在。
+
+补回：
+
+```java
+if (player != null && BallClusterItem.mergeIntoExisting(player, stack)) {
+    this.discard();
+    return;
+}
+stack = BallClusterItem.clusterize(stack);
+```
+
+### ③ 双击一键全部拿起：改成「先取出球再合并」
+
+原来 `absorbInto` 把遇到的球堆**当成一个整体**直接并 —— 用户指出应该是**先取出球再合并**。
+
+改成逐颗取：`takeOne` 每次都拿**耐久最低**那颗，目标壳 `hasRoom()` 为假就停：
+
+```java
+while (true) {
+    BallClusterContents cur = BallClusterItem.contents(target);
+    if (!cur.hasRoom()) break;                        // 满 64 → 停
+    ItemStack one = BallClusterItem.takeOne(shell);   // 取最低耐久
+    if (one.isEmpty()) break;
+    BallClusterContents after = cur.withAdded(one);
+    if (after == cur) break;
+    BallClusterItem.setContents(target, after);
+}
+```
+
+因为取的是最低耐久那颗，**装不下时留在原槽里的自然就是耐久最高的那些**，且位置不变。
+散球那条分支保持直接并。
+
+### ④ 球堆数字：背包能看见、物品栏看不见
+
+关键线索。`BallClusterDecorator` 是 `IItemDecorator`，只在容器界面
+（`AbstractContainerScreen`）物品格的 `itemDecorations` 里被调用；
+**HUD 的快捷栏是 `Gui` 自己画的**，不走那条路。
+
+而且 `BallPouchHud.render` 开头就 `if (!(mainHand instanceof CrossbowItem)) return;`，
+哪怕加进去也没机会执行。
+
+新增 `BallPouchHud.renderHotbarClusterCounts(...)`，在**所有 return 之前**调用：
+遍历 `player.getInventory()` 的前 9 格，是球堆就按原版布局画数字 ——
+`left = width/2 - 182/2`、`top = height - 22`、每格 **20px**（不是 `SLOT_WIDTH` 的 29，
+那是弹药提示格的尺寸），落点 `x + 19 - 2 - 宽度`、`y + 6 + 3`，白色带阴影。
+
+---
 ## 1.2.0.112 — 从 1.2.0.105 重做四项（作者要求「回退版本然后重做」）
 
 上一批（1.2.0.106~111）改得乱七八糟，作者要求回退重做。本版以 `11e49af`（1.2.0.105）为基线。
