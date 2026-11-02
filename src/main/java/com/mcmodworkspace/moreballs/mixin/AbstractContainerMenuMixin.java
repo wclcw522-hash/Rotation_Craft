@@ -387,6 +387,8 @@ public abstract class AbstractContainerMenuMixin {
                 // 背包满了：这一份掉脚下，然后收手（剩下的留在材料格里）
                 player.drop(product, false);
                 inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
+                // 产物槽同样要清 —— 否则那份留在槽里，玩家还能再取一次（多产一份）
+                resultSlot.set(ItemStack.EMPTY);
                 made++;
                 break;
             }
