@@ -1,3 +1,55 @@
+## 1.2.0.118 — 叠在一起的组合球被整叠切掉；点击整理静默
+
+### ① 叠在一起的完整组合球被一下全都切掉
+
+两个错叠在一起：
+
+**a. 材料复位把整栈清空了**
+
+```java
+} else {
+    inputSlot.set(ItemStack.EMPTY);   // ← 组合球那颗时代的写法
+}
+```
+
+现在材料格可能是可叠的栈（`rest` 里还剩 N-1 颗），直接清空就等于整叠被吞，
+只切出一份产物。改成两条分支统一用 `rest`：
+
+```java
+inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
+```
+
+**b. `if (!cluster) break;` 让组合球永远只切一颗**
+
+改成按 shift 区分：
+
+```java
+if (!cluster) {
+    if (!hasRest) break;      // 栈空 → 收工
+    if (!quickMove) break;    // 光标点击 → 只切一颗
+    continue;                 // Shift → 把整个栈切完
+}
+```
+
+循环开头每轮重取 `material`，所以 `continue` 就能接着切下一颗。
+
+### ② 点击整理静默
+
+作者：「中键整理功能静默，留一个接口备用」。
+
+新增总开关，逻辑一条没删：
+
+```java
+private static final boolean TIDY_ON_CLICK_ENABLED = false;
+```
+
+- `moreballs$specialClicks` 里的 `PICKUP_ALL` 接管：`TIDY_ON_CLICK_ENABLED && ...`
+- `canTakeItemForPickAll` 覆写同样受这个开关控制
+  （否则球堆双击会走原版、把壳撒一地）
+
+改回 `true` 即恢复。`moreballs$tidyIntoCarried` 与 `moreballs$absorbInto` 完整保留。
+
+---
 ## 1.2.0.116 — 球堆掉落即拆散；切球诊断；回退厚度
 
 作者 2026-11-02 三项指示：

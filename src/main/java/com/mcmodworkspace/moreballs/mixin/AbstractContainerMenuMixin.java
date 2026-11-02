@@ -57,20 +57,32 @@ public abstract class AbstractContainerMenuMixin {
     /** 切球诊断只打一次（定位完删掉） */
     private static boolean DIAG_CUT = false;
 
+    /**
+     * <b>点击整理球堆是否启用</b>（作者 2026-11-02：「中键整理功能静默，留一个接口备用」）。
+     *
+     * <p>现在是 {@code false} —— 逻辑全保留（{@code moreballs$tidyIntoCarried} 与
+     * {@code moreballs$absorbInto} 一条没删），只是不接管点击。改回 {@code true} 即恢复。</p>
+     */
+    private static final boolean TIDY_ON_CLICK_ENABLED = false;
+
     @Inject(method = "clicked", at = @At("HEAD"), cancellable = true, require = 0)
     private void moreballs$specialClicks(int slotId, int button, ContainerInput input,
                                          Player player, CallbackInfo ci) {
         AbstractContainerMenu self = (AbstractContainerMenu) (Object) this;
 
-        // ===== ⓪ 双击一键全部拿起（原版 PICKUP_ALL）对球堆生效（作者 2026-11-02）=====
+        // ===== ⓪ 点击整理球堆（原版 PICKUP_ALL / 双击）—— **静默中**（作者 2026-11-02）=====
         //
-        // 原版双击的真实协议**不是** slotId == -999（那是「点击窗口外丢弃物品」），而是：
-        //   AbstractContainerScreen.mouseClicked L405 判 doubleclick + canTakeItemForPickAll，
-        //   成立后 L419 发 ContainerInput.PICKUP_ALL。
+        // 作者原话：「中键整理功能静默，留一个接口备用」。
         //
-        // 球堆是 stacksTo(1) 的自定义物品，canTakeItemForPickAll 对它返回 false ——
-        // 连 PICKUP_ALL 都发不出来，所以下面还附了一个覆写把它放行。
-        if (input == ContainerInput.PICKUP_ALL) {
+        // 所以逻辑一条不删，只把总开关关掉：
+        //   · {@link #TIDY_ON_CLICK_ENABLED} = false 时完全不接管，原版行为照旧；
+        //   · 改回 true 就恢复（{@code moreballs$tidyIntoCarried} 与
+        //     {@code moreballs$absorbInto} 都还完整保留着）。
+        //
+        // 原版双击的真实协议不是 slotId == -999（那是「点击窗口外丢弃物品」），而是
+        // AbstractContainerScreen.mouseClicked L405 判 doubleclick + canTakeItemForPickAll，
+        // 成立后 L419 发 ContainerInput.PICKUP_ALL。
+        if (TIDY_ON_CLICK_ENABLED && input == ContainerInput.PICKUP_ALL) {
             if (moreballs$tidyIntoCarried(self, player)) {
                 ci.cancel();
                 return;
@@ -413,18 +425,36 @@ public abstract class AbstractContainerMenuMixin {
             }
 
             // ===== 材料复位 =====
-            if (cluster) {
-                inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
-                if (hasRest) {
-                    menu.clickMenuButton(player, selected);
-                }
-            } else {
-                inputSlot.set(ItemStack.EMPTY);
+            //
+            // ⚠️⚠️ **两条分支都必须用 `rest`**（作者 2026-11-02：「现在叠在一起的完整组合球
+            //     会被一下全都切掉，只有一份产物」）。
+            //
+            //   原来 else 分支写的是 `inputSlot.set(ItemStack.EMPTY)` —— 那是「组合球只有一颗」
+            //   时代的写法。现在材料格可能是**可叠的栈**（`rest` 里还剩 N-1 颗），
+            //   直接清空就等于把整叠都吞了：只切出一份产物，其余全消失。
+            inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
+            if (cluster && hasRest) {
+                menu.clickMenuButton(player, selected);   // 球堆：重算产物给下一颗
             }
             made++;
             // ⚠️ 产物槽要清，但**不能在这里清** —— 见下面 `broadcastChanges()` 之后的说明。
             if (!cluster) {
-                break;   // 组合球本体只切一次
+                // ===== 组合球本体 =====
+                //
+                // 作者 2026-11-02：「现在叠在一起的完整组合球会被一下全都切掉，只有一份产物」
+                // —— 根因就是这里原来**无条件 break**。
+                //
+                // 材料格是可叠的栈时必须按 shift 区分：
+                //   · 光标点击（!quickMove）—— 只切一颗，原版语义
+                //   · Shift 一键（quickMove）—— 把整个栈切完，每颗各出 4 份
+                // 循环开头每轮都会重取 `material`，所以直接 continue 就能接着切下一颗。
+                if (!hasRest) {
+                    break;              // 栈已清空 → 收工
+                }
+                if (!quickMove) {
+                    break;              // 没按 shift → 只切一颗
+                }
+                continue;               // 还有下一颗，继续切
             }
             if (!hasRest) {
                 break;   // 最后一颗切完 → 收工
@@ -524,7 +554,7 @@ public abstract class AbstractContainerMenuMixin {
     @Inject(method = "canTakeItemForPickAll", at = @At("HEAD"), cancellable = true, require = 0)
     private void moreballs$allowDoubleClickOnCluster(ItemStack carried, Slot slot,
             org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
-        if (slot != null && BallClusterItem.isCluster(slot.getItem())) {
+        if (TIDY_ON_CLICK_ENABLED && slot != null && BallClusterItem.isCluster(slot.getItem())) {
             cir.setReturnValue(true);
         }
     }
