@@ -103,15 +103,8 @@ public class BallCuttingRecipe extends StonecutterRecipe {
             boolean quarter = this.result().item() == ModItems.BALL_QUARTER.get();
             int firstSource = comboPieceSource(probe, 0, quarter);
             if (firstSource >= 0) {
-                int total = quarter ? 4 : 2;
-                int same = 0;
-                for (int i = 0; i < total; i++) {
-                    if (comboPieceSource(probe, i, quarter) == firstSource) {
-                        same++;
-                    }
-                }
                 product.set(ModComponents.FRAGMENT_SOURCE.get(), firstSource);
-                product.setCount(Math.max(1, same));
+                product.setCount(1);   // 恒 1 份，其余全由 giveRestPieces 补（作者 2026-11-02）
             }
             return product;
         }

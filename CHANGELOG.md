@@ -1,3 +1,48 @@
+## 1.2.0.110 — 切石机产物槽显示木球（FRAGMENT_SOURCE 被误删）；恢复收球优先已有球堆
+
+### ① 产物槽显示木四分之一球
+
+作者 2026-11-02：「切石机产物槽显示木四分之一球而不是第一象限的四分之一球，
+相应的产物会多出相应份数的木四分之一球」。
+
+我在 1.2.0.109 把 `assemble` 改成「产物槽恒 1 份」时，删掉 `same` 累加循环的范围划得太宽，
+**连 `product.set(FRAGMENT_SOURCE, firstSource)` 一起删了**。于是产物保留 json 模板里的
+占位值 `fragment_source: 0` —— 那就是木球。
+
+补回来：
+
+```java
+boolean quarter = this.result().item() == ModItems.BALL_QUARTER.get();
+int firstSource = comboPieceSource(probe, 0, quarter);
+if (firstSource >= 0) {
+    product.set(ModComponents.FRAGMENT_SOURCE.get(), firstSource);
+}
+product.setCount(1);
+```
+
+### ② 恢复「收球优先并进已有球堆」
+
+1.2.0.109 我把 `BallClusterItem` / `BallPickupHandler` / `BallPhysicsCore` 整体同步回
+1.2.0.105 基线时，把这条改动一起清掉了 —— 那是**误删**，它本来是好的。
+
+恢复三处：
+
+| 位置 | 内容 |
+|---|---|
+| `BallClusterItem.mergeIntoExisting(Player, ItemStack)` | 遍历背包按「同球种 + 同档位 + 有空位」找壳，`store()` 也复用它 |
+| `BallPickupHandler` | 空手拾取时先问它，成功就 `itemEntity.discard()` |
+| `BallPhysicsCore` 两处回收交付 | 同上 |
+
+`withAdded` 失败会静默返回 `this` —— 必须核对结果再清源栈，否则凭空销毁玩家的球。
+
+### ③ 双击一键收纳：仍未实现
+
+`AbstractContainerMenu` L404 的 `slotIndex == -999` 分支是「把光标物品丢出去」；
+`Minecraft` 与 `MouseHandler` 里都搜不到 `doubleClick` / `slotClicked`。
+**原版双击收纳的客户端入口不在这两个类里**，之前加的 `slotId == -999` 拦截根本没机会执行，
+已彻底回退（代码里 0 处）。要修需先定位真实入口。
+
+---
 ## 1.2.0.107 — 补上第三处产物槽清空（背包满那条路径）
 
 1.2.0.106 只清了两个 `break` 前的产物槽：组合球本体、球堆最后一颗。
