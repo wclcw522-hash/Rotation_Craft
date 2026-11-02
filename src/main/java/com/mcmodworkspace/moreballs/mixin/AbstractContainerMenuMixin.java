@@ -64,6 +64,22 @@ public abstract class AbstractContainerMenuMixin {
             return;
         }
 
+        // ===== ①' 双击一键收纳球堆（作者 2026-11-02）=====
+        //
+        // 作者原话：「原版的光标拿着物品双击一键收纳的功能要对球堆也生效，
+        // 光标拿着球堆的时候，双击将符合条件的球和球堆内的球整理到光标处，
+        // 手里拿着球的时候，先瞬间新建一个符合条件的球堆把光标处的球放进去再进行整理」
+        //
+        // 原版双击的协议是：客户端检测到双击后发 `slotId = -999` + `PICKUP` + 左键，
+        // 服务端 `AbstractContainerMenu.clicked` 收到就「把光标上的物品撒出去 / 收回来」。
+        // 球堆是自定义物品，原版那套对它没意义（会把壳撒一地）—— 所以在这里接管。
+        if (input == ContainerInput.PICKUP && button == 0 && slotId == -999) {
+            if (moreballs$tidyIntoCarried(self, player)) {
+                ci.cancel();
+                return;
+            }
+        }
+
         // ===== ② 光标上拿着球堆 + 右键空格 = 只放出 **1 颗球**（作者 2026-10-16）=====
         //
         // ⚠️ 这是在**改造原版行为**：原版「光标上有物品 + 右键空格」会把光标上那一份
@@ -392,11 +408,23 @@ public abstract class AbstractContainerMenuMixin {
                 inputSlot.set(ItemStack.EMPTY);
             }
             made++;
+            // ⚠️⚠️ **产物槽必须清空**（作者 2026-11-02：「按住shift切开的时候，
+            //   产物栏对应的四分之一球会被产出两份」）。
+            //
+            //   上面 L331 `clickMenuButton(player, selected)` 会让服务端**重新算一次产物**
+            //   并写回产物槽；我们把那份 copy 走发给玩家之后，**槽里那份还在**。
+            //   原来这里只清材料格、不清产物槽 ⇒ 玩家还能再点一次产物槽、再拿一份，
+            //   表现就是「产物栏那份被产出两份」。
+            //
+            //   组合球本体只切一次，之后槽位不再需要重算，直接清掉最干净。
             if (!cluster) {
+                resultSlot.set(ItemStack.EMPTY);
                 break;   // 组合球本体只切一次
             }
             if (!hasRest) {
-                break;   // 最后一颗切完 → 收工
+                // 最后一颗切完 —— `clickMenuButton` 没再跑，产物槽里同样残留着上一份
+                resultSlot.set(ItemStack.EMPTY);
+                break;
             }
         }
 
@@ -418,6 +446,91 @@ public abstract class AbstractContainerMenuMixin {
      * <p>份数随模板走：四分之一 4 份、半球 2 份（见
      * {@link com.mcmodworkspace.moreballs.BallCuttingRecipe#comboPieceSource}）。</p>
      */
+    /**
+     * <b>双击一键收纳球堆</b>（作者 2026-11-02）。
+     *
+     * <p>作者原话：「原版的光标拿着物品双击一键收纳的功能要对球堆也生效，
+     * 光标拿着球堆的时候，双击将符合条件的球和球堆内的球整理到光标处；
+     * 手里拿着球的时候，先瞬间新建一个符合条件的球堆把光标处的球放进去再进行整理」。</p>
+     *
+     * <h2>两种入口</h2>
+     * <ol>
+     *   <li><b>光标上是球堆</b> —— 直接开始整理：把背包里所有「同球种 + 同档位」的
+     *       球和球堆并进光标这个壳，直到壳满或没有可并的了。</li>
+     *   <li><b>光标上是球（用过的）</b> —— 先就地建一个壳把光标那颗装进去，
+     *       再从背包里继续收同档的；满耐久 / 没耐久概念的球本来就能叠，不套壳，
+     *       交给原版行为。</li>
+     * </ol>
+     *
+     * @return {@code true} = 这次点击已被接管（调用方要 {@code ci.cancel()}）
+     */
+    private static boolean moreballs$tidyIntoCarried(AbstractContainerMenu self, Player player) {
+        if (player.level().isClientSide()) {
+            return false;   // 让客户端走原版预测，服务端结果同步回去
+        }
+        ItemStack carried = self.getCarried();
+        if (carried.isEmpty()) {
+            return false;
+        }
+
+        boolean tidied = false;
+
+        if (com.mcmodworkspace.moreballs.BallClusterItem.isCluster(carried)) {
+            // 情况 A：光标上已经是壳 —— 直接往壳里收
+            tidied = moreballs$absorbInto(self, player, carried);
+        } else if (com.mcmodworkspace.moreballs.BallAmmo.isBall(carried)
+                && com.mcmodworkspace.moreballs.BallClusterTier.of(carried).isClustered()) {
+            // 情况 B：光标上是「用过的球」—— 先就地封成壳，再收
+            ItemStack shell = com.mcmodworkspace.moreballs.BallClusterItem.clusterize(carried.copy());
+            if (com.mcmodworkspace.moreballs.BallClusterItem.isCluster(shell)) {
+                self.setCarried(shell);
+                tidied = moreballs$absorbInto(self, player, shell);
+            }
+        }
+
+        if (tidied) {
+            self.broadcastChanges();
+        }
+        return tidied;
+    }
+
+    /**
+     * 把背包里所有能并进 {@code target} 这个壳的球/球堆并进去，并清空那些来源槽。
+     *
+     * @return 有没有真的并进去过东西
+     */
+    private static boolean moreballs$absorbInto(AbstractContainerMenu self, Player player, ItemStack target) {
+        boolean changed = false;
+        var inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack slot = inventory.getItem(i);
+            if (slot.isEmpty() || slot == target) {
+                continue;
+            }
+            // 壳 → 取出它装的那颗当探针；散球 → 直接自己
+            ItemStack probe = com.mcmodworkspace.moreballs.BallClusterItem.asBall(slot);
+            if (probe.isEmpty()) {
+                continue;
+            }
+            com.mcmodworkspace.moreballs.BallClusterContents existing =
+                    com.mcmodworkspace.moreballs.BallClusterItem.contents(target);
+            if (!existing.hasRoom() || !existing.matches(probe)) {
+                continue;
+            }
+            // ⚠️ `withAdded` 失败会静默返回 this —— 必须核对结果再动来源槽，
+            //    否则就是凭空销毁玩家的球（这个坑 2026-10-15 已经踩过一次）。
+            com.mcmodworkspace.moreballs.BallClusterContents after = existing.withAdded(probe);
+            if (after == existing) {
+                continue;
+            }
+            com.mcmodworkspace.moreballs.BallClusterItem.setContents(target, after);
+            // 来源槽整个清空（球堆的话里面的球已经全被 withAdded 拿走了）
+            inventory.setItem(i, ItemStack.EMPTY);
+            changed = true;
+        }
+        return changed;
+    }
+
     private static void moreballs$giveRestPieces(Player player, ItemStack combo, ItemStack product) {
         Integer keptSource = product.get(
                 com.mcmodworkspace.moreballs.ModComponents.FRAGMENT_SOURCE.get());

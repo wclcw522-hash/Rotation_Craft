@@ -129,6 +129,22 @@ public final class BallPickupHandler {
         //    （袋子里转槽 → 背包 → 掉脚下），和弩射完的回收完全一致。
         //    满耐久的球照旧放行 —— 它们本来就能和同批新球叠成一堆，套壳是画蛇添足。
         if (BallClusterTier.of(stack).isClustered()) {
+            // ===== 先并进背包里**已有的**同档球堆（作者 2026-11-02）=====
+            //
+            // 作者原话：「空手收球的时候，优先将球收入背包中已有的符合条件的球堆，
+            // 而不是新建球堆。」
+            //
+            // 原来这里直接 clusterize（纯新建）⇒ 每捡一颗用过的球就多占一格，
+            // 打一会儿背包又被吃满。现在先问 mergeIntoExisting，
+            // 它内部按「同球种 + 同档位 + 还有空位」找壳，成功就把 stack 清空。
+            if (BallClusterItem.mergeIntoExisting(player, stack)) {
+                event.setCanPickup(TriState.FALSE);
+                if (stack.isEmpty()) {
+                    itemEntity.discard();
+                }
+                return;
+            }
+            // 背包里没有能装的壳 → 才新建一个（保持原有落点规则）
             ItemStack shell = BallClusterItem.clusterize(stack.copy());
             if (BallClusterItem.isCluster(shell)) {
                 event.setCanPickup(TriState.FALSE);

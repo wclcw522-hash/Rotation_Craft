@@ -1,3 +1,59 @@
+## 1.2.0.106 — shift 切开多产一份；收球优先并已有球堆；双击一键收纳球堆
+
+作者 2026-11-02 三项：
+1. 「按住 shift 切开的时候，产物栏对应的四分之一球会被产出两份」
+2. 「空手收球的时候，优先将球收入背包中已有的符合条件的球堆，而不是新建球堆」
+3. 「原版的光标拿着物品双击一键收纳的功能要对球堆也生效」
+
+### ① shift 切开多产一份
+
+`AbstractContainerMenuMixin.moreballs$cutBalls` 里，`menu.clickMenuButton(player, selected)`
+会让服务端**重新算一次产物**并写回产物槽；那份被 copy 走发给玩家后，**槽里的还在**。
+原来收尾只清材料格、不清产物槽 ⇒ 玩家还能再点一次产物槽、再拿一份。
+
+修法：三个 `break` 之前都把 `resultSlot.set(ItemStack.EMPTY)` —— 组合球本体只切一次、
+球堆最后一颗切完，两条路都一样。
+
+### ② 空手收球优先并进已有球堆
+
+`BallClusterItem.store()` 里本来就有「先找已有壳、没有再新建」的逻辑，
+但**它没有任何调用点**（死方法）；真正在跑的收球入口 `BallPickupHandler`
+直接调 `clusterize()` —— 那个只会新建壳。于是每捡一颗用过的球就多占一格。
+
+把「先找已有壳」抽成 `BallClusterItem.mergeIntoExisting(Player, ItemStack)`：
+
+```java
+public static boolean mergeIntoExisting(Player player, ItemStack ball) {
+    // 遍历背包，按「同球种 + 同档位 + 还有空位」找壳
+    // withAdded 失败会静默返回 this —— 必须核对结果再清源栈
+}
+```
+
+`store()` 的 ① 段与 `BallPickupHandler` 都先问它，返回 true 就不新建。
+
+### ③ 双击一键收纳球堆
+
+原版双击的协议是客户端发 `slotId = -999` + `PICKUP` + 左键，服务端
+`AbstractContainerMenu.clicked` 收到就「把光标上的物品撒出去」。球堆是自定义物品，
+原版那套对它没意义（会把壳撒一地）。
+
+在 `moreballs$specialClicks` 加分支接管，新增两个方法：
+
+- `moreballs$tidyIntoCarried` —— 判断光标上是球堆还是散球
+- `moreballs$absorbInto` —— 遍历背包，把能并进目标壳的球/球堆并进去并清空来源槽
+
+两种入口：
+
+| 光标上 | 行为 |
+|---|---|
+| **球堆** | 直接把背包里「同球种 + 同档位」的球和球堆并进这个壳，直到壳满或没有可并的 |
+| **用过的球** | 先 `clusterize` 就地封成壳放进光标，再从背包继续收同档的 |
+
+满耐久 / 没耐久概念的球本来就能叠，不套壳，交给原版行为。
+
+只做服务端（改的是背包槽位与光标的持久状态，客户端那份由同步包刷回来）。
+
+---
 ## 1.2.0.105 — 锤头不在手中时锁死物品栏切换
 
 作者 2026-11-02：「流星锤在锤头不在手中时不能通过任何方式切换物品栏这一条功能没有实现」。
