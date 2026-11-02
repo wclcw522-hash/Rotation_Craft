@@ -135,6 +135,9 @@ public final class BallPickupHandler {
                 if (stack.isEmpty()) {
                     itemEntity.discard();
                 }
+                // 原版的摆臂动作（作者 2026-11-02：「让捡球这个动作右键时有原版的那个摆臂动作」）。
+                // 这条路不经过原版的正常拾取，所以得自己补一下 —— 否则球凭空消失、手上毫无反馈。
+                player.swing(net.minecraft.world.InteractionHand.MAIN_HAND, true);
                 return;
             }
             ItemStack shell = BallClusterItem.clusterize(stack.copy());
@@ -145,6 +148,7 @@ public final class BallPickupHandler {
                     player.drop(shell, false);   // 实在放不下就掉在脚下，绝不凭空消失
                 }
                 itemEntity.discard();
+                player.swing(net.minecraft.world.InteractionHand.MAIN_HAND, true);
                 return;
             }
         }

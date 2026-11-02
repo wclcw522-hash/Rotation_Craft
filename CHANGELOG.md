@@ -1,3 +1,19 @@
+## 1.2.0.111 — 捡球补原版摆臂动作
+
+作者 2026-11-02：「让捡球这个动作右键时有原版的那个摆臂动作」。
+
+球被自动收进球堆这条路径**不经过原版的正常拾取**（`event.setCanPickup(FALSE)` 拦掉了），
+所以原版那套摆臂动画不会播放 —— 球凭空消失、手上毫无反馈。
+
+在 `BallPickupHandler` 的两个成功分支各补一次：
+
+```java
+player.swing(net.minecraft.world.InteractionHand.MAIN_HAND, true);
+```
+
+`true` = 广播给周围客户端，联机时别人也能看到。
+
+---
 ## 1.2.0.110 — 切石机产物槽显示木球（FRAGMENT_SOURCE 被误删）；恢复收球优先已有球堆
 
 ### ① 产物槽显示木四分之一球
