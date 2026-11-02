@@ -1,3 +1,39 @@
+## 1.2.0.115 — shift 切球份数彻底固定；HUD 数量右移下移；球堆掉落物补侧面
+
+### ① shift 一键合成时第一象限产物多一倍
+
+前几版一直在「产物槽装几份 / 补发跳几份」之间找平衡，两边各读一个数字，只要不同步就出错。
+
+这版**把两个数字都钉死**，不再有任何互相推导：
+
+| 位置 | 值 |
+|---|---|
+| `BallCuttingRecipe.assemble` | `product.setCount(1)` —— 产物槽恒 1 份 |
+| `giveRestPieces` | `int keptLeft = keptSource == null ? 0 : 1;` —— 固定跳 1 份、补 3 份 |
+
+`FRAGMENT_SOURCE` 仍然设成 `comboPieceSource(probe, 0, quarter)`（第一象限），
+所以产物槽负责第一象限，其余三个进背包。合计恒为 4，与 shift 与否无关。
+
+不再读 `product.getCount()` —— 那个值一旦和 `assemble` 不同步，就是「多一倍」或「少一半」。
+
+### ② 快捷栏球堆数量向左上偏 3 像素
+
+作者截图对比后发现左上各偏 3px。`renderHotbarClusterCounts` 的落点补上偏移：
+
+```java
+int x = left + i * 20 + 3;
+graphics.text(..., x + 19 - 2 - font.width(amount), top + 6 + 3 + 3, ...);
+```
+
+### ③ 球堆掉落物只有薄薄一层、没有厚度
+
+`BallClusterSpecialRenderer.drawQuad` 只画了正面与背面两个面 —— 从侧面看就是**零厚度**。
+
+原版 `ItemModelGenerator` 给 `item/generated` 额外生成四个侧面（各取边缘一条 UV），
+那才是物品「有厚度」的来源。照同样做法补上左 / 右 / 上 / 下四个侧面，
+厚度沿用已有的 `PLANE_Z_BACK = 7.5` ~ `PLANE_Z_FRONT = 8.5`（= 1 模型单位 = 1/16 格）。
+
+---
 ## 1.2.0.114 — 球堆改回按档位分组
 
 作者 2026-11-02：「现在球堆会错误的堆到一起而不分级，球堆的名字依据最低耐久者决定，

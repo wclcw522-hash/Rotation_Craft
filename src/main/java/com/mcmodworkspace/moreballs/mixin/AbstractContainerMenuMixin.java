@@ -470,7 +470,9 @@ public abstract class AbstractContainerMenuMixin {
         //
         //   改成按**份数**跳：`product.getCount()` 是几就跳几次，减到 0 才继续补。
         //   于是「产物槽份数 + 补发份数」恒等于 4（四合一）/ 2（半球）。
-        int keptLeft = keptSource == null ? 0 : Math.max(0, product.getCount());
+        // 产物槽**恒 1 份**（见 assemble），所以这里固定只跳过 1 份 —— 补发恒 3 份。
+        // 不读 product.getCount()：那个值一旦和 assemble 不同步，shift 时就会多一倍或少一半。
+        int keptLeft = keptSource == null ? 0 : 1;
         for (int i = 0; i < total; i++) {
             int source = com.mcmodworkspace.moreballs.BallCuttingRecipe
                     .comboPieceSource(combo, i, quarter);

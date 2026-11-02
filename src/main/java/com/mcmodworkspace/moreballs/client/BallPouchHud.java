@@ -199,9 +199,14 @@ public final class BallPouchHud implements GuiLayer {
             String amount = String.valueOf(contents.size());
             // 原版快捷栏每格 20px（HOTBAR_WIDTH 182 ≈ 9×20 + 边距），
             // 不能用 SLOT_WIDTH —— 那个 29 是弹药提示格的尺寸，跟快捷栏无关。
-            int x = left + i * 20;
+            //
+            // ⚠️ +3/+3 的偏移（作者 2026-11-02 截图反馈：「物品栏的球堆数量比正常的
+            //    向左上偏了各 3 像素」）。原版 `GuiGraphicsExtractor#itemCount` 的落点是
+            //    `x + 19 - 2 - 宽度`、`y + 6 + 3`，而 HUD 这边 `x/y` 是**格子左上角**，
+            //    和容器界面里 `itemDecorations` 拿到的坐标系不完全一致，所以要补回来。
+            int x = left + i * 20 + 3;
             graphics.text(minecraft.font, amount,
-                    x + 19 - 2 - minecraft.font.width(amount), top + 6 + 3, 0xFFFFFFFF, true);
+                    x + 19 - 2 - minecraft.font.width(amount), top + 6 + 3 + 3, 0xFFFFFFFF, true);
         }
     }
 }

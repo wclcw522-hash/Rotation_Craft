@@ -111,7 +111,7 @@ public class BallCuttingRecipe extends StonecutterRecipe {
                     }
                 }
                 product.set(ModComponents.FRAGMENT_SOURCE.get(), firstSource);
-                product.setCount(Math.max(1, same));
+                product.setCount(1);   // 恒 1 份（作者 2026-11-02：shift 时多一倍，改回固定值彻底消歧义）
             }
             return product;
         }
