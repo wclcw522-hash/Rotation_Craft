@@ -1,3 +1,83 @@
+## 1.2.0.112 — 从 1.2.0.105 重做四项（作者要求「回退版本然后重做」）
+
+上一批（1.2.0.106~111）改得乱七八糟，作者要求回退重做。本版以 `11e49af`（1.2.0.105）为基线。
+
+### ② 切组合球产物份数：用「份数」而不是「来源」对齐
+
+`giveRestPieces` 原来写的是「source == keptSource 就跳」—— 按**来源**跳、把该来源全跳过。
+配合 `assemble` 的 `setCount(Math.max(1, same))`：
+
+- 产物槽代表 2 份、循环只碰到 1 个同来源的 i ⇒ **多发 1 份**
+- 产物槽代表 1 份、该来源占两个象限 ⇒ **少发 1 份**
+
+改成按**份数**跳：
+
+```java
+int keptLeft = keptSource == null ? 0 : Math.max(0, product.getCount());
+...
+if (keptSource != null && source == keptSource && keptLeft > 0) {
+    keptLeft--;
+    continue;
+}
+```
+
+于是「产物槽份数 + 补发份数」恒等于 4（四合一）/ 2（半球）。
+产物槽负责第一象限那份，其余三个进背包。
+
+### ② 收球优先并进已有球堆
+
+`BallClusterItem.store()` 里本来就有「先找已有壳」的逻辑，但**收球那条路不走它** ——
+`BallPickupHandler` 直接调 `clusterize`（纯新建）。把那段抽成
+`BallClusterItem.mergeIntoExisting(Player, ItemStack)`，`store` 与 `BallPickupHandler` 共用。
+
+`withAdded` 在满 / 不匹配时会静默返回 `this` —— 必须核对结果再清源栈。
+
+### ④ 捡球摆臂
+
+`BallPickupHandler` 两条返回路径（并入已有 / 新建壳）都补：
+
+```java
+player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+```
+
+### ③ 双击一键全部拿起：找到真正入口
+
+**原版双击不是 `slotId == -999`**（那是「点击窗口外丢弃物品」）。真实协议在
+`AbstractContainerScreen.mouseClicked`：
+
+```java
+// L405
+if (this.doubleclick && slot != null && event.button() == 0
+        && this.menu.canTakeItemForPickAll(ItemStack.EMPTY, slot)) {
+    // L419
+    this.slotClicked(slot, slotId, event.button(), ContainerInput.PICKUP_ALL);
+```
+
+而球堆是 `stacksTo(1)` 的自定义物品，`canTakeItemForPickAll` 对它返回 false ——
+**连 PICKUP_ALL 都发不出来**，这就是之前怎么拦都没反应的原因。
+
+两处一起改：
+
+| 位置 | 内容 |
+|---|---|
+| `canTakeItemForPickAll` 覆写 | 目标槽是球堆 ⇒ `cir.setReturnValue(true)` |
+| `moreballs$specialClicks` | `input == ContainerInput.PICKUP_ALL` ⇒ 接管整理 |
+
+整理：光标是球堆就直接往壳里收；光标是用过的球就先 `clusterize` 封壳放进光标再收。
+
+### ① 球堆右下角数字：加了诊断
+
+检查结论：`BallClusterDecorator`（`IItemDecorator`）确实存在、`MoreBallsClient` L83 注册正确、
+`render` 里的绘制语句也在。找不出为什么不显示，所以加一句**一次性**日志：
+
+```java
+[球堆数字] render 被调用：size={} x={} y={} 窗口={}x{}
+```
+
+三种可能靠它区分：不出现 ⇒ 没被调；出现但 size 小 ⇒ 数据问题；出现且 size ≥ 2 ⇒ 画了但被盖住。
+定位完这一句会删掉。
+
+---
 ## 1.2.0.111 — 捡球补原版摆臂动作
 
 作者 2026-11-02：「让捡球这个动作右键时有原版的那个摆臂动作」。

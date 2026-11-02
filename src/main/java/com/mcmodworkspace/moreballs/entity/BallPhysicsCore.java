@@ -2547,11 +2547,6 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         //    玩家拿到的都是「一格装一堆」。
         //
         //    满耐久的球会被 clusterize 原样返回（它们本来就能叠成一堆，不需要壳）。
-        if (player != null && com.mcmodworkspace.moreballs.BallClusterItem
-                .mergeIntoExisting(player, stack)) {
-            this.discard();
-            return;
-        }
         stack = com.mcmodworkspace.moreballs.BallClusterItem.clusterize(stack);
 
         if (!stack.isEmpty() && BallPouchHelper.giveToPlayer(player, stack)) {
@@ -4394,12 +4389,6 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         //    玩家拿到的都是「一格装一堆」。
         //
         //    满耐久的球会被 clusterize 原样返回（它们本来就能叠成一堆，不需要壳）。
-        //    先并进背包里**已有的**同档球堆（作者 2026-11-02：优先已有，不新建）
-        if (owner instanceof Player ownerPlayer && com.mcmodworkspace.moreballs.BallClusterItem
-                .mergeIntoExisting(ownerPlayer, stack)) {
-            this.discard();
-            return;
-        }
         stack = com.mcmodworkspace.moreballs.BallClusterItem.clusterize(stack);
 
         boolean diagIsShell = com.mcmodworkspace.moreballs.BallClusterItem.isCluster(stack);

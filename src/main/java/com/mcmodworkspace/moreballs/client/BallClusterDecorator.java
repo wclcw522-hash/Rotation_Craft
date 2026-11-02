@@ -45,6 +45,9 @@ public final class BallClusterDecorator implements IItemDecorator {
     private static final int DECORATION_WIDTH = 16;
     private static final int DECORATION_HEIGHT = 24;
 
+    /** 诊断只打一次；定位完就删（作者 2026-11-02） */
+    private static boolean DIAG_LOGGED = false;
+
     /** 无状态，全局一个就够 */
     public static final BallClusterDecorator INSTANCE = new BallClusterDecorator();
 
@@ -81,6 +84,21 @@ public final class BallClusterDecorator implements IItemDecorator {
                 || x + DECORATION_WIDTH > window.getGuiScaledWidth()
                 || y + DECORATION_HEIGHT > window.getGuiScaledHeight()) {
             return false;
+        }
+
+        // ===== 一次性诊断（作者 2026-11-02：「球堆在物品栏里少了右下角数字」）=====
+        //
+        // 目的：区分三种可能 ——
+        //   · 日志根本不出现 ⇒ 装饰器没被调（注册或 Item 不匹配）
+        //   · 出现但 size 是 0/1 ⇒ 数据侧问题
+        //   · 出现且 size ≥ 2 ⇒ 画了但被别的绘制盖住 / 坐标不对
+        // 定位完这一句就删。
+        if (!DIAG_LOGGED) {
+            DIAG_LOGGED = true;
+            com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                    "[球堆数字] render 被调用：size={} x={} y={} 窗口={}x{}",
+                    contents.size(), x, y,
+                    window.getGuiScaledWidth(), window.getGuiScaledHeight());
         }
 
         // ===== 光标上拿着球时，给「能收下它的球堆」画右下角小加号（作者 2026-10-18）=====

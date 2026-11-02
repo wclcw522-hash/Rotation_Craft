@@ -314,7 +314,7 @@ public class BallClusterItem extends Item {
             return;
         }
 
-        // ① 先并进已有的同类壳（作者 2026-11-02：优先已有，不新建）
+        // ① 先并进已有的同类壳（抽成 mergeIntoExisting，收球那条路也用同一条判据）
         if (mergeIntoExisting(player, ball)) {
             return;
         }
@@ -328,12 +328,12 @@ public class BallClusterItem extends Item {
     }
 
     /**
-     * <b>只试着并进背包里已有的同档球堆，不新建任何东西</b>（作者 2026-11-02：「空手收球的时候，
-     * 优先将球收入背包中已有的符合条件的球堆，而不是新建球堆」）。
+     * <b>只试着并进背包里已有的同档球堆，不新建任何东西</b>（作者 2026-11-02：
+     * 「空手收球的时候，优先将球收入背包中已有的符合条件的球堆，而不是新建球堆」）。
      *
-     * <p>原来这段逻辑只写在 {@link #store} 里，而 {@code store} 没有调用点；
-     * 真正在跑的三条路（拾取 / 两种回收）都用 {@link #clusterize} —— 那个只会新建壳。
-     * 抽出来之后三条路都能先问它。</p>
+     * <p>原来这段逻辑只写在 {@link #store} 里，而收球那条真正在跑的路
+     * （{@code BallPickupHandler}）直接调 {@link #clusterize} —— 那个只会新建壳，
+     * 于是每捡一颗用过的球就多占一格。抽出来之后两条路共用同一套判据。</p>
      *
      * @param ball 要并进去的球（<b>成功时会被就地清空</b>）
      * @return {@code true} = 已经全部并进某个已有的壳里了
@@ -352,7 +352,8 @@ public class BallClusterItem extends Item {
             if (!existing.hasRoom() || !existing.matches(ball)) {
                 continue;
             }
-            // withAdded 满 / 不匹配时会静默返回 this —— 必须核对结果再清源栈（2026-10-15 踩过）
+            // withAdded 在满 / 不匹配时会静默返回 this —— 必须核对结果再清源栈，
+            // 否则就是凭空销毁玩家的球（2026-10-15 踩过一次）。
             BallClusterContents after = existing.withAdded(ball);
             if (after == existing) {
                 continue;

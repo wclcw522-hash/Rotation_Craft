@@ -1,7 +1,9 @@
 package com.mcmodworkspace.moreballs.mixin;
 
 import com.mcmodworkspace.moreballs.BallClusterContents;
+import com.mcmodworkspace.moreballs.BallAmmo;
 import com.mcmodworkspace.moreballs.BallClusterItem;
+import com.mcmodworkspace.moreballs.BallClusterTier;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerInput;
@@ -59,13 +61,12 @@ public abstract class AbstractContainerMenuMixin {
 
         // ===== ⓪ 双击一键全部拿起（原版 PICKUP_ALL）对球堆生效（作者 2026-11-02）=====
         //
-        // 原版双击的真实协议**不是** slotId == -999，而是：
+        // 原版双击的真实协议**不是** slotId == -999（那是「点击窗口外丢弃物品」），而是：
         //   AbstractContainerScreen.mouseClicked L405 判 doubleclick + canTakeItemForPickAll，
         //   成立后 L419 发 ContainerInput.PICKUP_ALL。
         //
-        // 球堆是 stacksTo(1) 的自定义物品，原版那套对它没意义（会把整个壳撒出去）。
-        // 另外 canTakeItemForPickAll 对 stacksTo(1) 会返回 false、连 PICKUP_ALL 都不发，
-        // 所以下面还附加了一个覆写把它放行。
+        // 球堆是 stacksTo(1) 的自定义物品，canTakeItemForPickAll 对它返回 false ——
+        // 连 PICKUP_ALL 都发不出来，所以下面还附了一个覆写把它放行。
         if (input == ContainerInput.PICKUP_ALL) {
             if (moreballs$tidyIntoCarried(self, player)) {
                 ci.cancel();
@@ -336,7 +337,6 @@ public abstract class AbstractContainerMenuMixin {
 
         int made = 0;
         for (int n = 0; n < rounds; n++) {
-            material = inputSlot.getItem();   // continue 之后上一轮的 material 已过期
             // ===== 这一轮消耗的目标 =====
             //  · 材料是球堆 → 取走壳里耐久最低那一颗，剩余的壳暂存在局部变量里
             //    （不落地也不进背包 —— 那样会凭空多出第二份）
@@ -352,16 +352,14 @@ public abstract class AbstractContainerMenuMixin {
                 one = BallClusterItem.takeOne(shell);
                 rest = shell.copy();
             } else {
-                // 材料格可能是可叠的栈 —— 只取 1 颗当这一轮的目标（作者 2026-11-02）
-                one = material.copy();
-                one.setCount(1);
-                rest = material.copy();
-                rest.shrink(1);
+                one = material;
+                rest = ItemStack.EMPTY;
+            }
+            if (one.isEmpty()) {
+                break;
             }
             boolean isCombo = one.is(com.mcmodworkspace.moreballs.ModItems.COMBO_BALL.get());
-            boolean hasRest = cluster
-                    ? !BallClusterItem.contents(rest).isEmpty()
-                    : !rest.isEmpty();
+            boolean hasRest = cluster && !BallClusterItem.contents(rest).isEmpty();
 
             // ===== 那颗球进材料格 → 重新选中配方 → 算产物 =====
             // （材料换了物品，原版 slotsChanged 会把配方列表重置，所以必须重选）
@@ -402,19 +400,17 @@ public abstract class AbstractContainerMenuMixin {
             }
 
             // ===== 材料复位 =====
-            inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
-            if (hasRest && cluster) {
-                menu.clickMenuButton(player, selected);
+            if (cluster) {
+                inputSlot.set(hasRest ? rest : ItemStack.EMPTY);
+                if (hasRest) {
+                    menu.clickMenuButton(player, selected);
+                }
+            } else {
+                inputSlot.set(ItemStack.EMPTY);
             }
             made++;
             if (!cluster) {
-            if (!hasRest) {
-                break;              // 栈已清空 → 收工
-            }
-            if (!quickMove) {
-                break;              // 没按 shift → 只切一颗
-            }
-            continue;               // 栈里还有 → 继续切下一颗
+                break;   // 组合球本体只切一次
             }
             if (!hasRest) {
                 break;   // 最后一颗切完 → 收工
@@ -455,9 +451,16 @@ public abstract class AbstractContainerMenuMixin {
         boolean quarter = comboMaterial
                 || product.is(com.mcmodworkspace.moreballs.ModItems.BALL_QUARTER.get());
         int total = quarter ? 4 : 2;
-        // 产物槽只代表 1 份，所以这里**只跳过一次**（作者 2026-11-02）
-        // 产物槽已经发了几份同来源的，这里就跳过几份 —— 两边必须用同一个数字（作者 2026-11-02）
-        int keptLeft = keptSource == null ? 0 : product.getCount();
+        // ⚠️⚠️ **产物槽已经发了几份同来源的，这里就跳过几份**（作者 2026-11-02）。
+        //
+        //   原来写的是「source == keptSource 就跳」—— 按**来源**跳、把该来源全跳过。
+        //   配合 `assemble` 的 `setCount(Math.max(1, same))`：
+        //     · 产物槽代表 2 份、循环只碰到 1 个同来源的 i ⇒ 多发 1 份
+        //     · 产物槽代表 1 份、该来源占两个象限      ⇒ 少发 1 份
+        //
+        //   改成按**份数**跳：`product.getCount()` 是几就跳几次，减到 0 才继续补。
+        //   于是「产物槽份数 + 补发份数」恒等于 4（四合一）/ 2（半球）。
+        int keptLeft = keptSource == null ? 0 : Math.max(0, product.getCount());
         for (int i = 0; i < total; i++) {
             int source = com.mcmodworkspace.moreballs.BallCuttingRecipe
                     .comboPieceSource(combo, i, quarter);
@@ -491,7 +494,7 @@ public abstract class AbstractContainerMenuMixin {
      */
     @Inject(method = "canTakeItemForPickAll", at = @At("HEAD"), cancellable = true, require = 0)
     private void moreballs$allowDoubleClickOnCluster(ItemStack carried, Slot slot,
-                                                     org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+            org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
         if (slot != null && BallClusterItem.isCluster(slot.getItem())) {
             cir.setReturnValue(true);
         }
@@ -517,8 +520,8 @@ public abstract class AbstractContainerMenuMixin {
         if (BallClusterItem.isCluster(carried)) {
             // 情况 A：光标上已经是壳 —— 直接往壳里收
             tidied = moreballs$absorbInto(player, carried);
-        } else if (com.mcmodworkspace.moreballs.BallAmmo.isBall(carried)
-                && com.mcmodworkspace.moreballs.BallClusterTier.of(carried).isClustered()) {
+        } else if (BallAmmo.isBall(carried)
+                && BallClusterTier.of(carried).isClustered()) {
             // 情况 B：光标上是「用过的球」—— 先就地封成壳放进光标，再收
             ItemStack shell = BallClusterItem.clusterize(carried.copy());
             if (BallClusterItem.isCluster(shell)) {
@@ -555,7 +558,7 @@ public abstract class AbstractContainerMenuMixin {
             if (!existing.hasRoom() || !existing.matches(probe)) {
                 continue;
             }
-            // withAdded 失败会静默返回 this —— 必须核对结果再动来源槽，否则凭空销毁玩家的球
+            // withAdded 失败会静默返回 this —— 必须核对结果再动来源槽
             BallClusterContents after = existing.withAdded(probe);
             if (after == existing) {
                 continue;
