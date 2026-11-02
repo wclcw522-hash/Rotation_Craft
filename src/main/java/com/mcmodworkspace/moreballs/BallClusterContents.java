@@ -104,21 +104,23 @@ public record BallClusterContents(ItemStack icon, List<ItemStack> balls) {
         if (ball.isEmpty() || this.balls.isEmpty()) {
             return false;
         }
-        // ===== 兼容性修订（作者 2026-10-15）=====
+        // ===== 按档位分组（作者 2026-11-02 定稿）=====
         //
-        // ⚠️ 这里**只比球种，不再比档位**。
+        // 历史经过，别再翻：
+        //   · 1.1.0.0（0eae316）—— 初次实现，**按档分**（PRISTINE / FLAWED / DAMAGED /
+        //     BROKEN / CRUMBLING 各一个壳）
+        //   · 1.1.0.10（322b1fd）—— 作者要求「改回一个球种一个壳」，于是把档位判据删了，
+        //     理由写的是「原先按档拆成最多 5 个壳，观感就是不堆叠」
+        //   · 现在（2026-11-02）—— 作者重新要求**分级**：
+        //     「球堆会错误的堆到一起而不分级，球堆的名字依据最低耐久者决定，
+        //      而不是分成各个档位」
         //
-        //    原先还有一条 `&& BallClusterTier.of(ball) == tier()`，于是同一个球种会按
-        //    剩余耐久被拆成最多 5 个壳（PRISTINE / FLAWED / DAMAGED / BROKEN / CRUMBLING）。
-        //    打完一局回收回来，玩家看到的就是**好几个各装一两颗的壳** ——
-        //    作者原话「打出去收回来的还是不堆叠」说的就是这个。
-        //
-        //    而作者最初的需求写得很明确：「把一堆**耐久各异**的球收进一格」——
-        //    「耐久各异」正是要**放在一起**，档位不该成为分开的理由。
-        //
-        //    每颗球的精确耐久仍然各自独立保存（balls 里每颗都带自己的 TOUGHNESS_LEFT），
-        //    取出时一分不差地还回去 —— 这一点没有变。
-        //    档位仍然用于**显示**（壳的名字、「最低耐久」那行 tooltip），只是不再用于分组。
+        // 所以档位判据加回来了。档位不同 ⇒ 不并进同一个壳；档位相同 ⇒ 精确耐久仍各自独立保存。
+        // 名字里的档位前缀（{@code cluster.rotation_craft.tier.*}）本来就按 {@link #tier()}
+        // 算，分组改回按档之后名字自然就对了 —— 不会再出现「名字跟着最低耐久者跑」。
+        if (BallClusterTier.of(ball) != tier()) {
+            return false;
+        }
         ItemStack first = this.balls.get(0);
         if (!ItemStack.isSameItem(ball, first)) {
             return false;

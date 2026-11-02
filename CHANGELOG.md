@@ -1,3 +1,38 @@
+## 1.2.0.114 — 球堆改回按档位分组
+
+作者 2026-11-02：「现在球堆会错误的堆到一起而不分级，球堆的名字依据最低耐久者决定，
+而不是分成各个档位」。
+
+### 历史经过（先说清楚不是本轮改坏的）
+
+| 提交 | 内容 |
+|---|---|
+| `0eae316`（1.1.0.0） | 初次实现，**按档分**（PRISTINE / FLAWED / DAMAGED / BROKEN / CRUMBLING 各一壳） |
+| `322b1fd`（1.1.0.10） | 作者要求「改回一个球种一个壳」，删掉了档位判据 —— 理由写的是「原先按档拆成最多 5 个壳，观感就是不堆叠」 |
+
+也就是说「不分档」是 1.1.0.10 定的。现在作者重新要求分级，按新要求改回来。
+
+### 改动
+
+`BallClusterContents.matches` 里加回档位判据：
+
+```java
+if (BallClusterTier.of(ball) != tier()) {
+    return false;
+}
+ItemStack first = this.balls.get(0);
+if (!ItemStack.isSameItem(ball, first)) {
+    return false;
+}
+```
+
+- 档位不同 ⇒ 不并进同一个壳
+- 档位相同 ⇒ 精确耐久仍各自独立保存（`balls` 里每颗带自己的 `TOUGHNESS_LEFT`），取出时一分不差
+
+名字里的档位前缀本来就按 `tier()` 算（`BallClusterItem.getName` → `tierKey(contents.tier())`），
+分组改回按档之后名字自然就对了，不会再跟着最低耐久者跑。
+
+---
 ## 1.2.0.113 — 产物槽清空；回收路径补回「优先已有球堆」；双击先取球再合并；快捷栏数字
 
 ### ① 切组合球第一象限产物多一倍
