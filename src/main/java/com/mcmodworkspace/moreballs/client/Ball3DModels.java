@@ -146,9 +146,9 @@ public final class Ball3DModels {
         return Minecraft.getInstance().getModelManager().getStandaloneModel(k);
     }
 
-    /** 象限模型该用的 RenderType —— 与整球同一个图集 */
+    /** 象限模型该用的 RenderType —— 与整球同一条管线 */
     public static net.minecraft.client.renderer.rendertype.RenderType quadrantRenderType() {
-        return net.minecraft.client.renderer.Sheets.cutoutBlockItemSheet();
+        return net.minecraft.client.renderer.rendertype.RenderTypes.cutoutMovingBlock();
     }
 
 
@@ -190,15 +190,23 @@ public final class Ball3DModels {
     /**
      * 该球 3D 模型用的 RenderType（带 alpha 裁剪，空心球要看得出镂空）。
      *
-     * <p>⚠️ 用 {@code itemCutout} 而不是 {@code entityCutout}（作者 2026-10-29：「黑漆漆的看不出来是啥球」）。
-     * 我们的几何是「方块模型那一套 quads」（{@link BlockStateModelPart}），
-     * 而 {@code entityCutout} 是按**实体模型的法线**做漫反射的 —— 两者不是同一套光照，
-     * 套上去整体偏暗，贴图颜色出不来。{@code itemCutout} 才是给物品/方块模型用的那条管线。</p>
+     * <h2>为什么是 {@code cutoutMovingBlock}</h2>
+     * <p>我们的几何是<b>方块模型那一套 quads</b>（{@link BlockStateModelPart}），
+     * 必须走<b>方块管线</b>；{@code cutoutMovingBlock()} 正是原版活塞推方块时用来画
+     * {@code BlockStateModelPart} 的那条（{@code RenderPipelines.CUTOUT_BLOCK} +
+     * {@code createMovingBlockSetup}），顶点格式和光照都对得上。</p>
+     *
+     * <h2>历史（都踩过，别再回头）</h2>
+     * <ul>
+     *   <li>{@code entityCutout} —— 按实体模型法线打光，套到方块 quads 上整体发黑（2026-10-29）</li>
+     *   <li>{@code Sheets.cutoutBlockItemSheet()}（= {@code itemCutout(LOCATION_BLOCKS)}）
+     *       —— 虽然是 items 管线却读 blocks 图集，<b>球本身画得出来</b>，但顶点格式与方块 quads
+     *       不匹配，渲染状态会漏给后续方块：实测表现为场景里出现大片橙色/棕色纯色块，
+     *       连切石机这种石头材质也被采样成木头色（2026-11-03 用录像逐帧确认）。
+     *       它的特点是「球看着正常、别的东西坏了」，很容易误判成别的 bug。</li>
+     * </ul>
      */
     public static net.minecraft.client.renderer.rendertype.RenderType renderType(String key) {
-        // ⚠️ 方块模型必须用方块那套 RenderType（读 block atlas），不能用 entityCutout / itemCutout。
-        //    之前两版发黑就是选错了：那两条管线要求的是「实体模型 / 物品模型」的顶点格式与光照，
-        //    套到 BlockStateModelPart 的 quads 上颜色直接被压成黑。
-        return net.minecraft.client.renderer.Sheets.cutoutBlockItemSheet();
+        return net.minecraft.client.renderer.rendertype.RenderTypes.cutoutMovingBlock();
     }
 }

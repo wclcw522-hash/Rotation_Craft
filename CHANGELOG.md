@@ -1,3 +1,30 @@
+## 1.2.0.123 — 球体 3D 模型改用方块渲染管线
+
+### 改了什么
+
+`Ball3DModels.renderType()` 和 `quadrantRenderType()` 从
+`Sheets.cutoutBlockItemSheet()`（= `RenderTypes.itemCutout(LOCATION_BLOCKS)`）
+改为 `RenderTypes.cutoutMovingBlock()`。
+
+### 为什么
+
+我们的几何是 `BlockStateModelPart`——**方块模型那一套 quads**。原来的 `itemCutout` 是
+**物品管线**，顶点格式与光照都按物品模型来，套到方块 quads 上虽然球本身画得出来，
+但渲染状态会漏给后续物体：实测表现为场景里出现大片橙色/棕色纯色块，连石头材质的
+切石机都被采样成木头色。
+
+`cutoutMovingBlock()` 正是原版活塞推方块时画 `BlockStateModelPart` 用的那条
+（`RenderPipelines.CUTOUT_BLOCK` + `createMovingBlockSetup`），是我需要的正确管线。
+
+### 历史（都踩过）
+
+| 用过的 | 结果 |
+|---|---|
+| `entityCutout` | 按实体法线打光，整体发黑（2026-10-29） |
+| `Sheets.cutoutBlockItemSheet()` | 球正常、别的方块纹理错乱（2026-11-03） |
+| `RenderTypes.cutoutMovingBlock()` | 当前版本 |
+
+---
 ## 1.2.0.122 — 实测确认：组合球切球已完全正常（4 份四分之一球，一份不少）
 
 ### 实测证据
