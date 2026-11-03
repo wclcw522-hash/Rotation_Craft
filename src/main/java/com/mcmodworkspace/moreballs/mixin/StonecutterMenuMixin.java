@@ -113,6 +113,7 @@ public abstract class StonecutterMenuMixin {
                                            CallbackInfoReturnable<Boolean> cir) {
         StonecutterMenu self = (StonecutterMenu) (Object) this;
 
+
         if (buttonId < 0 || buttonId >= this.recipesForInput.size()) {
             return;
         }
