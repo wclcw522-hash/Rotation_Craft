@@ -1,3 +1,36 @@
+## 1.2.0.121 — 切石机组合球：摘掉半球配方 / 修首次点击 / 两处 Reference 比较错误
+
+### ① 组合球在切石机里为什么「点了没反应」
+
+`BallCuttingRecipe.matches` 里早写了「组合球不能对半切 → false」，但**那条判断对切石机的配方列表完全无效**：
+NeoForge 的 `selectByInput` 是**按 ingredient 建的索引，从头到尾不调用 `matches`**。
+于是组合球会看到「半球」和「四分之一球」两个配方，玩家点第一个（半球）→ 产物槽显示半球
+→ 再点产物槽 → `cutBalls` 里那条「组合球 + 半球 → 吞掉点击」的分支把它吃掉 → 什么都没发生。
+
+修法：新增 `StonecutterMenuMixin`，在 `slotsChanged` 里把「产物是半球」的条目从 `recipesForInput` 真正摘掉。
+
+### ② `ItemStackTemplate.item()` 返回的是 `Reference<Item>`，不是 `Item`
+
+这是本轮最关键的一个坑，**同一个错误在两个地方各犯了一次**：
+
+```java
+// ✗ 永远为 false
+slot.stack().item() != ModItems.BALL_HALF.get()
+this.result().item() == ModItems.BALL_QUARTER.get()
+```
+
+前者让配方过滤**静默失效**（日志实测 `item=Reference{...ball_half}`），
+后者让组合球**永远按「半球」的象限映射去切**，四象限全错位。
+
+两处都改成先 `create()` 出 `ItemStack` 再用 `is()` 比较。
+
+### ③ 第 0 条配方第一次点没反应
+
+`selectedRecipeIndex` 是 `DataSlot.standalone()`，**初值 0**；而原版 `clickMenuButton` 第一句就是
+`if (selectedRecipeIndex.get() == buttonId) return false;` —— 列表第 0 条第一次点必然被挡。
+修法：HEAD 判断「索引相同但产物槽为空」时把索引重置成 -1，让原版继续走正常流程。
+
+---
 ## 1.2.0.119 — 球堆六项行为：逐颗切球 / Q键逐颗扔 / 一键扔后拆散 / 不再被秒收 / 不挤成一个 / 中键整理静默
 
 ### ① 叠在一起的组合球被整叠吞掉

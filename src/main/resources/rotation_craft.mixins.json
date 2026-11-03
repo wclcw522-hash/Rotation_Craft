@@ -6,7 +6,8 @@
     "CrossbowItemMixin",
     "AbstractContainerMenuMixin",
     "InventoryMixin",
-    "ServerPlayerMixin"
+    "ServerPlayerMixin",
+    "StonecutterMenuMixin"
   ],
   "client": [
     "LocalPlayerMixin"

@@ -57,6 +57,30 @@ public abstract class AbstractContainerMenuMixin {
     /** 切球诊断只打一次（定位完删掉） */
     private static boolean DIAG_CUT = false;
 
+    /** 切球入口诊断计数器：前 20 次点击都打，之后静音（定位完删掉） */
+    private static int DIAG_CUT_COUNT = 0;
+
+    /**
+     * 切球入口诊断（临时）。
+     *
+     * <p>打印「卡在哪一步」以及当时材料格 / 产物槽的真实状态。
+     * 组合球在切石机里点不动时，看这一行就能确定是配方没算出来、被门槛挡住、
+     * 还是根本没进到 {@code moreballs$cutBalls}（那就要查 mixin 有没有注入成功）。</p>
+     */
+    private static void diagCut(String stage, boolean quickMove, boolean pickUp,
+                                ItemStack material, boolean cluster, boolean combo,
+                                int selected, ItemStack result) {
+        if (DIAG_CUT_COUNT >= 20) {
+            return;
+        }
+        DIAG_CUT_COUNT++;
+        com.mcmodworkspace.moreballs.MoreBalls.LOGGER.info(
+                "[切球] {} | quickMove={} pickUp={} | 材料={}x{} cluster={} combo={} | selected={} 产物槽={}x{}",
+                stage, quickMove, pickUp,
+                material.getItem(), material.getCount(), cluster, combo,
+                selected, result.getItem(), result.getCount());
+    }
+
     /**
      * <b>点击整理球堆是否启用</b>（作者 2026-11-02：「中键整理功能静默，留一个接口备用」）。
      *
@@ -298,6 +322,9 @@ public abstract class AbstractContainerMenuMixin {
 
         int selected = menu.getSelectedRecipeIndex();
         if (selected < 0 || resultSlot.getItem().isEmpty()) {
+            // 诊断（前 20 次）：能走到这里说明材料是球堆/组合球，但配方或产物槽没准备好
+            diagCut("配方未就绪", quickMove, pickUp, material, cluster, combo, selected,
+                    resultSlot.getItem());
             return false;   // 还没选配方 / 配方算不出东西
         }
 
@@ -317,6 +344,8 @@ public abstract class AbstractContainerMenuMixin {
         // 所以在**实际产出点**再拦一次：组合球 + 产物是半球 ⇒ 吞掉这次点击，什么都不做。
         // （`return true` 而不是 `false`：`false` 会让原版接手，而原版会真的产出一份半球。）
         if (combo && resultSlot.getItem().is(com.mcmodworkspace.moreballs.ModItems.BALL_HALF.get())) {
+            diagCut("组合球+半球配方，拒绝", quickMove, pickUp, material, cluster, combo, selected,
+                    resultSlot.getItem());
             return true;
         }
 
@@ -325,11 +354,14 @@ public abstract class AbstractContainerMenuMixin {
         // 球堆里的球都是**同一档位**的（BallClusterContents.matches 要求同档位），
         // 所以「看最低那颗」就等于看整堆 —— 与 BallCuttingRecipe.matches 同一口径。
         //
-        // ⚠️ 不达标时必须**吞掉这次点击**（什么都不做），绝不能 return false 漏给原版 ——
-        //    原版对产物槽的这次点击会把整个球堆消耗掉（作者实测踩过这个）。
+        // ⚠️⚠️ 对**球堆**必须吞掉这次点击（`stacksTo(1)`，原版一消耗整个壳就没了）。
+        //      但对**组合球**不一样：它是 `stacksTo(64)` 的，原版消耗 1 个不丢内容，
+        //      所以这里漏给原版是安全的 —— 反而比「吞掉点击、玩家点了没反应」更好。
         ItemStack peek = cluster ? BallClusterItem.asBall(inputSlot.getItem()) : material;
         if (peek.isEmpty() || !com.mcmodworkspace.moreballs.BallItem.canBeCut(peek)) {
-            return true;   // 门槛不达标 → 点不动
+            diagCut("耐久门槛不达标", quickMove, pickUp, material, cluster, combo, selected,
+                    resultSlot.getItem());
+            return cluster;   // 球堆 → 吞掉；组合球 → 漏给原版（它能正常切一颗）
         }
 
         // ===== 这个点击该不该「点不动」=====

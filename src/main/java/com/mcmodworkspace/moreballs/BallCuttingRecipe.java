@@ -61,6 +61,17 @@ public class BallCuttingRecipe extends StonecutterRecipe {
         super(commonInfo, input, result);
     }
 
+    /**
+     * <b>这条配方切出来的是半球吗</b>（作者 2026-11-03）。
+     *
+     * <p>给 {@code StonecutterMenuMixin} 用：组合球必须把「半球」那条配方从列表里摘掉。
+     * 父类的 {@code result()} 是 <b>protected</b>，外部访问不到，所以在这里开一个公开的判据
+     * —— 比在 mixin 里绕 {@code SlotDisplay} 的包名可靠得多。</p>
+     */
+    public boolean moreballs$isHalfRecipe() {
+        return this.result().item() == ModItems.BALL_HALF.get();
+    }
+
     public static final MapCodec<BallCuttingRecipe> MAP_CODEC = simpleMapCodec(BallCuttingRecipe::new);
 
     public static final StreamCodec<RegistryFriendlyByteBuf, BallCuttingRecipe> STREAM_CODEC =
@@ -94,25 +105,27 @@ public class BallCuttingRecipe extends StonecutterRecipe {
         ItemStack product = this.result().create();
         ItemStack probe = BallClusterItem.asBall(input.item());
         if (probe.is(ModItems.COMBO_BALL.get())) {
-            // ===== 组合球（作者 2026-10-16 的规则）=====
-            // 产物槽里**只放「与第一份同来源的那几份」**（同来源可以叠成一栈），
-            // 来源不同的那几份由取产物那一侧补进背包（见 AbstractContainerMenuMixin）。
+            // ===== 组合球：产物槽恒放「第一象限」那 1 份 =====
             //
-            // 例：二合一的组合球切四分之一 —— 上半两个象限同来源、下半两个同来源，
-            //     于是产物槽显示「上半那份材料的四分之一球 ×2」，下半那两份塞背包。
-            boolean quarter = this.result().item() == ModItems.BALL_QUARTER.get();
+            // 切石机的产物槽只装得下一个 ItemStack，而组合球要产出 4 个**来源不同**的碎片
+            // （ItemStack 只有一个 FRAGMENT_SOURCE 组件，装不下 4 个不同值）。
+            // 所以约定：产物槽负责第一象限那 1 份，其余 3 份由
+            // {@code AbstractContainerMenuMixin#moreballs$giveRestPieces} 在取产物时补进背包。
+            //
+            // ⚠️⚠️ **`setCount(1)` 必须无条件执行**。
+            //    原来它写在 `if (firstSource >= 0)` 里面 —— 第一象限为空（firstSource == -1）时
+            //    整个 if 跳过，产物会保留 json 模板里的 `count: 4` 且**没有 FRAGMENT_SOURCE**，
+            //    于是产物槽显示 4 个「木球碎片」（组件缺省值 0），补发侧又按 -1 再发一遍。
+            // ⚠️⚠️ `this.result().item()` 返回的是 **Reference<Item>**（不是 Item），
+            //    直接跟 `ModItems.BALL_QUARTER.get()` 比**永远为 false** ——
+            //    那样组合球会一直按「半球」的象限映射去切，四象限全错位。
+            //    必须先 create() 出 ItemStack 再比。（实测：日志里 item=Reference{...ball_quarter}）
+            boolean quarter = this.result().create().is(ModItems.BALL_QUARTER.get());
             int firstSource = comboPieceSource(probe, 0, quarter);
             if (firstSource >= 0) {
-                int total = quarter ? 4 : 2;
-                int same = 0;
-                for (int i = 0; i < total; i++) {
-                    if (comboPieceSource(probe, i, quarter) == firstSource) {
-                        same++;
-                    }
-                }
                 product.set(ModComponents.FRAGMENT_SOURCE.get(), firstSource);
-                product.setCount(1);   // 恒 1 份（作者 2026-11-02：shift 时多一倍，改回固定值彻底消歧义）
             }
+            product.setCount(1);
             return product;
         }
         int sourceIndex = sourceIndexFor(input.item());
