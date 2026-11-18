@@ -564,8 +564,22 @@ public class BallPouchItem extends Item {
             }
             return one;
         }
-        segment.remove(index);
-        return slot;
+        // ⚠️⚠️ **散球也只能拿一颗**（作者 2026-11-13 实测：装着 20 颗的那格被整格拿走了）。
+        //
+        //    原来这里是 `segment.remove(index); return slot;` —— 而 `slot` 若是一叠
+        //    （`count = 20`），那就等于**一次交出 20 颗**：袋子瞬间清空，副手拿到一叠，
+        //    弩装填只消耗其中 1 颗，剩下的又被还袋逻辑收回去 —— 现象就是
+        //    「装填能成功，但袋里球数一颗不少」，也就是刷球。
+        //
+        //    和上面球堆分支同一个道理：**取一颗，剩下的留在原格**。
+        ItemStack one = slot.copyWithCount(1);
+        slot.shrink(1);
+        if (slot.isEmpty()) {
+            segment.remove(index);
+        } else {
+            segment.set(index, slot);
+        }
+        return one;
     }
 
     /**

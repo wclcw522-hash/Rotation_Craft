@@ -438,7 +438,100 @@ public final class BallPouchHelper {
             }
         }
 
+        // ④ 装填期间被临时挪进隐藏槽的袋子（作者 2026-11-12 指定）
+        //
+        // ⚠️ 这一条不能漏：主手弩 + 副手袋子装填时，袋子会被挪进隐藏槽、
+        //    副手换成球（见 BallAmmoAutoLoader）。那段时间里袋子**不在**副手，
+        //    上面那条就找不到它 —— 于是「这次装填用了袋里哪颗球」「还剩多少」
+        //    这类统计会漏掉整整一个袋子，HUD 上的数量会凭空少一截。
+        for (ItemStack stashed : stashedPouches(player)) {
+            if (!containsSameStack(out, stashed)) {
+                out.add(stashed);
+            }
+        }
+
         return out;
+    }
+
+    // ===== 装填期间的袋子暂存（作者 2026-11-12 指定） =====
+
+    /**
+     * 隐藏槽里那个暂存的袋子；没有则返回 {@link ItemStack#EMPTY}。
+     *
+     * <p>规矩见 {@link ModAttachments#POUCH_STASH}：<b>只放收纳袋、
+     * 只能经由装填进出</b>。所以这里的读写一律走下面两个方法，
+     * 不在别处直接碰那个 attachment。</p>
+     */
+    public static ItemStack stashedPouch(Player player) {
+        List<ItemStack> stash = player.getData(ModAttachments.POUCH_STASH.get());
+        if (stash.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack first = stash.get(0);
+        return isPouch(first) ? first : ItemStack.EMPTY;
+    }
+
+    /** 隐藏槽里所有暂存的袋子（正常情况下最多一个） */
+    public static List<ItemStack> stashedPouches(Player player) {
+        List<ItemStack> stash = player.getData(ModAttachments.POUCH_STASH.get());
+        if (stash.isEmpty()) {
+            return List.of();
+        }
+        List<ItemStack> out = new ArrayList<>();
+        for (ItemStack stack : stash) {
+            if (isPouch(stack)) {
+                out.add(stack);
+            }
+        }
+        return out;
+    }
+
+    /** 隐藏槽里有没有暂存的袋子 */
+    public static boolean hasStashedPouch(Player player) {
+        return !stashedPouch(player).isEmpty();
+    }
+
+    /**
+     * 把袋子放进隐藏槽。
+     *
+     * <p>⚠️ <b>只收收纳袋</b> —— 传别的物品进来会直接被拒并返回 {@code false}，
+     * 这条是作者定的规矩（隐藏槽只装袋子），也防住「手滑把火把塞进去」这种事。</p>
+     *
+     * <p>⚠⚠️ <b>这里存的是原对象引用，不是 {@code copy()} 出来的副本</b>。
+     * 原因是 {@link BallPouchItem#takeLowestDurability} 是<b>就地扣球</b>的 ——
+     * 它改的是传进去那个 ItemStack 的组件。存副本的话，扣球扣在副本上，
+     * 而副本和玩家手里那份就分了家：袋子里那颗球一颗没少，副手却拿到了一颗全新的，
+     * 等于凭空刷球。存引用才能保证「扣球」与「放回副手」说的是同一个袋子。</p>
+     *
+     * @return true 表示已放进去了
+     */
+    public static boolean stashPouch(Player player, ItemStack pouch) {
+        if (!isPouch(pouch)) {
+            return false;
+        }
+        if (player.level().isClientSide()) {
+            return false;
+        }
+        player.setData(ModAttachments.POUCH_STASH.get(), List.of(pouch));
+        return true;
+    }
+
+    /**
+     * 把隐藏槽里的袋子取出来并清空槽位。
+     *
+     * <p>取出来后由调用方决定放哪儿（正常是副手）。槽位一定会被清空 ——
+     * 哪怕取出来的袋子因为副手被占而落到背包，也不会两边各留一份。</p>
+     */
+    public static ItemStack unstashPouch(Player player) {
+        if (player.level().isClientSide()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack pouch = stashedPouch(player);
+        if (pouch.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        player.setData(ModAttachments.POUCH_STASH.get(), List.of());
+        return pouch;
     }
 
     /** 列表里是否已经有同一个物品堆（按引用比，避免重复统计饰品栏那个） */

@@ -102,10 +102,27 @@ public final class BallAmmoAutoLoader {
             if (justSwitchedAway) {
                 recallOffhandBall(player);
             }
+            // ★ 主手不再是弩 —— 隐藏槽里要是还压着袋子，必须还回副手。
+            //   否则它会被永久扣在那儿：玩家看得见「袋子没了」，背包里也找不到。
+            restoreStashedPouch(player);
             return;
         }
 
-        // ① 主手是弩，但已经装填好了 → 不用管（子弹已经在膛里）
+        // ① ★ 装填已经结束 / 玩家松手了 → 把暂存的袋子换回副手（作者 2026-11-12 指定）
+        //
+        //    ⚠️ 这一条**必须排在下面「已装填就 return」之前**：装填完成时
+        //       `isCharged` 正好变 true，若先撞上那个 return，袋子就永远换不回来了。
+        //
+        //    两个触发时机都要认：
+        //      · 球已经进膛（`isCharged`）—— 正常装填完成
+        //      · 不再按着右键（`!isUsingItem`）—— 蓄力中途松手 / 被打断
+        if (BallPouchHelper.hasStashedPouch(player)
+                && (CrossbowItem.isCharged(mainHand) || !player.isUsingItem())) {
+            restoreStashedPouch(player);
+            return;
+        }
+
+        // ② 主手是弩，但已经装填好了 → 不用管（子弹已经在膛里）
         if (CrossbowItem.isCharged(mainHand)) {
             return;
         }
@@ -138,6 +155,24 @@ public final class BallAmmoAutoLoader {
         //    正是作者要求的行为（作者反馈的「袋里只有满耐久时，用过的同类球不会替换到副手」）。
         ItemStack offhand = player.getOffhandItem();
         boolean occupied = !offhand.isEmpty();
+
+        // ★★ 副手是收纳袋 + 正在蓄力装填 → 临时换手（作者 2026-11-12 指定）
+        //
+        // 作者的原话：「让副手是袋子的时候也触发上膛动画，在完成上膛前把袋子挤到
+        // 一个额外的隐藏物品栏里，把目标弹药拿出来，完成上膛后再把副手的弹药放回收纳袋
+        // 并让收纳袋从隐藏的额外物品栏回来。」
+        //
+        // 为什么非这样不可：原版 `CrossbowItem.tryLoadProjectiles` 只认**手持的球**。
+        // 副手拎着袋子时它什么都找不到，装填直接不起来 —— 而这恰恰是作者最自然的用法
+        // （主手弩、副手袋子）。所以装填期间必须让副手上真的有一颗球。
+        //
+        // ⚠️ 只认「正在蓄力」这一个瞬间（`isUsingItem` + 使用中的就是主手那把弩）：
+        //    平时副手拎着袋子不该被无端顶掉，那是玩家自己的搭配。
+        if (occupied && BallPouchHelper.isPouch(offhand) && isChargingCrossbow(player, mainHand)) {
+            borrowFromPouch(player, offhand, wanted);
+            return;
+        }
+
         if (occupied && !BallAmmo.isBall(offhand)) {
             return;
         }
@@ -236,6 +271,137 @@ public final class BallAmmoAutoLoader {
     }
 
     /**
+     * 玩家此刻是不是正拿着<b>这把主手弩</b>在蓄力。
+     *
+     * <p>只看 {@code isUsingItem()} 不够 —— 那个状态是「玩家在用<b>某样</b>东西」，
+     * 副手喝药水、吃食物时同样成立。必须再确认「正在用的就是主手这把弩」，
+     * 否则副手一边喝药一边被塞球就闹笑话了。</p>
+     */
+    private static boolean isChargingCrossbow(Player player, ItemStack mainHand) {
+        return player.isUsingItem() && player.getUseItem() == mainHand;
+    }
+
+    /**
+     * <b>把装填期间暂存的袋子换回副手</b> —— 作者 2026-11-12 指定流程的后半段。
+     *
+     * <p>顺序必须是「先把副手剩的球收进袋子，再把袋子放回副手」：
+     * 球已经被原版装填消耗掉了，一般副手是空的；但玩家中途松手、或者装填被别的原因
+     * 打断时，那颗球可能还挂在上头 —— 那就得先收好，别让它跟着袋子一起被顶掉。</p>
+     *
+     * <p>万一副手此刻被别的东西占了（玩家手快塞了个火把），袋子走
+     * {@link BallPouchHelper#deliverReturned} 退回背包，<b>绝不丢在地上</b>。</p>
+     */
+    private static void restoreStashedPouch(Player player) {
+        if (!BallPouchHelper.hasStashedPouch(player)) {
+            return;
+        }
+
+        // ⚠️ 顺序：**先收球、再取袋子**。
+        //    `unstashPouch` 会立刻清空隐藏槽，那之后 `allPouchStacks` 就找不到这个袋子了 ——
+        //    先取袋子的话，下面 `deliverReturned` 会把球塞进背包而不是袋子，
+        //    玩家看到的就是「那颗球没回袋子里」。袋子还在槽里时收球，才能落回它自己身上。
+        ItemStack leftover = player.getOffhandItem();
+        MoreBalls.LOGGER.info("[ball][还袋] 副手此刻={}（isBall={}），stash里球数={}",
+                leftover.isEmpty() ? "空" : leftover.getItem().toString() + " x" + leftover.getCount(),
+                BallAmmo.isBall(leftover),
+                countInPouch(BallPouchHelper.stashedPouch(player)));
+        if (!leftover.isEmpty() && BallAmmo.isBall(leftover)) {
+            player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+            BallPouchHelper.deliverReturned(player, leftover.copy());
+            MoreBalls.LOGGER.info("[ball][还袋] 副手的球已收回袋子");
+        }
+
+        ItemStack pouch = BallPouchHelper.unstashPouch(player);
+        if (pouch.isEmpty()) {
+            return;
+        }
+        MoreBalls.LOGGER.info("[ball][还袋] 取出袋子，球数={}，副手现在={}", countInPouch(pouch),
+                player.getOffhandItem().isEmpty() ? "空" : player.getOffhandItem().getItem().toString());
+
+        if (player.getOffhandItem().isEmpty()) {
+            player.setItemInHand(InteractionHand.OFF_HAND, pouch);
+            MoreBalls.LOGGER.info("[ball][还袋] 袋子已放回副手");
+        } else {
+            // 副手被别的东西占了 —— 袋子退回背包（进袋子自己 / 背包 / 掉落，都行），不能凭空消失
+            BallPouchHelper.deliverReturned(player, pouch);
+            MoreBalls.LOGGER.info("[ball][还袋] 副手被占，袋子退回背包");
+        }
+        BallPouchHelper.syncPouchToClient(player);
+    }
+
+    /**
+     * <b>装填期间临时换手</b> —— 把副手的袋子挪进隐藏槽，换上一颗选中种类的球。
+     *
+     * <p>对应作者 2026-11-12 指定的前半段。做完之后原版
+     * {@code CrossbowItem.tryLoadProjectiles} 就能在副手找到球、正常跑完装填动画；
+     * 装填结束时由 {@link #restoreStashedPouch} 把袋子换回来。</p>
+     *
+     * <h2>抽不到球怎么办</h2>
+     * <p>整段<b>回滚</b>：袋子原样放回副手。绝不能出现「袋子被挪走了、球又没拿到」
+     * 这种两头空的局面 —— 那是把玩家的东西弄丢了。</p>
+     */
+    private static void borrowFromPouch(Player player, ItemStack pouch, ItemStack wanted) {
+        if (!BallPouchHelper.stashPouch(player, pouch)) {
+            return;
+        }
+        player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+
+        // 注意：`allPouchStacks` 已经把隐藏槽里的袋子算进去了（见 BallPouchHelper）。
+        // ⚠️ 但**不能**假设「拿到的那份就是存储里那个对象」—— 见下面写回那段的说明。
+        ItemStack taken = ItemStack.EMPTY;
+        ItemStack usedPouch = ItemStack.EMPTY;
+        for (ItemStack candidate : BallPouchHelper.allPouchStacks(player)) {
+            int before = countInPouch(candidate);
+            taken = BallPouchItem.takeLowestDurability(candidate, wanted);
+            int after = countInPouch(candidate);
+            MoreBalls.LOGGER.info("[ball][借球] 候选袋球数 {} -> {}，取到={}（与入参同一对象? {}）",
+                    before, after,
+                    taken.isEmpty() ? "空" : taken.getHoverName().getString(),
+                    candidate == pouch);
+            if (!taken.isEmpty()) {
+                usedPouch = candidate;
+                break;
+            }
+        }
+
+        if (taken.isEmpty()) {
+            player.setItemInHand(InteractionHand.OFF_HAND, BallPouchHelper.unstashPouch(player));
+            diagnose(player, "袋子里取不到这种球（临时换手已回滚）", wanted, pouch);
+            return;
+        }
+
+        // ⚠️⚠️ **扣完球必须把那个袋子显式写回隐藏槽**（作者 2026-11-13 实测：球被复制）。
+        //
+        //    现象：装填能成功，但袋里的球数一颗不少 —— 装十次就白拿十颗，是个刷球漏洞。
+        //
+        //    根因：`BallPouchItem.takeLowestDurability` 是**就地改 ItemStack 组件**的
+        //    （`pouch.set(POUCH_CONTENTS, ...)`）。改的是它手里那个 ItemStack。
+        //    而 attachment 的 `getData` 返回的那份**不保证**与存储里是同一个对象 ——
+        //    扣球扣在临时副本上，真袋子纹丝不动，下一 tick 又能取到同样一颗。
+        //
+        //    所以取到球之后，把**改过的这一份**写回隐藏槽，让存储指向它。
+        if (!usedPouch.isEmpty()) {
+            BallPouchHelper.stashPouch(player, usedPouch);
+            MoreBalls.LOGGER.info("[ball][借球] 写回stash后：stash里球数={}，countOf={}",
+                    countInPouch(BallPouchHelper.stashedPouch(player)),
+                    BallAmmoSelection.countOf(player, wanted));
+        }
+
+        player.setItemInHand(InteractionHand.OFF_HAND, taken);
+        BallPouchHelper.syncPouchToClient(player);
+    }
+
+    /** 诊断用：这个袋子里现存的球数（两段合起来）；空栈返回 -1 */
+    private static int countInPouch(ItemStack pouch) {
+        if (pouch.isEmpty()) {
+            return -1;
+        }
+        BallPouchContents contents = BallPouchItem.contents(pouch);
+        return BallPouchContents.countBalls(contents.ammo())
+                + BallPouchContents.countBalls(contents.transit());
+    }
+
+    /**
      * 补弹诊断补弹诊断 —— 只在「本该补弹却没补」的地方调用，并做限流避免每刻刷屏。
      *
      * <p>打出的量：选中的是哪种球、副手现在拿着什么/耐久多少、袋子里同种最低耐久、
@@ -269,6 +435,17 @@ public final class BallAmmoAutoLoader {
     @SubscribeEvent
     public static void onPlayerLoggedOut(
             net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
-        WAS_HOLDING_CROSSBOW.remove(event.getEntity().getUUID());
+        Player player = event.getEntity();
+
+        // ⚠️ 退出前必须把暂存的袋子还回去。
+        //    玩家要是在装填动画跑到一半时退出，那个袋子还压在隐藏槽里 ——
+        //    不清的话它就**永久留在附件里**了：下一次登录，玩家背包里找不到袋子、
+        //    副手也是空的，而数据其实还挂在身上，等于凭空消失一整袋球。
+        //    这里顺手放回副手（副手多半是空的，正好接住）。
+        if (!player.level().isClientSide() && BallPouchHelper.hasStashedPouch(player)) {
+            restoreStashedPouch(player);
+        }
+
+        WAS_HOLDING_CROSSBOW.remove(player.getUUID());
     }
 }

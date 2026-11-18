@@ -187,6 +187,25 @@ public class FlailHeadEntity extends BallProjectile {
     private static final double SNAP_BACK_SPEED = 0.35D;
 
     /**
+     * <b>带【尖啸】的锤头专用的「判定线长」</b>（作者 2026-11-18 指定）。
+     *
+     * <p>【尖啸】的射线距离上限是 {@code BallExtraTraits.SHRIEK_MAX_RANGE = 256} 格，
+     * 而 {@code shriek()} 是「把整条轨迹算完、球直接停到落点」——
+     * 于是锤头一触发尖啸，位置直接跳到最多 256 格外，{@code lineLength()} 远远越过 30。
+     * 之后它又被绳子约束拉回 30 格球面上，于是「刚过 30 判一次、拉回来、
+     * 下一 tick 又是 30.x」反复触发，线长上限与回归的时序就错乱了。</p>
+     *
+     * <p>所以给带【尖啸】的锤头把**判定**阈值放宽到 40 格留出余量。
+     * <b>实际约束仍是 30 格</b>（{@code maxRopeLength} / {@code ropeLimit} 都不动），
+     * 物品面板上的「线长 30」也照旧来自 {@code FlailItem.MAX_LINE_LENGTH} ——
+     * 玩家看到的数字、和锤头真正停下的位置，都没有变。</p>
+     */
+    private static final double SHRIEK_SNAP_THRESHOLD = 40.0D;
+
+    /** 本锤头的判定线长；{@code < 0} 表示还没按 profile 算过（首次 tickFlying 时定值）。 */
+    private double snapThreshold = -1.0D;
+
+    /**
      * 绳子绷紧时朝掷出者施加的张力（每 tick 的速度增量，格/刻）。
      *
      * <p>只影响「越过线长之后」的表现：值太大会把锤头暴力拽回来像弹簧，
@@ -929,7 +948,16 @@ public class FlailHeadEntity extends BallProjectile {
 
 
         // ===== ① 线长上限：扣 1 耐久 + 完成一次弹射 + 朝掷出者的小速度 =====
-        if (this.lineLength() >= this.maxRopeLength && !this.lineCapConsumed) {
+        //
+        // 判定阈值：带【尖啸】的锤头用 40 格（见 SHRIEK_SNAP_THRESHOLD 的说明），
+        // 其余球种仍是自己的 maxRopeLength（默认 30）。
+        // ⚠️ 这里只放宽**判定**，实际约束仍由 ropeLimit / maxRopeLength 管，都是 30 格。
+        if (this.snapThreshold < 0.0D) {
+            this.snapThreshold = this.profile().hasFlag(BallBehavior.BallProfile.FLAG_SHRIEK)
+                    ? SHRIEK_SNAP_THRESHOLD
+                    : this.maxRopeLength;
+        }
+        if (this.lineLength() >= this.snapThreshold && !this.lineCapConsumed) {
             this.lineCapConsumed = true;
 
             // 【尖啸】的「弹射」：到线长上限等同于撞到东西，交给 shriekLand 结算一次。

@@ -195,6 +195,37 @@ public final class ModAttachments {
                     .build());
 
     /**
+     * <b>装填期间暂存的收纳袋</b>（空列表 = 没有暂存的）。
+     *
+     * <h2>为什么需要它（作者 2026-11-12 指定）</h2>
+     * <p>作者的用法是「主手弩 + 副手收纳袋」。而原版 {@code CrossbowItem.tryLoadProjectiles}
+     * 只认<b>手持的球</b>，副手拎着袋子时它什么都找不到 —— 装填不起来。
+     * 而 {@link BallAmmoAutoLoader} 又有一条「副手拿着非球物品就不碰」的护栏，
+     * 本意是保护火把 / 盾牌，结果把<b>袋子</b>也一起挡在外面了。</p>
+     *
+     * <p>作者定的解法：<b>装填期间把袋子临时挪到一个隐藏槽里</b>，副手换上选中的球，
+     * 让原版装填照常跑完；<b>装填一结束就把袋子换回来</b>。</p>
+     *
+     * <h2>这个槽的规矩（作者明确限定）</h2>
+     * <ul>
+     *   <li><b>只能放收纳袋</b> —— 别的物品永远进不来</li>
+     *   <li><b>只能经由装填这一条路径进出</b> —— 玩家没有任何办法往里塞别的东西，
+     *       也不会在里面发现自己的火把</li>
+     * </ul>
+     *
+     * <p>⚠️ 同 {@link #SELECTED_AMMO}，用 {@code List} 而不是裸 {@code ItemStack} ——
+     * {@code ItemStack.CODEC} 拒绝空栈，而「没有暂存」必须能表示。</p>
+     *
+     * <p>不需要 {@code .sync(...)}：副手拿什么由 {@code setItemInHand} 触发原版同步，
+     * 这个槽纯粹是服务端的记账，客户端看不到也不需要看到。</p>
+     */
+    public static final Supplier<AttachmentType<List<ItemStack>>> POUCH_STASH = ATTACHMENTS.register(
+            "pouch_stash",
+            () -> AttachmentType.<List<ItemStack>>builder(() -> List.of())
+                    .serialize(ItemStack.CODEC.listOf().fieldOf("pouch_stash"))
+                    .build());
+
+    /**
      * <b>烈焰人的球袋</b> —— 它持有的球（作者 2026-10-11 指定：混装、最多 12 颗）。
      *
      * <p>为什么要单独存：烈焰人要能**同时拿不同种类**的球，

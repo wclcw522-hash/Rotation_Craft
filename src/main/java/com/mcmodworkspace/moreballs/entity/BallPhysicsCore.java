@@ -4128,7 +4128,10 @@ public class BallPhysicsCore extends ThrowableItemProjectile {
         // （`tickHomingReturn` 放弃回归 / 主人不在）会把计数一并清零，
         // 下次落定重新等 —— 见那个方法。
         if (!this.homingBack) {
-            if (++this.homingDelayTicks < HOMING_DELAY_TICKS) {
+            // 【尖啸】的隐藏效果（作者 2026-11-18）：尖啸已经打完（`shriekDone`）
+            // ⇒ 这条路直接失效，落地后不再等这 0.5 秒。
+            // 没触发尖啸时 `shriekDone` 恒为 false，其余球种一个字节都不变。
+            if (!this.shriekDone && ++this.homingDelayTicks < HOMING_DELAY_TICKS) {
                 return false;   // 还在等，本刻不起飞（也不碰 speed / noPhysics）
             }
             this.homingDelayTicks = 0;

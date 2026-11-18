@@ -1,3 +1,545 @@
+## 1.2.0.137 —— 按作者要求回退 136
+
+**作者 2026-11-18**：「改回上一版吧」
+
+**回退内容**：删除 1.2.0.136 加在 `BallPhysicsCore.ballTickPre()` 里的那句
+`if (this.shriekDone && this.returnToOwner && this.homingToOwner()) return;`
+（连注释一起），回到 1.2.0.135 的状态。
+
+**保留不动**：1.2.0.135 的线长屏障方案 ——
+`BallExtraTraits.shriek()` 里的 `range`（有绳长约束的锤头把射程收到剩余绳长，
+球本体仍是 256 格）。作者已确认这个方案可行。
+
+### 当前状态
+
+- 【尖啸】打空气 → 锤头停在线长球面上（屏障）✓ 保留
+- 停住之后的回归：**回到 135 的行为**（不再有 136 那条额外入口）
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- `shriekDone && this.returnToOwner` 全文件扫描：无残留
+- `BallExtraTraits` L349 `double range = SHRIEK_MAX_RANGE` 仍在
+## 1.2.0.136 —— 打空气的锤头改为走**同一条**回归代码
+
+**作者 2026-11-18 反馈**：「这个回归和撞地回归感觉上不一样，撞地是正常回归，
+打空气回归的时候绳子会抽搐，更像是强制收绳，你确定这两处使用的都是回归代码吗？」
+（并确认 135 的线长屏障方案可行）
+
+### 回答：确实不是同一处
+
+| 场景 | 走的路 |
+|---|---|
+| **撞地** | 锤头脚下有方块 ⇒ 落定判定通过 ⇒ 进落定分支那句 `if (returnToOwner && homingToOwner())` ⇒ `homingToOwner0()`：0.6 起、每刻 +0.09、封顶 4.0，并开 `noPhysics` + `noGravity` 平滑飞行 |
+| **打空气（135 之后）** | 尖啸被线长屏障收尾，锤头停在 30 格**半空**，脚下没有方块 ⇒ `hasSupportBelow()` 恒 false ⇒ **永远不落定** ⇒ 落定分支那四个 `homingToOwner()` 调用点**一个都进不去** ⇒ 只剩 `applyRopeConstraint` 在原地反复投影 |
+
+**「绳子抽搐 / 更像强制收绳」就是第二行**：它压根没进回归，是绳子约束在下落与投影之间来回拉扯。
+
+### 修法
+
+`BallPhysicsCore.ballTickPre()`（L1785，紧跟忠诚段之后）补一条入口：
+
+`java
+if (this.shriekDone && this.returnToOwner && this.homingToOwner()) {
+    return;   // 本 tick 已由回归接管，常规静止处理让路
+}
+`
+
+尖啸这一趟既然已经收尾（`shriekDone`），就不存在「还没飞完」，直接交给**同一个**
+`homingToOwner()` —— 与撞地路径共用全部回归逻辑：加速曲线、穿墙、无重力一模一样。
+
+### 与 132 的关系
+
+132 加过同一行，当时按作者要求删掉了（因为那版同时还在改别的）。
+本版重新加回，理由不同：**这次的目标就是让两条路径共用同一处回归代码**，
+不再是「另开一条回归捷径」。
+
+### 影响面
+
+`shriekDone` 在没触发尖啸时**恒为 false** ⇒ 潮汐 / 铁球等其余球种完全不受影响。
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- 回读确认入口在 `BallPhysicsCore` L1785
+## 1.2.0.135 —— 【尖啸】在线长上限处立「一次性屏障」
+
+**作者 2026-11-18 报**：「还是打空气回归会慢。要不然这样，【尖啸】触发的时候在线长上限处
+先生成一个屏障，让锤头可以撞到屏障后正常回归，屏障在接受一次撞击后立即消失。」
+
+### 根因（打空气为什么和撞墙不一样）
+
+`BallExtraTraits.shriek()` 的射线每段射 `SHRIEK_MAX_RANGE = 256` 格：
+
+- **撞到方块**：`level.clip` 命中，落点就在墙面上（通常远小于 30 格）⇒ 锤头停在近处 ⇒ 回归正常
+- **打空气**：`clip` 返回 MISS，`end = to`（**256 格外**）⇒ 循环末尾
+  `shriekLand(lastPoint, null)` 把锤头**直接钉在那儿** ⇒ 线长判定被越过 ⇒
+  全靠绳子把它从 256 格拽回 30 格球面 ⇒ 就是「回归非常慢」
+
+### 修法：把线长上限当成一道一次性屏障
+
+`shriek()` 里新增局部量 `range`：
+
+`java
+double range = SHRIEK_MAX_RANGE;
+if (ball instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity ropeHead) {
+    double rope = Math.max(1.0D, ropeHead.maxRopeLength());
+    double used = owner != null
+            ? owner.getEyePosition().distanceTo(from)
+            : from.distanceTo(ball.position());
+    range = Math.max(0.0D, Math.min(range, rope - used));
+}
+`
+
+量的是**剩余绳长**（`线长 - 已用`），不是固定 30 —— 出手点本身就在主人前方几格，
+固定 30 会落到 35 格上，照样超线长。
+
+射程与「总射程用完」两处都改用 `range`：
+
+`java
+Vec3 to = cursor.add(dir.scale(range));                 // 每段射程
+if (bounce >= maxBounces || cursor.distanceTo(from) >= range) break;
+`
+
+### 为什么这就是「屏障」
+
+- 屏障的语义 = **锤头飞不出这个球面**，射线走到那儿就收尾
+- 屏障只活这一趟：`range` 是本次调用里的局部量，**算完即弃**，
+  不需要往世界里生成任何实体，也就没有「撞完要清掉」的收尾问题
+- 撞击照常结算：`shriekSegment` 的 `miss` 参数在方法体里**根本没用到**
+  （只决定调用方要不要继续走下一段），所以落点音效 / 音爆 / 范围伤害都照旧
+
+### 影响面
+
+- **球本体（回响球，没有绳子）**：`instanceof FlailHeadEntity` 不进，
+  `range` 仍是 256 ⇒ **行为一个字节没变**
+- **流星锤锤头**：射程收紧到剩余绳长 ⇒ 打空气也停在 30 格内 ⇒ 回归正常
+- **带回响组件的组合球做的锤头**：同样是 `FlailHeadEntity`，同样生效
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- 回读确认：`owner` 在 L320 声明、`range` 在 L349 使用（顺序正确）；
+  两处射程判断都已改用 `range`
+## 1.2.0.134 —— 【尖啸】锤头的判定线长放宽到 40（实际仍停在 30）
+
+**作者 2026-11-18 报的现象**：「回响流星锤的线长限制确认一下，是不是经常没有正确的停在
+30 格而是更远的距离，导致回归代码出现 bug。」
+
+### 确认：线长确实会被尖啸绕过
+
+`BallExtraTraits` 里：
+
+- `SHRIEK_MAX_RANGE = 256.0D`（尖啸射线的距离上限，作者 2026-10-16 指定）
+- `shriek()` 是「把整条轨迹算完、**球直接停到落点**」
+
+所以锤头一触发尖啸，位置**直接跳到最多 256 格外的落点**，`lineLength()` 远远越过 30。
+之后绳子约束又把它拉回 30 格球面上 —— 于是「刚过 30 判一次 → 拉回来 → 下一 tick 又 30.x」
+反复触发，线长上限与回归的时序就错乱了。
+
+1.2.0.130 的诊断日志也印证过：`tick=40 line=30.20/30.00 dist=28.31` ——
+记录到的线长确实超过 30。
+
+### 修法（按作者方案）
+
+`FlailHeadEntity`：
+
+- 新增常量 `SHRIEK_SNAP_THRESHOLD = 40.0D`
+- 新增字段 `private double snapThreshold = -1.0D;`（首次 `tickFlying` 时按 profile 定值）
+- 线长弹回判定从 `this.lineLength() >= this.maxRopeLength`
+  改成 `this.lineLength() >= this.snapThreshold`
+- `snapThreshold` 的取值：`profile().hasFlag(FLAG_SHRIEK)` ⇒ **40**，否则 ⇒ `this.maxRopeLength`（30）
+
+### 「隐藏 40 / 实际 30」是怎么保证的
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 判定阈值 `snapThreshold` | 尖啸球 **40** | 留余量，避免 30.x 反复触发 |
+| 实际约束 `maxRopeLength` | **30**（未改动） | 球面半径、收线、`ropeLimit` 全走它 |
+| 物品面板「线长」 | **30** | `FlailItem` L366-367 用的是 `MAX_LINE_LENGTH` 常量，没动 |
+
+所以：**玩家看到的数字是 30，锤头真正停下的位置也是 30**，只有内部「什么时候算到顶」
+这一条判断放宽到了 40。
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- 回读确认：`snapThreshold` 在 L206（字段）/ L955-956（定值）/ L960（判定）；
+  `maxRopeLength` 仍在 L175 且值未变；`FlailItem` 的 tooltip 仍读 `MAX_LINE_LENGTH`
+## 1.2.0.133 —— 只保留「让等待失效」这一条（作者 2026-11-18 更正）
+
+作者原话：「不是让你改回归逻辑，是改成【尖啸】会让落地后的等待这一条失效，
+不需要添加额外功能的代码。」
+
+**132 里多做了一件**：在 `ballTickPre()` 加了一个「到达尽头就直接起回归」的入口
+（`if (shriekDone && returnToOwner && homingToOwner()) return;`）—— 那等于**改了回归的启动条件**，
+属于额外功能。**本版删除**。
+
+**现在只剩一处改动**，`BallPhysicsCore.homingToOwner0()` L4134：
+
+`java
+if (!this.shriekDone && ++this.homingDelayTicks < HOMING_DELAY_TICKS) {
+    return false;
+}
+`
+
+原来是无条件 `++homingDelayTicks < HOMING_DELAY_TICKS`。加一个 `!this.shriekDone` 之后：
+
+- **触发过尖啸的球**（回响球 / 带回响组件的组合球）：`shriekDone == true` ⇒ 短路 ⇒
+  **落地后不再等那 0.5 秒**，落定即起飞
+- **其余球种**：`shriekDone` 恒为 false ⇒ 判定与原来完全一致，**一个字节没变**
+
+回归的启动条件（落定）没有动 —— 尖啸球照样要落地落定才回家，只是不再额外等 0.5 秒。
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- 全仓库扫描 `shriekDone`：除本处外全是原有代码（L1539 / L1561 / L1620 / L3104 / L1617 注释）
+- `FlailHeadEntity` 已无 `homingToOwner()` 调用（129/131 那段回退干净）
+## 1.2.0.132 —— 回退 129/131 的做法，改由【尖啸】词条处理（作者 2026-11-18 指定）
+
+### 回退
+
+**删掉 1.2.0.129 / 131 加在 `FlailHeadEntity.tickFlying()` 里的那段**：
+
+`java
+// 已删除
+if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()
+        && this.lineLength() >= this.maxRopeLength
+        && this.homingToOwner()) { return; }
+`
+
+那段是「锤头一到线长就走回归」，判据挂在**锤头**上，会连带影响所有带自动回收词条的锤头。
+
+### 新做法：给【尖啸】加一个隐藏效果
+
+作者原话：「给【尖啸】词条添加一个隐藏效果，即不受等待一秒后开始回归的判定，
+而是到达尽头就开始回归，这样不管是回响球还是带有回响组件的组合球触发了尖啸
+都可以避免这个 bug。」
+
+判据改到**词条**上（`shriekDone`），两处改动都在 `BallPhysicsCore`：
+
+**① `ballTickPre()`（L1780）—— 到达尽头就直接起回归，不经过落定分支**
+
+`java
+if (this.shriekDone && this.returnToOwner && this.homingToOwner()) {
+    return;
+}
+`
+
+回归原来的四个启动点全在落定判定之后，而落定要求「速度 < 0.03 + 脚下有支撑」。
+锤头被绳子吊着时 `hasSupportBelow()` 恒为 false，永远进不去 —— 这就是「均匀地慢」的根。
+尖啸这一趟既然已经打完（`shriekDone`），就不存在「继续飞完」这回事，直接交给回归。
+
+**② `homingToOwner0()`（L4160）—— 跳过 `HOMING_DELAY_TICKS` 的 0.5 秒等待**
+
+`java
+if (!this.shriekDone && ++this.homingDelayTicks < HOMING_DELAY_TICKS) {
+    return false;
+}
+`
+
+原判定是「落地后等 0.5 秒再起飞」，尖啸球这时已经停在落点上了，再拖一下手感就是「迟迟不走」。
+
+### 影响面
+
+`shriekDone` 在没触发尖啸时**恒为 false**，所以：
+
+- 潮汐球、铁球等**不带【尖啸】的球种**：两个判据都短路，**行为一个字节没变**
+- **回响球**：触发尖啸后到达尽头即回归
+- **带回响组件的组合球**：判据在词条上（`profile.hasFlag(FLAG_SHRIEK)`），组合同样生效
+
+### 验证
+
+- 编译 BUILD SUCCESSFUL
+- 修复后遍历确认：`FlailHeadEntity` 已无 `homingToOwner` 调用（回退干净）；
+  两处新判据分别在 `BallPhysicsCore` L1780 / L4160；无诊断日志残留
+## 1.2.0.131 —— 回响流星锤回收修复（实测验证通过）
+
+**1.2.0.130 是带诊断日志的验证版**（[flail-diag]，只在服务端每 10 刻打一行），
+本版把它删干净，逻辑与 130 完全一致。
+
+**实测数据**（1.2.0.130，回响流星锤投出后松手）：
+
+`
+tick=30  stage=FLYING retrieving=false line=1.61/30.00  dist=31.00 speed=0.000 noGravity=false
+tick=40  stage=FLYING retrieving=false line=30.20/30.00 dist=28.31 speed=0.780 noGravity=true
+tick=50  stage=FLYING retrieving=false line=19.25/30.00 dist=16.47 speed=1.680 noGravity=true
+`
+
+- 	ick=40 时 line=30.20 ≥ maxRopeLength(30.00) → 1.2.0.129 加的判断触发 → 回归接管
+  （
+oGravity=true 是 homingToOwner0 的特征）
+- 距离 31.00 → 28.31 → 16.47，速度 0 → 0.78 → 1.68（ .6 + homingTicks × 0.09 的加速曲线）
+- 10 刻走了 11.84 格 = **1.18 格/刻**，原来是 SNAP_BACK_SPEED 的 0.35 格/刻，**快 3.4 倍**
+
+**修复内容**（FlailHeadEntity.tickFlying()，utoRetrieveWanted() 置位之后）：
+
+`java
+if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()
+        && this.lineLength() >= this.maxRopeLength
+        && this.homingToOwner()) {
+    return;
+}
+`
+
+**根因回顾**：球的回归只在落定分支启动（BallPhysicsCore L2050/2064/2108/2114 四处，
+全在 hasSupportBelow() 判定之后），而锤头被绳子吊着时 hasSupportBelow() 恒为 false，
+永远不落定 ⇒ 回归一次都不启动，只剩 SNAP_BACK_SPEED = 0.35 格/刻的飘。
+回响 weight=0 初速 14，弹回后在空中飘得最久，所以只有它明显；
+潮汐 weight=6 很快落地落定，回归正常。
+
+**遗留**：本次只覆盖「超出线长」这一条路径。若锤头在 30 格**以内**悬空（不落地）时
+仍然慢，说明还有第二条路径 —— 届时加回 [flail-diag] 日志按同样方法定位。
+## 1.2.0.129 —— 回响流星锤回收「均匀地慢」修复
+
+**现象**（作者 2026-11-13）：「回响流星锤的回收有变慢了，这次是很均匀的慢，不是一顿一顿的；潮汐流星锤的正常。」
+补充：「松手以后锤头自己飘回来，很慢」「有时正常有时很慢」「之前很快」。
+
+**根因**：球的「回归」（homingToOwner0）**只在落定分支里启动** ——
+BallPhysicsCore 里 if (returnToOwner && homingToOwner()) 一共四处
+（L2050 / L2064 / L2108 / L2114），全都在落定判定之后，而落定要求
+`hasSupportBelow()`（脚下有方块）**且**速度低于阈值。
+
+锤头是被绳子吊着的：到达线长上限（30 格）时只拿到 SNAP_BACK_SPEED（0.35 格/刻）
+的初速，之后**一直在空中飘** —— hasSupportBelow() 恒为 false，**永远不落定**，
+于是回归一次都不会启动，全程只剩 0.35 格/刻（= 7 格/秒），表现为「均匀地慢」。
+
+**为什么只有回响受影响**：它 weight = 0，withWeight 把初速度抬到 14
+（`BASE_LAUNCH_SPEED - (0 - 4)`），弹回后在空中飘得更久、更难落地；
+潮汐 weight = 6 初速 8，很快砸到地上落定，回归正常启动。
+这也解释了「有时正常有时很慢」—— 只要锤头恰好落地了，回归就正常。
+
+**修法**：锤头本来就有绳子约束，不需要靠「落地」判断该不该回家 ——
+**绳子绷紧（到达线长）就是「该回家了」**。在 `tickFlying()` 里
+（`autoRetrieveWanted()` 置位之后）加一段：
+
+`java
+if (this.stage() == Stage.FLYING && this.autoRetrieveWanted()
+        && this.lineLength() >= this.maxRopeLength
+        && this.homingToOwner()) {
+    return;
+}
+`
+
+交给回归接管后速度是 0.6 起、每刻 +0.09、封顶 4.0 格/刻，比 0.35 的飘快一个量级。
+
+**遍历过的链路**（改前 / 改后都读过全文）：
+	ickReturning（L1103-1193）、
+ecoverSpeed（30 / weight）、
+profileOf / allOf、homingToOwner0（L4053-4180）、homingToOwner 四个调用点、
+utoRetrieveWanted、线长弹回（L927-946）、SNAP_BACK_SPEED、
+isShriekFlying / effectiveSpeed（确认它们**不**参与移动判定）。
+
+**修复后遍历抓到一处编译错误**：
+eturnToOwner 是 BallPhysicsCore 的 private 字段，
+子类访问不到 —— 改用本类的 utoRetrieveWanted()。编译已通过。
+
+**待作者实测确认**：本次只改了「超出线长」这一条路径。若松手后（未到线长）仍然慢，
+说明还有另一条路径，需要加日志观测 stage / isRetrieving / homingBack / homingTicks。
+## 1.2.0.128 —— 移除组合球诊断日志（验证完成后的清理）
+
+- 删除 1.2.0.127 加在 `BallComboRecipe.Vertical/Square.matches()` 开头的两行 INFO 诊断日志。
+- **组合球真实合成验证通过**（1.2.0.127 上实测）：
+  - `Square.matches` 收到 `w=2 h=2 size=4`，四格均为带 `fragment_source` 的 `ball_quarter` → 匹配
+  - 结果格产出四色组合球（木 / 圆石 / 铁 / 金），`combo_slot_3 = 2` 与左下格来源一致
+  - 玩家背包确认为 1 个 `rotation_craft:combo_ball`
+- 同时确认的设计事实：
+  - `CraftingInput.ofPositioned` **按非空包围盒裁剪**（1 格 → 1×1，横排 2 格 → 2×1，四格 → 2×2），
+    所以 `Vertical`（要求 1×2 竖排）与 `Square`（要求 2×2）的条件都是可满足的
+  - `RecipeMap.getRecipesFor` 在 `container.isEmpty()` 时直接返回空流 —— **合成格空着时 matches 不会被调用**
+  - 绕开 GUI 操作的办法：`/item replace entity @s player.crafting.0..3 with ...`
+## 1.2.0.127 —— 组合球配方诊断（仅日志，无逻辑改动）
+
+- 在 `BallComboRecipe.Vertical.matches()` / `Square.matches()` 开头各加一行 **INFO** 级诊断日志，
+  打印 `width` / `height` / `size` / 首格物品。
+- 目的：确认 26.2 的 `CustomRecipe.matches()` 在玩家 2×2 合成格上**是否被调用**，
+  以及 `CraftingInput` 裁边后的真实尺寸（`ofPositioned` 会按非空包围盒裁剪）。
+- 已验证事实：配方确实在 `RecipeManager` 里（`[ball][JEI] isHandled(...) -> true`）、
+  `getType()` 返回 `RecipeType.CRAFTING`、`/recipe give` 能识别、`fragment_source` 组件写入正常。
+- **无逻辑改动**，诊断完可整段删除。
+
+
+### 1.2.0.125 ~ 1.2.0.126 · 修「装填不扣球」的刷球漏洞
+
+**现象**（作者 2026-11-13 实测）：主手弩 + 副手收纳袋，轮盘选过弹后装填能成功，但**袋里的球一颗不少** —— 装几次就白拿几颗。
+
+**根因**（`BallPouchItem.takeOneFromSlot`）：散球分支写的是
+
+```java
+segment.remove(index);
+return slot;      // slot 可能是一叠（count = 20）
+```
+
+**整格拿走了**。袋里是「一格 20 颗」时，这一行等于一次交出 20 颗：袋子瞬间清空、副手拿到一叠，弩装填只消耗其中 1 颗，剩下的又被还袋逻辑收回去 —— 所以数字看起来没变。
+
+球堆分支早在 2026-10-15 就改成了「掏一颗、壳留剩」，**散球这一支漏了同样的处理**。
+
+**改法**：散球也只取一颗，剩下的留在原格（空了才清掉那一格）。
+
+**实测证据**（诊断日志）：
+
+```
+修复前：[借球] 候选袋球数 20 -> 0
+修复后：[借球] 候选袋球数 20 -> 19，取到=木球
+       [借球] 写回stash后：stash里球数=19，countOf=19
+       [还袋] 副手此刻=wooden_ball x1（isBall=true）
+       [还袋] 取出袋子，球数=20，副手现在=空
+       [还袋] 袋子已放回副手
+```
+
+**说明一点**：创造模式下原版**不消耗弹药**，所以装填完袋里会回到 20 —— 那是原版行为，不是本模组的 bug。
+
+**顺带加的诊断日志**（`[ball][借球]` / `[ball][还袋]`）：把「取球前后袋里几颗、副手拿着什么、写回 stash 后多少」逐项打出来。这次定位靠的就是它们——之前几轮全靠猜，绕了很多弯路。
+
+### 1.2.0.124 · 副手收纳袋也能装填（作者 2026-11-12 指定）
+
+**现象**：主手弩 + 副手收纳袋时，长按 R 有轮盘，但右键装不上弹，也看不到弹药槽。
+
+**根因**（`BallAmmoAutoLoader`）：
+
+1. 「副手拿非球物品就不碰」那条护栏本意是保护火把 / 盾牌，**把收纳袋也一起挡了** ——
+   还没走到从袋里抽球那一步就 return；
+2. 而原版 `CrossbowItem.tryLoadProjectiles` 只认**手持的球**，副手拎着袋子时什么都找不到，
+   装填根本起不来。这恰好是作者最自然的用法。
+
+**改法**（照作者指定的流程）：
+
+- `ModAttachments` 新增隐藏槽 `POUCH_STASH` —— **只放收纳袋、只能经由装填这一条路径进出**，
+  玩家没有任何别的办法往里塞东西
+- 蓄力开始的那一刻：袋子挪进隐藏槽 → 从袋里抽一颗选中种类的球顶上副手 →
+  原版装填照常跑完（上膛动画、贴图、音效全走原版）
+- 装填结束（球已进膛）或蓄力中断（松手）：**先把副手剩的球收回袋子，再把袋子换回副手**
+  （顺序不能反 —— `unstashPouch` 会立刻清空隐藏槽，先取袋子的话球会落进背包而不是袋子）
+- 抽不到球时**整段回滚**，袋子原样放回，绝不出现「袋子挪走了、球也没拿到」两头空
+- `BallPouchHelper.allPouchStacks` 把隐藏槽的袋子也算进去 ——
+  否则装填期间「袋里还剩多少」这类统计会漏掉整整一个袋子
+- 玩家登出时把袋子还回副手 —— 否则装填中途退出会让袋子**永久卡在隐藏槽**里，
+  下次登录背包找不到、副手也是空的
+
+**注**：轮盘里选过弹药仍是前提。没选弹时副手不会被自动填充，`BallPouchHud` 也整块不画 ——
+这是原有设计，不是缺陷。
+
+### 组合球数值回调 · 弩外观重写 · JEI 插件（0.3.3.50 ~ 0.3.3.53）
+
+**① 组合球数值全部回调到上一版**（作者要求）
+
+把 0.3.3.48 改过的三处合成规则原样退回：基础数值（伤害/重量/弹跳/蓄力/不精确度）取**算术平均**；
+阈值类（融化/引雷/磁吸）在 `Fragment.plus()` 里**直接相加**；【变形】按**第一份有值的来源**决定。
+同时删掉了那轮新加的 `averageThresholds()`。
+
+**② 弩上的组合球外观：两轮重写，最后定位到「事件挂错总线」**
+
+重写过程中排掉一串问题，记录在此以免重蹈：
+
+```java
+// 反编译 NeoForge：
+public class RegisterSpecialModelRendererEvent extends Event implements IModBusEvent {
+    // "This event is fired on the mod event bus"
+}
+```
+
+- **注册挂在了 `@EventBusSubscriber`（GAME 总线）** → 事件从不触发 → `bake()` 不被调用 →
+  **模型是空的，整把弩消失，而且日志里一条报错都没有**。改为在入口类
+  `modEventBus.addListener(...)`。**这类「静默空白」只能靠日志埋点定位，不能靠猜。**
+- **`base` 模型不参与渲染** —— `SpecialModelWrapper` 只用它提供 display 变换与纹理依赖
+  （`resolver.markDependency(this.base)`），几何必须由渲染器自己画。
+- **坐标空间是 0..16**（照原版 `ItemModelGenerator` 的 `from=(0,0,7.5)` / `to=(16,16,8.5)`），
+  而 `submitCustomGeometry` 的 pose **不带物品缩放** → 必须自己 `scale(1/16)`。
+  写成 `0..1` 会小到看不见，写成 `0..16` 不缩放会变成几百倍大的巨物。
+- **贴图管线要用 `RenderTypes.itemCutout`**（原版 `ItemFeatureRenderer` 走 `ITEM_CUTOUT`），
+  用实体管线 `entityCutout` 画物品会明显偏暗。
+- **组件读取要能回退**：四个 `combo_slot_N` 是派生物，`ensureComboSlots` 只在物品待在背包里时补，
+  **装在弩上就不会触发** —— 渲染层改为读不到就从 `combo_sources` 现算。
+- **空象限用 -1 表示**：二合一球的 `slot3/slot4` 是刻意移除的，原来「遇 null 就整体返回 null」
+  会让二合一球永远只画底图。
+
+**③ JEI 不显示组合球配方：缺「配方扩展」**
+
+反编译 JEI 的筛选逻辑，答案只有一行：
+
+```java
+// mezz.jei.library.plugins.vanilla.crafting.CraftingRecipeCategory
+public boolean isHandled(RecipeHolder<CraftingRecipe> recipe) {
+    return this.extendableHelper.getOptionalRecipeExtension(recipe).isPresent();
+}
+```
+
+**JEI 只显示「注册过扩展」的配方类。** 原版 `ShapedRecipe` 自带扩展，自定义配方不自带 →
+被整个丢掉 → 表现是「点上去点不动、跟没配方一样」。
+
+新增 `compat/MoreBallsJeiPlugin.java`，照 JEI 官方做法实现 `IModPlugin`：
+
+```java
+registration.getCraftingCategory().addExtension(
+        BallComboRecipe.Vertical.class, comboExtension(1, 2, ModItems.EXAMPLE_HALF.get()));
+registration.getCraftingCategory().addExtension(
+        BallComboRecipe.Square.class,   comboExtension(2, 2, ModItems.EXAMPLE_QUARTER.get()));
+```
+
+只依赖 JEI 的 API（`compileOnly`），靠 `@JeiPlugin` 注解被发现 —— **没装 JEI 时这个类不会被加载**。
+
+**④ README 精简**
+
+拆出「AI 提示」「作者的话」两块，其下加项目简介；其余章节压缩表达、合并许可与声明一节。
+### 首测修复续 · 【变形】改造与自动装填失效（作者实测反馈）
+
+**① 自动装填「几乎完全失效」—— 一个 `Integer.MAX_VALUE` 初始化陷阱**
+
+```java
+int bestLeft = Integer.MAX_VALUE;        // 初始值
+int left = remainingToughness(slot);     // 满耐久 → 也是 Integer.MAX_VALUE
+if (left < bestLeft) { ... }             // MAX < MAX 恒为 false！
+```
+
+满耐久的球返回 `Integer.MAX_VALUE`，正好等于初始值，于是**一颗都选不中**。
+而「袋里全是满耐久的球」正是最常见的情况，所以看起来整个功能都坏了。
+判据改成 `best < 0 || left < bestLeft`。
+
+> **这一条是我自己引入的**：上一版这个函数读的是原版 `DataComponents.DAMAGE`
+> （球的耐久根本不在那儿，永远读到 `null`），所有球都成了 `MAX_VALUE - 1`，
+> **歪打正着地低于初始值**，反而能取到第一颗。我把它「修对」成读 `TOUGHNESS_LEFT` 之后，
+> 隐藏的初始化缺陷才暴露出来。**修对一个 bug 时，要想到它之前「能跑」是靠什么歪打正着的。**
+
+**② 副手替换条件太宽**
+
+`sameKind(offhand, wanted)` 只判断「同种」，副手拿着满耐久球时直接返回，
+袋里那颗刚回收、用过的同类球永远轮不上。补上耐久比较：
+副手那颗**不比袋里最旧的那颗更差**时才跳过。
+
+**③ 取球判据同样按 item 比**（`BallAmmo` 里找更旧那颗时）——
+组合球全是同一个 item，会误判同种。改用 `sameKind`。
+
+**④ 多重射击的附属弹不再变形** —— 它连掉落都没有，变方块更奇怪。
+
+**⑤ 组合球掉落改为「等权重随机取一份」** —— 先随机挑一个来源，只跑那一个的掉落表。
+「铁-金球」碎了要么按铁球掉、要么按金球掉，不会两边都掉。
+
+**⑥ 【变形】改为随机变成自身材质之一**
+
+| 球 | 候选方块 |
+|---|---|
+| 金球 | 金块（单材质） |
+| 木-金-圆石-铁球 | 木板 / 金块 / 圆石 / 铁块 四选一 |
+
+放不下时同样随机退化成对应方块的物品形式。新增 `BallMorph` 负责候选推算 ——
+`BallProfile.morphBlock` 只能存一个方块，所以它的职责收敛成「表示有变形特质」。
+
+文本按作者指定：常显 `【变形】变得好方……`，Shift 展开
+`耐久耗尽后，将随机变为自身材质对应的方块。`
+
+**⑦ 【熔融】词条里的药水效果带颜色了**
+
+原来是 lang 里写死的纯文本。改成引用药水效果自己的名字，
+于是按原版规则上色（有害=红、有益=蓝）—— 「熔融物烧伤」是
+`MobEffectCategory.HARMFUL`，会以**红色**显示。
+
+**⑧ 分页文本的占位符写错了**
+
+`"第 %1s / %2s 页"` 少了 `$`，MC 解析时把 `%1` 当参数索引、后面的 `s` 丢掉，
+显示成乱码似的数字。改成 `%1$s / %2$s`，并全库扫了一遍没有同类写错。
+
+
 ## 1.2.0.123 — 球体 3D 模型改用方块渲染管线
 
 ### 改了什么

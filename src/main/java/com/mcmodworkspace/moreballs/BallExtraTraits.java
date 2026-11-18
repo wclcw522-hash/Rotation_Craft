@@ -329,6 +329,35 @@ public final class BallExtraTraits {
         Vec3 cursor = from;
         Vec3 dir = velocity.normalize();
 
+        // ===== 【尖啸】射程上限：球 256 格，**有绳长约束的锤头到线长就收尾** =====
+        //
+        // ⚠️⚠️ 作者 2026-11-18 报「打空气时回归会慢」。
+        //
+        //   根因：`SHRIEK_MAX_RANGE` 是 256 格。一路没撞到方块时，终点就取 256 格外的那个点，
+        //   而循环末尾的 `shriekLand(lastPoint, null)` 会把锤头**直接钉在那儿**。
+        //   锤头是被绳子拴着的 —— 被扔到 256 格外之后线长判定必然被越过，
+        //   接下来全靠绳子把它一路拽回 30 格球面，那一段就是玩家感觉到的「回归非常慢」。
+        //   撞到方块时没这个问题：射线先撞墙，落点本来就在 30 格内。
+        //
+        //   修法：把「线长上限」当成一道**一次性屏障** —— 射线走到那儿就收尾，
+        //   等价于撞到东西，`shriekLand` 照常结算落点，之后锤头就停在 30 格内、回归正常。
+        //   屏障只活这一趟：`range` 是本次调用里的局部量，算完即弃，
+        //   不需要往世界里生成任何实体，也就没有「撞完要清掉」的收尾问题。
+        //
+        //   **球本体（没有绳子）完全不受影响** —— 它没有「线长」这回事，
+        //   下面这个 instanceof 不进，`range` 仍是 256。
+        double range = SHRIEK_MAX_RANGE;
+        if (ball instanceof com.mcmodworkspace.moreballs.entity.FlailHeadEntity ropeHead) {
+            // 屏障立在「以主人为圆心、半径 = 线长」的那个球面上 —— 所以量的是**剩余绳长**：
+            // 锤头此刻离主人 d 格，它最多还能往外飞 (线长 - d) 格，而不是固定 30 格。
+            // （固定 30 会算错：出手点本身就在主人前方几格，射满 30 会落到 35 格上，照样超线长。）
+            double rope = Math.max(1.0D, ropeHead.maxRopeLength());
+            double used = owner != null
+                    ? owner.getEyePosition().distanceTo(from)
+                    : from.distanceTo(ball.position());
+            range = Math.max(0.0D, Math.min(range, rope - used));
+        }
+
         // ★ **出手即判定一次轨迹修正**（作者 2026-10-17 要求）
         //
         //   原来只在「每段算完之后」才跑修正链 —— 于是第一段永远是原始方向，
@@ -342,8 +371,8 @@ public final class BallExtraTraits {
         Vec3 lastPoint = from;
 
         for (int bounce = 0; bounce <= maxBounces; bounce++) {
-            // ① 从当前点朝当前方向射到距离上限
-            Vec3 to = cursor.add(dir.scale(SHRIEK_MAX_RANGE));
+            // ① 从当前点朝当前方向射到距离上限（锤头 = 线长，球 = 256）
+            Vec3 to = cursor.add(dir.scale(range));
             BlockHitResult hit = level.clip(new ClipContext(cursor, to,
                     ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));
             boolean miss = hit.getType() == HitResult.Type.MISS;
@@ -370,7 +399,7 @@ public final class BallExtraTraits {
                 //
                 //     正确做法：没撞到东西时把**这一段终点当作新的起点继续走**（方向用修正后的），
                 //     直到用完段数或用完距离。这样「直线飞出一段 → 拐向 → 再飞一段」才成立。
-                if (bounce >= maxBounces || cursor.distanceTo(from) >= SHRIEK_MAX_RANGE) {
+                if (bounce >= maxBounces || cursor.distanceTo(from) >= range) {
                     break;   // 段数或总射程用完了
                 }
                 cursor = end;
