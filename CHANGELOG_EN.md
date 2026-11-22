@@ -1,10 +1,10 @@
 # Changelog (MC 26.2 line)
 
-> **This is the 26.2 version line of "More Balls" — the current mainline.**
+> **This is the 26.2 version line of "Rotation Craft" — the current mainline.**
 > Ported from the 26.3 line (1.38.6); both share the same source logic.
 > The 26.3 line is frozen (Curios is incompatible with NeoForge there, so the
 > trinket feature could not be tested).
-> History of the 26.3 line lives in `[26.3更多球]_More_Balls\CHANGELOG.md`.
+> History of the 26.3 line lives in `[26.3旋转工艺]_Rotation_Craft\CHANGELOG.md`.
 
 ---
 

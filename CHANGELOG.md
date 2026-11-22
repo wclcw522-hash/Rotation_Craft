@@ -10151,7 +10151,7 @@ private float senseMultiplier() {
 > **这是「更多球」的 26.2 版本线，当前主线。**
 > 本线由 26.3 线的 1.38.6 移植而来，两边共用同一份源码逻辑；
 > 26.3 线已冻结（那边 Curios 与 NeoForge 不兼容，饰品功能没法测）。
-> 26.3 线的历史见 `[26.3更多球]_More_Balls\CHANGELOG.md`。
+> 26.3 线的历史见 `[26.3旋转工艺]_Rotation_Craft\CHANGELOG.md`。
 
 ## 0.4.0.29 — 还原没遍历依据的改动 + 修「球没伤害」的真根因
 
