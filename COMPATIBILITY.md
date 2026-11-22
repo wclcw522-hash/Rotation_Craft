@@ -1,6 +1,6 @@
 # 兼容性说明 · Compatibility
 
-本文件记录「更多球」与其它模组共存时**需要注意的地方**。
+本文件记录「旋转工艺」与其它模组共存时**需要注意的地方**。
 （素材来源见 [ASSET_NOTICES.md](ASSET_NOTICES.md)，第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。）
 
 

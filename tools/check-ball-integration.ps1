@@ -1,4 +1,4 @@
-# More Balls - new-ball integration check (resource side)
+# Rotation Craft - new-ball integration check (resource side)
 #
 # The code-side check lives in BallIntegrationCheck.java (runs at startup and verifies
 # tag <-> sources() consistency). This script checks RESOURCE FILES instead:
@@ -28,7 +28,7 @@ $warnings = New-Object System.Collections.ArrayList
 $ok       = New-Object System.Collections.ArrayList
 
 Write-Host ''
-Write-Host '===== More Balls / new-ball integration check =====' -ForegroundColor Cyan
+Write-Host '===== Rotation Craft / new-ball integration check =====' -ForegroundColor Cyan
 Write-Host "Resource root: $ResourceRoot"
 Write-Host ''
 

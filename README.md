@@ -1,4 +1,4 @@
-# 更多球 · More Balls
+# 旋转工艺 · Rotation Craft
 
 > ## ⚠️ 注意
 >
@@ -45,7 +45,7 @@
 ## 安装
 
 1. 装 **NeoForge 26.2.0.88** 或更高（26.2 线）
-2. 把 `More_Balls-<版本>.jar` 丢进 `.minecraft/mods/`
+2. 把 `Rotation_Craft-<版本>.jar` 丢进 `.minecraft/mods/`
 3. 需要 **Java 25**
 
 **可选联动**（缺失时优雅降级，不会崩）：**JEI**（展示配方）、**AppleSkin**（食物提示）、**Curios**（收纳袋挂饰品栏）。
