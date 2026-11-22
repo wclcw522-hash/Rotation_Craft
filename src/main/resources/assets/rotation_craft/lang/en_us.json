@@ -15,7 +15,7 @@
   "tooltip.rotation_craft.flail.line_length": "Chain length: %s blocks",
   "tooltip.rotation_craft.flail.recover": "Retrieval speed: %s blocks/s",
   "itemGroup.rotation_craft.battle": "Combat",
-  "itemGroup.rotation_craft.battle.flail": "Rotation Craft - Flail","item.rotation_craft.ball_cluster.named": "%1$s %2$s",
+  "itemGroup.rotation_craft.battle.flail": "More Balls - Flail","item.rotation_craft.ball_cluster.named": "%1$s %2$s",
   "tooltip.rotation_craft.cluster.count": "Holds %1$s",
   "tooltip.rotation_craft.cluster.lowest": "Lowest: %1$s (%2$s of them)",
   "tooltip.rotation_craft.cluster.hint_alt": "Hold Alt for the 6 lowest · Shift+Right-click throws a group",

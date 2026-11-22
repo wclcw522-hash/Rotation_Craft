@@ -1,0 +1,224 @@
+package com.mcmodworkspace.rotationcraft.client;
+
+import com.mcmodworkspace.rotationcraft.BallBehavior;
+import net.minecraft.util.profiling.ProfilerFiller;
+import net.minecraft.server.packs.resources.SimplePreparableReloadListener;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
+import net.neoforged.neoforge.client.event.RegisterSpecialModelRendererEvent;
+import com.mcmodworkspace.rotationcraft.BallCharge;
+import com.mcmodworkspace.rotationcraft.ModEntities;
+import com.mcmodworkspace.rotationcraft.RotationCraft;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.entity.ThrownItemRenderer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import com.mcmodworkspace.rotationcraft.ModMenus;
+import com.mcmodworkspace.rotationcraft.client.BallPouchScreen;
+import net.neoforged.neoforge.client.event.RegisterSelectItemModelPropertyEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
+
+/**
+ * 客户端专属：实体渲染器注册 + 蓄力等级 HUD。
+ *
+ * <p>用 {@link EventBusSubscriber} 的 {@code value = Dist.CLIENT} 做隔离：
+ * FML 只在客户端加载并注册这个类，专用服务端上它根本不会被触碰，
+ * 也就不会把客户端专属类拖进服务端的类加载器。</p>
+ */
+@EventBusSubscriber(modid = RotationCraft.MOD_ID, value = Dist.CLIENT)
+public final class RotationCraftClient {
+
+    /** HUD 文字与物品名的水平间距：物品名画在 hotbar 上方，蓄力条再往上让一格 */
+    private static final int HUD_ABOVE_HOTBAR = 72;
+
+    private static final int CHARGE_TEXT_COLOR = 0xFFFFC04D;
+
+    private RotationCraftClient() {
+    }
+
+    /**
+     * 资源包重载时清掉按贴图算出来的缓存。
+     *
+     * <p>弩上那套组合球贴图是「读底图 + 逐像素叠象限」在 CPU 上现合成的，
+     * 资源包一换，底图与象限贴图都变了，旧结果全错 —— 不清就会一直显示旧资源包的图。</p>
+     */
+    public static void registerReloadListeners(AddClientReloadListenersEvent event) {
+        event.addListener(
+                Identifier.fromNamespaceAndPath(RotationCraft.MOD_ID, "combo_charge_cache"),
+                new ComboChargeReload());
+    }
+
+    private static final class ComboChargeReload extends SimplePreparableReloadListener<Void> {
+
+        @Override
+        protected Void prepare(ResourceManager manager, ProfilerFiller profiler) {
+            return null;
+        }
+
+        @Override
+        protected void apply(Void unused, ResourceManager manager, ProfilerFiller profiler) {
+            ComboChargeBallRenderer.clearCache();
+        }
+    }
+
+    /**
+     * 【球堆】图标角落那个数量 —— 见 {@link BallClusterDecorator}。
+     *
+     * <p>球堆是 {@code stacksTo(1)} 的，原版不会给它画堆叠数字（那个只读
+     * {@code ItemStack#getCount()}），所以得自己挂一个 {@code IItemDecorator}。
+     * 数字取的是球列长度，现算的。</p>
+     */
+    @SubscribeEvent
+    public static void onRegisterItemDecorations(
+            net.neoforged.neoforge.client.event.RegisterItemDecorationsEvent event) {
+        event.register(com.mcmodworkspace.rotationcraft.ModItems.BALL_CLUSTER.get(),
+                BallClusterDecorator.INSTANCE);
+    }
+
+    /** 球的投射物复用原版 ThrownItemRenderer：按实体携带的物品堆渲染，无需写渲染代码 */
+    @SubscribeEvent
+    public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerEntityRenderer(ModEntities.BALL.get(), BallRenderer::new);
+        event.registerEntityRenderer(ModEntities.BALL_ENDER_PEARL.get(), ThrownItemRenderer::new);
+        // 流星锤锤头（作者 2026-10-19）：复用原版 ThrownItemRenderer ——
+        // 它按实体携带的物品栈（= 那把流星锤）渲染，而流星锤的物品模型会按内嵌球选图标，
+        // 所以锤头在世界里看起来就是「那颗球的缩小版 + 绳子」，不需要自定义渲染代码。
+        event.registerEntityRenderer(ModEntities.FLAIL_HEAD.get(), FlailHeadRenderer::new);
+        // 滴水石锥（【尖刺】射出去的锥子）—— 外观就是 minecraft:pointed_dripstone 那件物品，
+        // 缩小到 0.6 倍，因为作者要的是「**最小的**滴水石锥」。
+        event.registerEntityRenderer(ModEntities.DRIPSTONE_SHARD.get(),
+                context -> new ThrownItemRenderer<com.mcmodworkspace.rotationcraft.entity.DripstoneShard>(
+                        context, 0.6F, true));
+        // 被召唤的蜜蜂 —— **直接复用原版蜜蜂的渲染器**。
+        // 它泛型绑的就是 Bee，而我们的实体继承自 Bee，所以模型、贴图、愤怒时的变体
+        // 全都白拿，不需要任何新美术素材（作者 2026-10-16 指定做成独立生物）。
+        event.registerEntityRenderer(ModEntities.SUMMONED_BEE.get(),
+                net.minecraft.client.renderer.entity.BeeRenderer::new);
+    }
+
+    /** 把收纳袋的菜单绑到界面上 */
+    @SubscribeEvent
+    public static void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
+        event.register(ModMenus.BALL_POUCH.get(), BallPouchScreen::new);
+    }
+
+
+    /**
+     * 蓄力等级显示 —— 位置在物品栏上方、物品名称上方（作者指定）。
+     *
+     * <p>只在「手里正拿着可蓄力的球并且正在蓄力」时出现。</p>
+     */
+    @SubscribeEvent
+    public static void onRenderGui(RenderGuiEvent.Post event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        LocalPlayer player = minecraft.player;
+        if (player == null || !player.isUsingItem()) {
+            return;
+        }
+
+        ItemStack stack = player.getUseItem();
+
+        // ===== ★ 球堆：手上是**壳**，能不能蓄力要看**壳里那颗球**（作者 2026-10-15）=====
+        //
+        // ⚠️⚠️ 这里原先直接问 `BallBehavior.handles(stack)` —— 而壳**不在** `#rotation_craft:balls`
+        //    标签里，`handles` 对它返回 false ⇒ **本方法当场 return** ⇒
+        //    那条「蓄力 x / y」在手持球堆蓄力时**永远不显示**。
+        //
+        //    作者原话：「拿着球堆蓄力时那行"蓄力x/x"还是没有显示」—— 说的就是这一处。
+        //    （我 1.1.0.21 给壳补 `getUseDuration` 是另一条路，跟这行字无关。）
+        //
+        //    `asBall` 把壳摊成里面**耐久最低**的那颗球（散球原样返回），
+        //    后面的 profile / 等级计算就都跟着正确了。
+        // ===== ★ 流星锤：手上是**锤**，蓄力等级要问**内嵌的那颗球**（作者 2026-10-19）=====
+        //
+        // ⚠️⚠️ 漏了这一条的后果：`BallBehavior.handles(flail)` 恒为 false ⇒
+        //     下面 `if (!BallBehavior.handles(probe)) return;` 每次都命中 ⇒
+        //     手持流星锤蓄力时那条「蓄力 x / y」**永远不显示**。
+        //     作者原话：「显示蓄力层数，模组里做了！！！」—— 就是这里没接上。
+        ItemStack probe;
+        if (com.mcmodworkspace.rotationcraft.FlailItem.isFlail(stack)) {
+            probe = com.mcmodworkspace.rotationcraft.FlailItem.ballOf(stack);
+        } else if (com.mcmodworkspace.rotationcraft.BallClusterItem.isCluster(stack)) {
+            probe = com.mcmodworkspace.rotationcraft.BallClusterItem.asBall(stack);
+        } else {
+            probe = stack;
+        }
+        // ⚠️ 回收锤头时**不显示蓄力文字**（作者 2026-10-19）。
+        //    回收同样靠 startUsingItem 维持「使用中」，所以 isUsingItem 为真 ——
+        //    不判这一条的话，按住右键回收时会一直挂着「蓄力 x / y」。
+        // 判据同 getUseAnimation / LocalPlayerMixin：回收中 **或** 刚回收完还没松手。
+        // 1.2.0.66 起 finishReturn 只设 RECOVERED，少判它就会在回收期间一直挂着「蓄力 x / y」。
+        if (com.mcmodworkspace.rotationcraft.FlailItem.isFlail(stack)
+                && (com.mcmodworkspace.rotationcraft.FlailItem.isRetrieving(stack)
+                        || com.mcmodworkspace.rotationcraft.FlailItem.isRecovered(stack))) {
+            return;
+        }
+        if (!BallBehavior.handles(probe)) {
+            return;
+        }
+        BallBehavior.BallProfile profile = BallBehavior.profileFor(probe);
+        int maxLevel = profile.chargeLevels();
+        if (maxLevel <= 0) {
+            return;
+        }
+
+        int level = BallCharge.levelAt(BallCharge.usedTicks(player), maxLevel);
+        // 常态不显示：只有真正蓄上力（等级 ≥ 1）才把指示露出来（作者指定）。
+        // 免得刚按下右键、还没蓄满一级时先闪一个「蓄力 0/3」出来。
+        if (level < 1) {
+            return;
+        }
+        Component label = Component.translatable("hud.rotation_craft.charge", level, maxLevel);
+
+        GuiGraphicsExtractor graphics = event.getGuiGraphics();
+        Font font = minecraft.font;
+        int centerX = minecraft.getWindow().getGuiScaledWidth() / 2;
+        int y = minecraft.getWindow().getGuiScaledHeight() - HUD_ABOVE_HOTBAR;
+        graphics.centeredText(font, label, centerX, y, CHARGE_TEXT_COLOR);
+    }
+
+    /**
+     * 注册物品模型属性 {@code rotation_craft:charged_ball}。
+     *
+     * <p>弩拉满时要根据「装的是不是球」换模型，而原版的 {@code charge_type} 是个封闭枚举
+     * （只有箭 / 烟花火箭 / 空），加不了新值 —— 所以自己起一个属性。
+     * 弩的模型文件最外层先问它，不是球就整个落回原版那套逻辑。</p>
+     */
+    /**
+     * 注册组合球装填外观用的 {@code minecraft:special} 渲染器。
+     *
+     * <p><b>由 {@link com.mcmodworkspace.rotationcraft.RotationCraft} 在 mod 总线上调用</b>，
+     * 而不是靠本类的 {@code @EventBusSubscriber} —— 那个挂在 GAME 总线上，
+     * 而 {@code RegisterSpecialModelRendererEvent} 是 {@code IModBusEvent}，
+     * 挂错总线不会触发，症状是模型静默空白。</p>
+     */
+    public static void registerSpecialModelRenderers(RegisterSpecialModelRendererEvent event) {
+        RotationCraft.LOGGER.info("[ball][弩] ⓪ 注册 special 渲染器 rotation_craft:combo_charge_ball —— 事件已触发");
+        event.register(
+                Identifier.fromNamespaceAndPath(RotationCraft.MOD_ID, "combo_charge_ball"),
+                ComboChargeBallRenderer.Unbaked.MAP_CODEC);
+
+        // 【球堆】图标 = 里面那颗球（作者 2026-10-15 指定）
+        //
+        // 与上面那条同理：必须由 RotationCraft 在 **mod 总线**上调用本方法，
+        // 靠 @EventBusSubscriber（GAME 总线）挂不上 —— 症状会是没有报错的静默空白图标。
+        event.register(
+                BallClusterSpecialRenderer.Unbaked.ID,
+                BallClusterSpecialRenderer.Unbaked.CODEC);
+    }
+    @SubscribeEvent
+    public static void onRegisterSelectProperties(RegisterSelectItemModelPropertyEvent event) {
+        event.register(Identifier.fromNamespaceAndPath(RotationCraft.MOD_ID, "charged_ball"),
+                ChargedBall.TYPE);
+    }
+
+}

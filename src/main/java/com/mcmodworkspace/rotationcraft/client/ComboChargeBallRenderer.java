@@ -1,0 +1,810 @@
+package com.mcmodworkspace.rotationcraft.client;
+
+import com.mcmodworkspace.rotationcraft.BallFragments;
+import com.mcmodworkspace.rotationcraft.BallAmmo;
+import com.mcmodworkspace.rotationcraft.ModComponents;
+import com.mcmodworkspace.rotationcraft.RotationCraft;
+import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.serialization.MapCodec;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.client.renderer.special.SpecialModelRenderer;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.Resource;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.api.distmarker.Dist;
+import org.joml.Vector3f;
+import org.joml.Vector3fc;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * 组合球装填到弩上时的外观。
+ *
+ * <h2>做法：运行时合成一张贴图，只画一个面</h2>
+ * <p>组合球的小球由物品组件决定（四个象限各自一种材质），外观没法预先画好。
+ * 但<b>也不需要叠层渲染</b> —— 那样会带来一堆麻烦（层间 z-fighting、被底图盖住、
+ * 每层都要单独选管线）。</p>
+ *
+ * <p>这里用的是更直接的办法：</p>
+ * <ol>
+ *   <li>把「满弦空弩」底图与四个象限的贴图，在 CPU 上<b>合成成一张 16×16 的图</b></li>
+ *   <li>用 {@link DynamicTexture} 上传成运行时纹理，按象限组合<b>缓存</b></li>
+ *   <li>渲染时只提交<b>一个</b> 16×16 的面 —— 没有层叠、没有 z 冲突</li>
+ * </ol>
+ *
+ * <h2>几何：照原版物品模型</h2>
+ * <p>{@code net.minecraft.client.renderer.ItemModelGenerator} 生成普通物品贴图用的是
+ * {@code from=(0,0,7.5)} / {@code to=(16,16,8.5)} —— 也就是<b>几何空间 0..16、贴图平面 z=7.5</b>。
+ * 本渲染器同样按 0..16 提交顶点，平面取 7.4（比 7.5 靠前一点点），
+ * 并在提交前统一 {@code scale(1/16)} 换算到物品空间。</p>
+ */
+// ⚠️ 这里**不要**加 @OnlyIn(Dist.CLIENT)。
+//
+// NeoForge 26.x 移除了 @OnlyIn 的运行时成员剥离行为，保留注解只会在每次启动时打印
+//   [ERROR] @OnlyIn used on class ...  （作者 2026-10-08 看到的「报错几十遍」就是它）
+// 客户端专用性已经由「注册时挂在客户端事件上」保证了，不需要这个注解。
+public class ComboChargeBallRenderer implements SpecialModelRenderer<int[]> {
+
+    /** 模型空间 → 物品空间（原版物品几何是 0..16） */
+    private static final float MODEL_SCALE = 1.0F / 16.0F;
+
+    /**
+     * 本渲染器的几何整体相对原版贴片<b>往前挪的偏移</b>。
+     *
+     * <p>⚠️ 作者 2026-10-16 报「组合球上膛贴图有异常像素」，查下来有一条是
+     * <b>三套几何完全同深度共面</b>：本渲染器的正面写死 8.5、背面 7.5，
+     * 而 base 模型 {@code minecraft:item/crossbow_pulling_2}（→ {@code item/crossbow}
+     * → {@code item/generated}）的贴片正面<b>也</b>在 8.5、背面 7.5。</p>
+     *
+     * <p>同深度 ⇒ 浮点精度内谁在前不确定 ⇒ <b>条纹 / 闪烁</b>。
+     * 整体往前挪一点点即可根除，视觉上完全看不出来（0.01 / 16 格）。</p>
+     */
+    private static final float Z_BIAS = 0.01F;
+
+    /**
+     * 正面的 z（原版 2D 贴片的正面在 8.5 —— {@code from=(0,0,7.5)} / {@code to=(16,16,8.5)}），
+     * 再往前挪 {@link #Z_BIAS} 避开与 base 同深度。
+     */
+    private static final float PLANE_Z_FRONT = 8.5F + Z_BIAS;
+
+    /** 背面的 z（照原版 {@code from z=7.5}，同样挪 {@link #Z_BIAS}，厚度不变） */
+    private static final float PLANE_Z_BACK = 7.5F + Z_BIAS;
+
+    /** 侧壁的 z 范围 —— 照原版 bakeSideFaces 的 from.z / to.z */
+    private static final float SIDE_Z_FROM = 7.5F + Z_BIAS;
+    private static final float SIDE_Z_TO = 8.5F + Z_BIAS;
+
+    /**
+     * 球区在 16×16 贴图里的范围（含端点）—— 与 {@code charge_piece_*} 的覆盖范围一致。
+     *
+     * <p>见 {@link #clearBallArea} 的说明。</p>
+     */
+    private static final int BALL_X0 = 2;
+    private static final int BALL_Y0 = 2;
+    private static final int BALL_X1 = 7;
+    private static final int BALL_Y1 = 7;
+
+    private static final float MIN = 0.0F;
+    private static final float MAX = 16.0F;
+
+    /** 某个象限没有内容（二合一球的下半就是这样） */
+    private static final int NO_PIECE = -1;
+
+    private static Identifier resource(String path) {
+        return Identifier.fromNamespaceAndPath(RotationCraft.MOD_ID, path);
+    }
+
+    /** 底图：满弦的空弩 */
+    private static final Identifier BASE_TEXTURE = resource("textures/item/charge_base_crossbow.png");
+
+    /** 四分之一的象限贴图（q = 1..4，左上 / 右上 / 左下 / 右下） */
+    private static Identifier pieceTexture(int source, int quadrant) {
+        return resource("textures/item/charge_piece_" + source + "_" + quadrant + ".png");
+    }
+
+    /**
+     * <b>二分之一的半球贴图</b>（{@code half_top} / {@code half_bottom}）。
+     *
+     * <p>二合一球的两块各占<b>一整个半圆</b>（见 {@code BallFragments.slotValue}：
+     * 二合一时象限 0/1 归第一块、2/3 归第二块）。所以它该贴的是一整张半球图，
+     * 而不是拼两个象限 —— 素材包里那 16 张 {@code charge_piece_N_half_*.png}
+     * 就是为此准备的，但<b>之前代码一次都没引用过</b>，
+     * 于是二合一球在弩上只显示「半个半圆」，看起来像是只剩一层
+     * （作者反馈的「弩的贴图只剩一层」）。</p>
+     *
+     * @param top true = 上半、false = 下半
+     */
+    private static Identifier halfTexture(int source, boolean top) {
+        return resource("textures/item/charge_piece_" + source + "_half_"
+                + (top ? "top" : "bottom") + ".png");
+    }
+
+    /**
+     * 合成结果缓存：象限组合 → 已注册的动态纹理 id。
+     *
+     * <p>同一组来源只合成一次。玩家能遇到的组合数很少，缓存不会失控。</p>
+     */
+    /**
+     * 合成结果缓存 —— 键是四个象限的下标，值是注册好的动态纹理 id。
+     *
+     * <p><b>用 LRU 而不是 HashMap</b>：组合球的象限组合是
+     * 8 种球的四象限排列，理论上千种，每种都会注册一张 DynamicTexture
+     * （显存 + 纹理管理器条目）。HashMap 只增不减，玩久了会一直堆。
+     * 封顶 {@link #COMPOSED_CAPACITY} 张，超了淘汰最久没用的那张。</p>
+     *
+     * <p>{@code null} 值表示「这张合成过、失败了」——负缓存，避免每次都重跑
+     * 一遍读图 + 逐像素合成（读图失败通常是资源包问题，短时间内不会好）。
+     * 资源包重载时由 {@link #clearCache()} 整体作废。</p>
+     */
+    /**
+     * 合成图的**像素副本**，按同一个缓存键存。
+     *
+     * <p>侧壁必须扫「合成后」的轮廓（底图 + 球），但合成图是注册在
+     * {@code TextureManager} 的<b>动态纹理</b>——{@code ResourceManager} 读不到它
+     * （两套系统），所以 {@code drawSideFaces} 里那句 {@code readTexture(texture)}
+     * 恒返回 null，侧壁一次都没画出来过。这里把像素留一份给侧壁用。</p>
+     */
+    private static final Map<String, NativeImage> COMPOSED_PIXELS =
+            new java.util.LinkedHashMap<>(16, 0.75F, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, NativeImage> eldest) {
+                    if (size() > COMPOSED_CAPACITY) {
+                        eldest.getValue().close();
+                        return true;
+                    }
+                    return false;
+                }
+            };
+
+    private static final Map<String, Identifier> COMPOSED =
+            new java.util.LinkedHashMap<>(16, 0.75F, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Identifier> eldest) {
+                    return size() > COMPOSED_CAPACITY;
+                }
+            };
+
+    /** 缓存上限 —— 一张 16×16 的 RGBA 只有 1 KB，显存占用可忽略，这里限制的是纹理管理器条目数 */
+    private static final int COMPOSED_CAPACITY = 64;
+
+    /** 合成失败时占位用的「负缓存」标记 */
+    private static final Identifier FAILED = Identifier.fromNamespaceAndPath("minecraft", "missingno");
+
+    /**
+     * 作废全部合成缓存 —— 资源包重载后必须调用。
+     *
+     * <p>缓存里存的是「按当前资源包的贴图合成出来的结果」，
+     * 资源包一换、底图或象限贴图变了，旧结果就全错了。</p>
+     */
+    public static void clearCache() {
+        COMPOSED.clear();
+        // ⚠️ 像素副本也要一起清 —— 只清 COMPOSED 的话，重载后侧壁拿到的还是
+        //    上一份资源包合成出来的旧图（贴图不更新的直接原因），
+        //    而且每个旧 NativeImage 都是本地内存，不清就等于漏。
+        //    先 close 再 clear：LinkedHashMap.clear() 不走 removeEldestEntry，不会替我们释放。
+        for (NativeImage img : COMPOSED_PIXELS.values()) {
+            if (img != null && !img.isClosed()) {
+                img.close();
+            }
+        }
+        COMPOSED_PIXELS.clear();
+    }
+
+    // ===== 取参数 =====
+
+    /**
+     * 读四个象限的来源下标，{@code -1} 表示该象限留空。
+     *
+     * <p>两级取数：先读四个 {@code combo_slot_N} 组件；读不到就退回 {@code combo_sources}
+     * 字符串组件现算 —— 旧存档里的球只有后者，而补组件的 {@code ensureComboSlots}
+     * 只在物品待在背包里时才跑，装在弩上不会触发。</p>
+     *
+     * @return 四个象限的来源下标；连来源数据都没有时返回 null（此时只显示底图）
+     */
+    @Override
+    public int @Nullable [] extractArgument(ItemStack stack) {
+        // ⚠️ 传进来的是**弩**（SpecialModelWrapper.update 传的是被渲染的物品栈），
+        //    而组合球的四个象限组件在**装填的那颗球**上 —— 先把球从弩里拆出来再读。
+        //    不拆的话这里恒返回 null，弩上永远只有底图。
+        stack = BallAmmo.chargedBallStack(stack);
+        if (stack == null || stack.isEmpty()) {
+            diag("② extractArgument() 弩上没有球 -> null（只画底图）");
+            return null;
+        }
+        int kinds = BallFragments.sources().size();
+        Integer[] raw = {
+                stack.get(ModComponents.COMBO_SLOT_1.get()),
+                stack.get(ModComponents.COMBO_SLOT_2.get()),
+                stack.get(ModComponents.COMBO_SLOT_3.get()),
+                stack.get(ModComponents.COMBO_SLOT_4.get())
+        };
+
+        int[] slots = new int[4];
+        boolean anySlot = false;
+        for (Integer v : raw) {
+            if (v != null) {
+                anySlot = true;
+                break;
+            }
+        }
+        if (anySlot) {
+            for (int i = 0; i < 4; i++) {
+                Integer v = raw[i];
+                slots[i] = (v == null) ? NO_PIECE : ((v >= 0 && v < kinds) ? v : 0);
+            }
+            diag("② extractArgument() 读 combo_slot -> {}", Arrays.toString(slots));
+            return slots;
+        }
+
+        List<Integer> indexes = BallFragments.parseIndexes(
+                stack.getOrDefault(ModComponents.COMBO_SOURCES.get(), ""));
+        if (indexes.isEmpty()) {
+            diag("② extractArgument() 组件全空 -> null（只画底图）");
+            return null;
+        }
+        for (int q = 0; q < 4; q++) {
+            int v = BallFragments.slotValue(indexes, q);
+            slots[q] = (v >= 0 && v < kinds) ? v : NO_PIECE;
+        }
+        diag("② extractArgument() 从 combo_sources={} 现算 -> {}", indexes, Arrays.toString(slots));
+        return slots;
+    }
+
+    // ===== 渲染 =====
+
+    @Override
+    public void submit(int @Nullable [] slots, PoseStack poseStack,
+                       SubmitNodeCollector collector, int lightCoords, int overlayCoords,
+                       boolean hasFoil, int outlineColor) {
+        diag("③ submit() 被调用：slots={}", Arrays.toString(slots));
+
+        Identifier texture = composedTexture(slots);
+        if (texture == null) {
+            // 走到这里说明连底图都合成不出来 —— 那是读图失败，readTexture 里已经报过了
+            diag("③ submit() 合成失败 -> 什么都不画");
+            return;
+        }
+
+        poseStack.pushPose();
+        poseStack.scale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+        drawQuad(poseStack, collector, texture, lightCoords, overlayCoords);
+        // 补侧壁 —— special 不渲染 base，不补的话弩就是一片纸
+        drawSideFaces(poseStack, collector, texture, composedPixels(slots), lightCoords, overlayCoords);
+        poseStack.popPose();
+
+        diag("③ submit() 已提交一个面：texture={} 顶点={}~{} z={} scale={}（双面）",
+                texture, MIN, MAX, PLANE_Z_FRONT, MODEL_SCALE);
+    }
+
+    /**
+     * 诊断计数 —— {@code extractArgument} 与 {@code submit} 每帧都会走，
+     * 直接打日志会把 latest.log 刷爆，所以只记录最开始几次。
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger DIAG =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private static final int DIAG_LIMIT = 8;
+
+    private static void diag(String message, Object... args) {
+        if (DIAG.incrementAndGet() <= DIAG_LIMIT) {
+            RotationCraft.LOGGER.debug("[ball][弩] " + message, args);
+        }
+    }
+
+    /**
+     * 提交一个覆盖整格的 16×16 平面 —— <b>双面</b>。
+     *
+     * <h2>⚠️ 绕序必须与 MC 的 FaceInfo 一致，否则整面被剔除</h2>
+     * <p>{@code ITEM_CUTOUT} 管线<b>没有</b> {@code withCull(false)}，走的是默认
+     * <b>背面剔除开启</b>。MC 对「正面朝 +Z」的硬约定是
+     * {@code FaceInfo.SOUTH} 的顺序：</p>
+     * <pre>
+     *   (MIN,MAX) → (MIN,MIN) → (MAX,MIN) → (MAX,MAX)     左上 → 左下 → 右下 → 右上
+     * </pre>
+     * <p>而这里原来写的是 <b>它的逆序</b>
+     * （{@code (MAX,MIN)→(MIN,MIN)→(MIN,MAX)→(MAX,MAX)}）——
+     * 那等价于 {@code Direction.NORTH} 的绕序，法线朝 <b>-Z</b>。
+     * 于是第一人称手持（手性为正的上下文）时整个面被判为背面、直接丢弃，
+     * 表现就是「弩整格看不见」（作者 2026-10-09 报的）。注释写「法线朝 +Z」是错的。</p>
+     *
+     * <h2>为什么要画两面</h2>
+     * <p>原版 2D 物品几何本来就是双面的 —— {@code ItemModelGenerator.bakeExtrudedSprite()}
+     * 会同时 bake {@code Direction.SOUTH} 与 {@code Direction.NORTH} 两面，
+     * 正是为了规避物品在不同 display context 下的手性翻转（拿在手上和放在地上，
+     * 同一个模型看到的是不同的一面）。只画一面就必然有一半场合是空白。</p>
+     *
+     * <h2>z 值</h2>
+     * <p>原版 2D 贴片的实体范围是 {@code from=(0,0,7.5)} / {@code to=(16,16,8.5)}：
+     * <b>正面在 8.5</b>、7.5 是背面。原来的 {@code PLANE_Z = 7.4} 落在贴片<b>之后</b>，
+     * 也会被弩身挡住。</p>
+     */
+    private static void drawQuad(PoseStack poseStack, SubmitNodeCollector collector,
+                                 Identifier texture, int light, int overlay) {
+        // 物品要用物品管线（原版 ItemFeatureRenderer 走的就是 ITEM_CUTOUT）。
+        RenderType type = RenderTypes.itemCutout(texture);
+        collector.submitCustomGeometry(poseStack, type, (pose, buffer) -> {
+            // ---- 正面（+Z）：FaceInfo.SOUTH 的绕序 ----
+            vertex(buffer, pose, MIN, MAX, 0.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
+            vertex(buffer, pose, MIN, MIN, 0.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
+            vertex(buffer, pose, MAX, MIN, 1.0F, 1.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
+            vertex(buffer, pose, MAX, MAX, 1.0F, 0.0F, PLANE_Z_FRONT, 1.0F, light, overlay);
+
+            // ---- 背面（-Z）：顶点倒序，但 **UV 与正面保持一致** ----
+            //
+            // ⚠️ 这里曾经把 UV 也左右镜像了，注释还写着「FaceInfo.NORTH 的绕序」——
+            //    那是**反了两次**：顶点已经倒过来，UV 再镜像一次就等于没镜像。
+            //
+            //    后果很具体：掉落物形态的弩**旋转 180° 后你看到的是背面**，
+            //    而背面的镜像把那次旋转又抵消掉了 → 「有种转了但又没转的诡异感」
+            //    （作者 2026-10-09 反馈）。
+            //
+            //    原版 2D 物品**只渲染正面**，所以从来没暴露这个问题；
+            //    我们为了保险画了双面，就得让背面看起来和正面一样。
+            //    （物理上「从背面看该镜像」是对的，但那是**同一件物品**的观感需求，
+            //      这里要的是「翻过来看还是它」——按观感优先。）
+            //    映射与正面**完全一致**：x=MIN → u=0、x=MAX → u=1；y=MAX → v=0、y=MIN → v=1。
+            //    只是顶点的遍历顺序倒过来（这样绕序与 NORTH 一致，法线朝向也对）。
+            vertex(buffer, pose, MAX, MAX, 1.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
+            vertex(buffer, pose, MAX, MIN, 1.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
+            vertex(buffer, pose, MIN, MIN, 0.0F, 1.0F, PLANE_Z_BACK, -1.0F, light, overlay);
+            vertex(buffer, pose, MIN, MAX, 0.0F, 0.0F, PLANE_Z_BACK, -1.0F, light, overlay);
+        });
+    }
+
+    /**
+     * 把合成图渲染成**一层由小立方体拼成的板**。
+     *
+     * <h2>为什么改成这样</h2>
+     * <p>之前是「一个大平面 + 四边侧壁」，改了六七版都不对（侧面缺、底面透明、
+     * UV 拉长……）。原版那套 {@code bakeSideFaces} 是为 {@code item/generated}
+     * 的正常烘焙流程写的，而 {@code minecraft:special} 的提交管线与之不同 ——
+     * 硬套过去总差一口气。</p>
+     *
+     * <p>作者建议改成「直接渲染成像素块再拼起来」，这里照做：
+     * <b>每个不透明像素生成一个小立方体</b>（8 个角、6 个面），
+     * 该像素的颜色按面朝向做明暗。</p>
+     *
+     * <p>好处：不需要单独处理「侧壁 / 底面」—— 立方体天生六面齐全，
+     * 缺面这个问题从根本上消失。</p>
+     */
+    private static void drawSideFaces(PoseStack poseStack, SubmitNodeCollector collector,
+                                      Identifier texture, NativeImage img, int light, int overlay) {
+        if (img == null || img.isClosed()) {
+            return;
+        }
+        RenderType type = RenderTypes.itemCutout(texture);
+        int w = img.getWidth();
+        int h = img.getHeight();
+        float px = 16.0F / w;      // 一个像素在模型空间里的宽度
+        float py = 16.0F / h;
+        collector.submitCustomGeometry(poseStack, type, (pose, buffer) -> {
+            int boxes = 0;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    if (!isOpaque(img, x, y)) {
+                        continue;
+                    }
+                    // 该像素在模型空间里的位置（y 翻转：贴图自上而下，模型自下而上）
+                    float x0 = x * px;
+                    float x1 = x0 + px;
+                    float y1 = 16.0F - y * py;
+                    float y0 = y1 - py;
+
+                    // UV 取该像素中心，保证每个面采到自己那一格
+                    float u = (x + 0.5F) / w;
+                    float v = (y + 0.5F) / h;
+
+                    // ===== 正 / 背 两面：总要画（这是"板"的两个面） =====
+                    quadXY(buffer, pose, x0, y0, x1, y1, SIDE_Z_FROM, SIDE_Z_TO, u, v, 0, 0, 1, light, overlay);
+                    quadXY(buffer, pose, x1, y0, x0, y1, SIDE_Z_FROM, SIDE_Z_TO, u, v, 0, 0, -1, light, overlay);
+
+                    // ===== 四周：**只画外露的那些面** =====
+                    //
+                    //    ⚠️ 之前六个面全画、还双面提交，顶点数到 6336 ——
+                    //    超过 submitCustomGeometry 的缓冲区，**尾部被静默丢弃**，
+                    //    表现就是「总是缺后面画的那几面」（作者反馈：左前、右后、底面缺）。
+                    //    现在把顶点数压到 ~1600：正背必画，四周只在邻居透明时才画。
+                    //    相邻像素之间的内部面本来也看不见，不画反而更对。
+                    if (!isOpaque(img, x, y - 1)) {
+                        // 上方外露 → +Y 面
+                        quadXZ(buffer, pose, x0, x1, y1, SIDE_Z_FROM, SIDE_Z_TO, u, v, 0, 1, 0, light, overlay);
+                    }
+                    if (!isOpaque(img, x, y + 1)) {
+                        // 下方外露 → -Y 面
+                        quadXZ(buffer, pose, x0, x1, y0, SIDE_Z_FROM, SIDE_Z_TO, u, v, 0, -1, 0, light, overlay);
+                    }
+                    if (!isOpaque(img, x - 1, y)) {
+                        // 左方外露 → -X 面
+                        quadYZ(buffer, pose, x0, y0, y1, SIDE_Z_FROM, SIDE_Z_TO, u, v, -1, 0, 0, light, overlay);
+                    }
+                    if (!isOpaque(img, x + 1, y)) {
+                        // 右方外露 → +X 面
+                        quadYZ(buffer, pose, x1, y0, y1, SIDE_Z_FROM, SIDE_Z_TO, u, v, 1, 0, 0, light, overlay);
+                    }
+                    boxes++;
+                }
+            }
+            if (SIDE_DIAG.getAndIncrement() < 1) {
+                RotationCraft.LOGGER.debug("[ball][弩] 像素立方体 {} 个（图 {}x{}，每像素 {}x{} 模型单位）",
+                        boxes, w, h, px, py);
+            }
+        });
+    }
+
+    /**
+     * 提交一个小立方体的一个面。
+     *
+     * <p>四个顶点按 {@code (x0/y0/x1/y1)} 与 {@code (u, v)} 组合出来，
+     * 法线用调用方给的面朝向（用于光照计算）。</p>
+     */
+    /**
+     * 提交一个四边形 —— **正反两遍**。
+     *
+     * <h2>为什么双面</h2>
+     * <p>{@code RenderTypes.itemCutout} 的管线开着背面剔除。上一版只提交一遍，
+     * 绕序对的那几面能看见、反的那几面被整个剔掉 —— 现象就是
+     * 「每个像素只有三面有贴图，左/右/内面是空的」（作者 2026-10-09 反馈）。</p>
+     *
+     * <p>与其逐面去推导绕序（六个面六个朝向，很容易再错），不如**每个面都画两遍**：
+     * 总顶点数翻倍（3168 → 6336），但这点量对现代显卡可以忽略，
+     * 而「少面」这类问题从根上消失。</p>
+     */
+    private static void quadDouble(VertexConsumer buffer, PoseStack.Pose pose,
+                                   float ax, float ay, float az,
+                                   float bx, float by, float bz,
+                                   float cx, float cy, float cz,
+                                   float dx, float dy, float dz,
+                                   float u, float v,
+                                   float nx, float ny, float nz,
+                                   int light, int overlay) {
+        // 正面
+        vertexRaw(buffer, pose, ax, ay, az, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, bx, by, bz, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, cx, cy, cz, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, dx, dy, dz, u, v, nx, ny, nz, light, overlay);
+        // 反面（顶点倒序）
+        vertexRaw(buffer, pose, dx, dy, dz, u, v, -nx, -ny, -nz, light, overlay);
+        vertexRaw(buffer, pose, cx, cy, cz, u, v, -nx, -ny, -nz, light, overlay);
+        vertexRaw(buffer, pose, bx, by, bz, u, v, -nx, -ny, -nz, light, overlay);
+        vertexRaw(buffer, pose, ax, ay, az, u, v, -nx, -ny, -nz, light, overlay);
+    }
+
+    /** 正/背面：xy 平面上的矩形，z 从 zNear 到 zFar */
+    private static void quadXY(VertexConsumer buffer, PoseStack.Pose pose,
+                               float x0, float y0, float x1, float y1,
+                               float zNear, float zFar,
+                               float u, float v, float nx, float ny, float nz,
+                               int light, int overlay) {
+        quadDouble(buffer, pose, x0, y0, zNear, x1, y0, zFar, x1, y1, zFar, x0, y1, zNear,
+                u, v, nx, ny, nz, light, overlay);
+    }
+
+    /** 上/下面：xz 平面上的矩形，y 固定 */
+    private static void quadXZ(VertexConsumer buffer, PoseStack.Pose pose,
+                               float x0, float x1, float y,
+                               float zNear, float zFar,
+                               float u, float v, float nx, float ny, float nz,
+                               int light, int overlay) {
+        quadDouble(buffer, pose, x0, y, zNear, x1, y, zNear, x1, y, zFar, x0, y, zFar,
+                u, v, nx, ny, nz, light, overlay);
+    }
+
+    /** 左/右面：yz 平面上的矩形，x 固定 */
+    private static void quadYZ(VertexConsumer buffer, PoseStack.Pose pose,
+                               float x, float y0, float y1,
+                               float zNear, float zFar,
+                               float u, float v, float nx, float ny, float nz,
+                               int light, int overlay) {
+        quadDouble(buffer, pose, x, y0, zNear, x, y0, zFar, x, y1, zFar, x, y1, zNear,
+                u, v, nx, ny, nz, light, overlay);
+    }
+
+    private static void quad(VertexConsumer buffer, PoseStack.Pose pose,
+                             float x0, float y0, float x1, float y1,
+                             float zNear, float zFar,
+                             float u, float v, float nx, float ny, float nz,
+                             int light, int overlay) {
+        // ⚠️ 四个顶点必须是矩形的**四个不同的角**。
+        //
+        //    上一版我写成了 `(x0,y0) (x0,y0) (x1,y1) (x1,y1)` —— 只有两个角、
+        //    重复了两遍，于是每个面都退化成一条线，看上去就是「到处拉丝的小方块」、
+        //    「第三人称像拿了个海胆」（作者 2026-10-09 反馈）。
+        //
+        //    正确走法：从 (x0,y0) 起，沿矩形逆时针一圈。
+        vertexRaw(buffer, pose, x0, y0, zNear, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, x1, y0, zFar, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, x1, y1, zFar, u, v, nx, ny, nz, light, overlay);
+        vertexRaw(buffer, pose, x0, y1, zNear, u, v, nx, ny, nz, light, overlay);
+    }
+
+    /**
+     * 这个像素**是否不透明**。
+     *
+     * <p>⚠️ 不能用 {@code getLuminanceOrAlpha} —— 它返回「亮度<b>或</b> alpha」，
+     * 对<b>深色像素</b>（弩的贴图里大量深棕与近黑）会返回 0，于是被判成「透明」跳过。
+     * 这里只认 alpha 通道。越界一律算透明（图边缘向外就是空气，那条边当然外露）。</p>
+     */
+    private static boolean isOpaque(NativeImage img, int x, int y) {
+        if (x < 0 || y < 0 || x >= img.getWidth() || y >= img.getHeight()) {
+            return false;
+        }
+        return (img.getPixel(x, y) >> 24) != 0;
+    }
+
+    /** 侧壁诊断计数（只打前几次） */
+    private static final java.util.concurrent.atomic.AtomicInteger SIDE_DIAG =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+    /** 侧壁四方向 —— 照原版 SideDirection 的语义（水平 = 上下两条边） */
+    private enum SideDir {
+        UP(0, -1, true, 0, -1),
+        DOWN(0, 1, true, 0, 1),
+        LEFT(-1, 0, false, -1, 0),
+        RIGHT(1, 0, false, 1, 0);
+
+        final int stepX;
+        final int stepY;
+        final boolean horizontal;
+        final float nx;
+        final float ny;
+
+        SideDir(int stepX, int stepY, boolean horizontal, float nx, float ny) {
+            this.stepX = stepX;
+            this.stepY = stepY;
+            this.horizontal = horizontal;
+            this.nx = nx;
+            this.ny = ny;
+        }
+    }
+
+    /** 带完整法线向量的顶点（侧壁用） */
+    private static void vertexRaw(VertexConsumer buffer, PoseStack.Pose pose,
+                                  float x, float y, float z, float u, float v,
+                                  float nx, float ny, float nz, int light, int overlay) {
+        buffer.addVertex(pose, x, y, z)
+                .setColor(0xFFFFFFFF)
+                .setUv(u, v)
+                .setOverlay(overlay)
+                .setLight(light)
+                .setNormal(pose, nx, ny, nz);
+    }
+    private static void vertex(VertexConsumer buffer, PoseStack.Pose pose,
+                               float x, float y, float u, float v,
+                               float z, float normalZ, int light, int overlay) {
+        buffer.addVertex(pose, x, y, z)
+                .setColor(0xFFFFFFFF)
+                .setUv(u, v)
+                .setOverlay(overlay)
+                .setLight(light)
+                .setNormal(pose, 0.0F, 0.0F, normalZ);
+    }
+
+    // ===== 合成与缓存 =====
+
+    /**
+     * 拿到「这颗组合球装填后」的贴图 id —— 没合成过就现合成。
+     *
+     * @param slots 四个象限的来源下标；{@code null} 表示没读到数据，此时只合成底图
+     */
+    private static @Nullable Identifier composedTexture(int @Nullable [] slots) {
+        int[] key = (slots == null) ? new int[] { NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE } : slots;
+        String cacheKey = Arrays.toString(key);
+        if (COMPOSED.containsKey(cacheKey)) {
+            Identifier cached = COMPOSED.get(cacheKey);
+            // 负缓存（合成失败过）直接返回 null，不要再读一遍贴图
+            return (cached == FAILED) ? null : cached;
+        }
+        Identifier baked = bake(slots);
+        // 失败也要记下来 —— 否则每帧都会重跑一次「读图 + 逐像素合成」
+        COMPOSED.put(cacheKey, (baked != null) ? baked : FAILED);
+        return baked;
+    }
+
+    /**
+     * 取这一次合成结果的<b>像素副本</b>（侧壁扫轮廓要用）。
+     *
+     * <p>键与 {@link #composedTexture} 一致；没合成过或合成失败时返回 null。</p>
+     */
+    private static @Nullable NativeImage composedPixels(int @Nullable [] slots) {
+        int[] key = (slots == null) ? new int[] { NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE } : slots;
+        NativeImage img = COMPOSED_PIXELS.get(Arrays.toString(key));
+        // 每次都返回一份可读的副本副本没必要 —— 调用方只读不写，直接给同一个引用
+        return (img == null || img.isClosed()) ? null : img;
+    }
+
+    /**
+     * 把底图与四个象限在 CPU 上合成成一张 16×16 的图，注册成动态纹理。
+     *
+     * <p>逐像素对着 RGBA 做 source-over，透明像素不覆盖底下的内容。</p>
+     */
+    private static @Nullable Identifier bake(int @Nullable [] slots) {
+        NativeImage canvas = readTexture(BASE_TEXTURE);
+        if (canvas == null) {
+            RotationCraft.LOGGER.warn("[ball][弩] ★ 底图 {} 读不出来，弩的外观将不可见", BASE_TEXTURE);
+            return null;
+        }
+
+        // ★ 先清空底图的球区 —— 见 clearBallArea 的说明（作者 2026-10-16 报的异常像素）
+        clearBallArea(canvas);
+
+        if (slots != null) {
+            // 二合一还是四合一？判据是「上半两象限的来源是不是同一个」——
+            // 二合一时 0/1 同源、2/3 同源；四合一时四格互不相同（同种球会例外，见下）。
+            boolean twoPart = slots[0] == slots[1] && slots[2] == slots[3]
+                    && slots[0] != NO_PIECE && slots[2] != NO_PIECE;
+            if (twoPart && slots[0] != slots[2]) {
+                // ===== 二合一：两块各占一整个半圆，用整张半球贴图 =====
+                NativeImage topPiece = readTexture(halfTexture(slots[0], true));
+                if (topPiece != null) {
+                    overlay(canvas, topPiece);
+                    topPiece.close();
+                }
+                NativeImage bottomPiece = readTexture(halfTexture(slots[2], false));
+                if (bottomPiece != null) {
+                    overlay(canvas, bottomPiece);
+                    bottomPiece.close();
+                }
+            } else {
+                // ===== 四合一（或同种球合成）：逐象限拼 =====
+                for (int q = 0; q < 4; q++) {
+                    if (slots[q] == NO_PIECE) {
+                        continue;
+                    }
+                    NativeImage piece = readTexture(pieceTexture(slots[q], q + 1));
+                    if (piece == null) {
+                        continue;
+                    }
+                    overlay(canvas, piece);
+                    piece.close();
+                }
+            }
+        }
+
+        // 每颗球一份贴图；名字带上尺寸与本图指纹，避免撞名
+        Identifier id = resource("combo_charge/" + Integer.toHexString(canvas.hashCode())
+                + "_" + COMPOSED.size());
+        String label = "rotation_craft combo charge " + Arrays.toString(slots);
+        // 先留一份像素给侧壁用（canvas 交给 DynamicTexture 之后不能再碰）
+        NativeImage pixels = new NativeImage(NativeImage.Format.RGBA, canvas.getWidth(), canvas.getHeight(), false);
+        for (int py = 0; py < canvas.getHeight(); py++) {
+            for (int px = 0; px < canvas.getWidth(); px++) {
+                pixels.setPixel(px, py, canvas.getPixel(px, py));
+            }
+        }
+        COMPOSED_PIXELS.put(Arrays.toString(slots == null ? new int[] { NO_PIECE, NO_PIECE, NO_PIECE, NO_PIECE } : slots), pixels);
+
+        Minecraft.getInstance().getTextureManager().register(id, new DynamicTexture(() -> label, canvas));
+        RotationCraft.LOGGER.debug("[ball][弩] ④ 合成装填贴图 {} <- slots={}（{}）", id, Arrays.toString(slots),
+                (slots == null) ? "只画底图" : "已叠象限/半球");
+        return id;
+    }
+
+    /** 读一张贴图为可写像素缓冲；失败返回 null */
+    public static @Nullable NativeImage readTexture(Identifier id) {
+        try {
+            Resource resource = Minecraft.getInstance().getResourceManager().getResourceOrThrow(id);
+            try (InputStream in = resource.open()) {
+                return NativeImage.read(in);
+            }
+        } catch (IOException | RuntimeException e) {
+            RotationCraft.LOGGER.warn("[ball][弩] ★ 读取贴图失败 {}：{}", id, e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * 把 {@code top} 按 alpha 叠到 {@code base} 上（source-over）。
+     *
+     * <p>两张图都是 16×16，直接逐像素处理。{@link NativeImage} 的坐标原点是左上角，
+     * 与贴图一致，不需要翻转。</p>
+     */
+    public static void overlay(NativeImage base, NativeImage top) {
+        int w = Math.min(base.getWidth(), top.getWidth());
+        int h = Math.min(base.getHeight(), top.getHeight());
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int src = top.getPixel(x, y);
+                int sa = (src >>> 24) & 0xFF;
+                if (sa == 0) {
+                    continue;   // 全透明 → 保留底下的内容
+                }
+                if (sa == 255) {
+                    base.setPixel(x, y, src);
+                    continue;
+                }
+                int dst = base.getPixel(x, y);
+                double a = sa / 255.0;
+                int r = (int) (((src >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * (1 - a));
+                int g = (int) (((src >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * (1 - a));
+                int b = (int) ((src & 0xFF) * a + (dst & 0xFF) * (1 - a));
+                int da = (dst >>> 24) & 0xFF;
+                int outA = (int) (sa + da * (1 - a));
+                base.setPixel(x, y, (outA << 24) | (r << 16) | (g << 8) | b);
+            }
+        }
+    }
+
+    /**
+     * <b>清空底图上的球区</b>（作者 2026-10-16 报「组合球上膛贴图有异常像素」后的修复）。
+     *
+     * <h2>问题</h2>
+     * <p>底图 {@code charge_base_crossbow.png} 是原版满弦弩的<b>精确复制</b> ——
+     * 而原版弩的球区 {@code (2..7)²} 里<b>本来就有 30 个非透明像素</b>（弦、机件、木身）。
+     * 四张 {@code charge_piece} 的并集只覆盖 32 个像素，于是球的<b>圆角缺口</b>处
+     * —— 左下 {@code (2,7)}、右上 {@code (7,2)}、右下 {@code (7,7)} ——
+     * 会把这 3 个弩身像素<b>露出来</b>，看着就是「球角上多了一小块棕 / 灰」。</p>
+     *
+     * <h2>为什么清掉是安全的</h2>
+     * <p>那些像素本来就该由 <b>base 模型</b> 提供 ——
+     * {@code crossbow.json} 里组合球那条 case 的 {@code base} 是
+     * {@code minecraft:item/crossbow_pulling_2}，也就是<b>同一把弩</b>。
+     * 球角变透明后，透过它看到的就是 base 的弩身，<b>视觉完全一样</b>。</p>
+     *
+     * <h2>顺带解决的两件事</h2>
+     * <ol>
+     *   <li>{@code drawSideFaces} 会把合成图里<b>每一个不透明像素</b>做成 1 像素小立方体 ——
+     *       清空后这些立方体从「整把弩」缩到「只剩球」，边缘被 UV 拉成色条的面积大幅减少；</li>
+     *   <li>与 base 同深度共面的面积，从「整张图」缩到「只剩球」，配合 {@link #Z_BIAS}
+     *       把 z-fighting 压到看不见。</li>
+     * </ol>
+     */
+    private static void clearBallArea(NativeImage image) {
+        for (int y = BALL_Y0; y <= BALL_Y1; y++) {
+            for (int x = BALL_X0; x <= BALL_X1; x++) {
+                if (x < image.getWidth() && y < image.getHeight()) {
+                    image.setPixel(x, y, 0);   // ARGB 全 0 = 完全透明
+                }
+            }
+        }
+    }
+
+    /** 无状态，共用一个实例 */
+    public static final ComboChargeBallRenderer INSTANCE = new ComboChargeBallRenderer();
+    /**
+     * 包围盒 —— 必须与 {@link #submit} 里**实际提交的几何**处在同一空间。
+     *
+     * <p>{@code submit} 会给 poseStack 乘 {@link #MODEL_SCALE}（1/16），
+     * 所以屏幕上的几何实际是 0..1；而原来这里返回的是模型空间的 0..16 ——
+     * 两者差 16 倍，包围盒比真实外观大出一大截（物品展示框 / GUI 里的缩放会跟着错）。</p>
+     */
+    @Override
+    public void getExtents(Consumer<Vector3fc> output) {
+        // 包围盒报的是**提交时 poseStack 所在的空间**，而 submit() 里
+        // 几何是在 scale(MODEL_SCALE) **之后**提交的 —— 也就是已经落到 0..1。
+        // 所以这里报 0..1，与几何一致。
+        float s = MODEL_SCALE;
+        output.accept(new Vector3f(MIN * s, MIN * s, MIN * s));
+        output.accept(new Vector3f(MAX * s, MAX * s, MAX * s));
+    }
+
+    /** 注册用的 Unbaked */
+    public record Unbaked() implements SpecialModelRenderer.Unbaked<int[]> {
+
+        public static final Unbaked INSTANCE = new Unbaked();
+
+        public static final MapCodec<Unbaked> MAP_CODEC = MapCodec.unit(INSTANCE);
+
+        @Override
+        public @Nullable SpecialModelRenderer<int[]> bake(SpecialModelRenderer.BakingContext context) {
+            RotationCraft.LOGGER.debug("[ball][弩] ① Unbaked.bake() 被调用 —— special 渲染器注册生效");
+            return ComboChargeBallRenderer.INSTANCE;
+        }
+
+        @Override
+        public MapCodec<? extends SpecialModelRenderer.Unbaked<int[]>> type() {
+            return MAP_CODEC;
+        }
+    }
+}

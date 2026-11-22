@@ -1,0 +1,280 @@
+package com.mcmodworkspace.rotationcraft;
+
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.world.item.ItemStack;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * 「球堆」里装着的东西 —— 一批<b>同种</b>的球。
+ *
+ * <h2>为什么需要它</h2>
+ * <p>球的耐久记在 {@link ModComponents#TOUGHNESS_LEFT} 组件上，而 MC 的堆叠判定要求
+ * <b>组件完全一致</b>。于是副手打出去一组球、回收回来时，每颗挨的次数都不一样，
+ * 组件值自然各不相同 —— <b>每颗独占一格</b>，一趟下来背包被吃掉大半。</p>
+ *
+ * <p>球堆就是给这些球套一个「壳」：<b>壳本身只记「哪种球 + 哪一档」</b>，
+ * 内部的球则<b>原样存着</b>（{@link #balls} 里每颗都带自己精确的耐久）。
+ * 取出时把原来那颗还回去，<b>耐久一分不差</b>。</p>
+ *
+ * <h2>⚠️ 壳与壳之间不能互相叠</h2>
+ * <p>因为 {@link #balls} 的内容本身就是组件的一部分 —— 两堆球只要有一颗粒子的耐久不同，
+ * 组件就不同，MC 就不会让它们叠在一起。<b>但这不影响本机制的目的</b>：
+ * 一个壳能装 {@link #MAX_BALLS} 颗，<b>自己就只占一格</b>，
+ * 所以「减少占格」这件事根本不依赖「壳互相叠」。</p>
+ *
+ * <p>（这和潜影盒一样：装满了的潜影盒之间也叠不了，但它本来就只占一格。）</p>
+ *
+ * <h2>{@link #balls} 的排序约定</h2>
+ * <p><b>始终按剩余耐久升序</b>。作者指定「右键取出时给耐久最低的」、
+ * tooltip 也要「显示最低的那一颗」—— 保持有序之后，这两件事都只是取下标 0，
+ * 不用每次遍历找最小值。</p>
+ */
+public record BallClusterContents(ItemStack icon, List<ItemStack> balls) {
+
+    /** 一个球堆最多装多少颗 —— 与 {@code ModItems.BALL_STACK_SIZE} 一致 */
+    public static final int MAX_BALLS = 64;
+
+    /** 空壳（内部没有任何球）。不带 {@code BALL_CLUSTER} 组件 = 这个 */
+    public static final BallClusterContents EMPTY =
+            new BallClusterContents(ItemStack.EMPTY, List.of());
+
+    /**
+     * 编解码用<b>不可空</b>的 {@code ItemStack.CODEC}（不是收纳袋那套 {@code OPTIONAL_}）——
+     * 球堆里不允许有空格，它是个紧凑列表，不是摆位容器。
+     */
+    public static final Codec<BallClusterContents> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            ItemStack.CODEC.fieldOf("icon").forGetter(BallClusterContents::icon),
+            ItemStack.CODEC.listOf().fieldOf("balls").forGetter(BallClusterContents::balls)
+    ).apply(instance, BallClusterContents::new));
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, BallClusterContents> STREAM_CODEC =
+            StreamCodec.composite(
+                    ItemStack.STREAM_CODEC,
+                    BallClusterContents::icon,
+                    ItemStack.STREAM_CODEC.apply(ByteBufCodecs.list()),
+                    BallClusterContents::balls,
+                    BallClusterContents::new);
+
+    /** 这一堆里有多少颗 —— <b>图标角落那个数字就是它</b>，现算，不另存字段 */
+    public int size() {
+        return this.balls.size();
+    }
+
+    public boolean isEmpty() {
+        return this.balls.isEmpty();
+    }
+
+    /** 这一堆是哪一档（由代表球算出来；代表球没了就按最低那颗算） */
+    public BallClusterTier tier() {
+        ItemStack probe = this.icon.isEmpty() ? lowest() : this.icon;
+        return probe.isEmpty() ? BallClusterTier.PRISTINE : BallClusterTier.of(probe);
+    }
+
+    /** 这一堆里耐久最低的那颗；空堆返回 {@link ItemStack#EMPTY} */
+    public ItemStack lowest() {
+        return this.balls.isEmpty() ? ItemStack.EMPTY : this.balls.get(0);
+    }
+
+    /**
+     * 耐久最低的 {@code n} 颗（升序）。
+     *
+     * <p>作者指定：按住 Alt 时要显示「本堆叠耐久最少的 6 个球的剩余耐久」。</p>
+     */
+    public List<ItemStack> lowestN(int n) {
+        int end = Math.min(n, this.balls.size());
+        return List.copyOf(this.balls.subList(0, end));
+    }
+
+    /**
+     * 这颗球能不能进这一堆。
+     *
+     * <p>两个条件：<b>同一种球</b>（物品相同）且<b>同一档位</b>。</p>
+     *
+     * <p>⚠️ 只比「档位」而不比「精确耐久」—— 这正是本机制的意义所在。
+     * 进堆后每颗球的精确耐久仍然独立保存，只是不再影响它们能否待在一起。</p>
+     */
+    public boolean matches(ItemStack ball) {
+        if (ball.isEmpty() || this.balls.isEmpty()) {
+            return false;
+        }
+        // ===== 按档位分组（作者 2026-11-02 定稿）=====
+        //
+        // 历史经过，别再翻：
+        //   · 1.1.0.0（0eae316）—— 初次实现，**按档分**（PRISTINE / FLAWED / DAMAGED /
+        //     BROKEN / CRUMBLING 各一个壳）
+        //   · 1.1.0.10（322b1fd）—— 作者要求「改回一个球种一个壳」，于是把档位判据删了，
+        //     理由写的是「原先按档拆成最多 5 个壳，观感就是不堆叠」
+        //   · 现在（2026-11-02）—— 作者重新要求**分级**：
+        //     「球堆会错误的堆到一起而不分级，球堆的名字依据最低耐久者决定，
+        //      而不是分成各个档位」
+        //
+        // 所以档位判据加回来了。档位不同 ⇒ 不并进同一个壳；档位相同 ⇒ 精确耐久仍各自独立保存。
+        // 名字里的档位前缀（{@code cluster.rotation_craft.tier.*}）本来就按 {@link #tier()}
+        // 算，分组改回按档之后名字自然就对了 —— 不会再出现「名字跟着最低耐久者跑」。
+        if (BallClusterTier.of(ball) != tier()) {
+            return false;
+        }
+        ItemStack first = this.balls.get(0);
+        if (!ItemStack.isSameItem(ball, first)) {
+            return false;
+        }
+
+        // ===== ★ 组合球还要比「构成」（作者 2026-10-16 报的 bug）=====
+        //
+        // ⚠️ 所有组合球**共用同一个物品**（{@code rotation_craft:combo_ball}）——
+        //    光比物品会把「木 + 铁」和「金 + 钻石」当成同一种球收进同一个壳，
+        //    玩家看到的正是「不同的组合球回收进收纳袋时挤进了同一个球堆」。
+        //
+        //    组合球的真正身份在 {@code combo_slot_1..4} 这四个组件里，必须逐个比。
+        //    普通球根本没有这些组件 —— 两边都取不到值时
+        //    {@code Objects.equals(null, null)} 为真，所以这一段对普通球是**零影响**的。
+        if (isComboBall(first) || isComboBall(ball)) {
+            for (int q = 0; q < 4; q++) {
+                Integer mine = first.get(ModComponents.COMBO_SLOTS.get(q).get());
+                Integer theirs = ball.get(ModComponents.COMBO_SLOTS.get(q).get());
+                if (!java.util.Objects.equals(mine, theirs)) {
+                    return false;   // 象限构成不同 ⇒ 不是同一种组合球
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 是不是组合球。
+     *
+     * <p>组合球的「身份」不在物品 id 上（所有组合球共用 {@code rotation_craft:combo_ball}），
+     * 而在 {@code combo_slot_1..4} 组件里 —— 所以 {@link #matches} 光比物品是不够的。</p>
+     */
+    private static boolean isComboBall(ItemStack stack) {
+        return stack.getItem() == com.mcmodworkspace.rotationcraft.ModItems.COMBO_BALL.get();
+    }
+
+    /**
+     * <b>「最低耐久的那一组」的大小</b> —— 从下标 0 起、连续与最低那颗<b>耐久完全相同</b>的颗数。
+     *
+     * <h2>什么叫「一组」（作者 2026-10-15 定的口径）</h2>
+     * <p>作者原话是「释放一组耐久最低的球」，同时又要「显示该耐久的球有几个」——
+     * 这两句说的是同一件事：<b>「一组」= 耐久值相同的那一批</b>，
+     * 不是固定 64 颗、也不是随便一批。</p>
+     *
+     * <p>{@link #balls} 始终按剩余耐久升序，所以这一组天然就排在开头，
+     * 只要从 0 往后数到耐久变了为止 —— <b>不用新增字段</b>。</p>
+     */
+    public int lowestGroupSize() {
+        if (this.balls.isEmpty()) {
+            return 0;
+        }
+        int first = toughnessLeft(this.balls.get(0));
+        int n = 1;
+        while (n < this.balls.size() && toughnessLeft(this.balls.get(n)) == first) {
+            n++;
+        }
+        return n;
+    }
+
+    /**
+     * 取走开头 {@code n} 颗（也就是最低耐久的那一组），返回取完后的新内容。
+     *
+     * @param n 取走多少颗；超出总数时按总数算
+     */
+    public BallClusterContents withoutFirst(int n) {
+        if (this.balls.isEmpty() || n <= 0) {
+            return this;
+        }
+        int take = Math.min(n, this.balls.size());
+        List<ItemStack> next = new ArrayList<>(this.balls.subList(take, this.balls.size()));
+        return new BallClusterContents(next.isEmpty() ? ItemStack.EMPTY : this.icon, next);
+    }
+
+    /** 这一堆还装得下吗 */
+    public boolean hasRoom() {
+        return this.balls.size() < MAX_BALLS;
+    }
+
+    /**
+     * 塞一颗球进来，返回新的内容。
+     *
+     * <p>塞不下、或种类/档位不符时<b>原样返回 {@code this}</b> —— 调用方拿返回值比一下
+     * 就知道成没成，不用另开 boolean。</p>
+     *
+     * <p><b>⚠️ 按 {@code count} 拆成一颗一个元素</b>（作者 2026-10-15 实测反馈
+     * 「同耐久的一组球整理后只剩 1 个」就是这条引起的）。</p>
+     *
+     * <h2>为什么必须拆</h2>
+     * <p>背包里 8 颗同耐久的球是<b>一个 {@code count=8} 的栈</b>。原先这里写的是
+     * {@code next.add(ball.copy())} —— 把<b>整个栈当成一个元素</b>塞进去，于是
+     * `balls.size()` 返回 1，而 {@link #size()}（图标角标、tooltip、「一组」的数量、
+     * `declusterInto` 的判据）全都拿它当「几颗」用 ⇒ 8 颗显示成 1 颗。</p>
+     *
+     * <p>现在一个元素 = 一颗球，`size()` 就是货真价实的颗数 ——
+     * <b>六处口径一次性对齐，不用逐处改</b>。</p>
+     *
+     * <p>塞完重新按耐久升序排一次（见类注释里的排序约定）。</p>
+     */
+    public BallClusterContents withAdded(ItemStack ball) {
+        if (ball.isEmpty() || this.balls.size() >= MAX_BALLS) {
+            return this;
+        }
+        ItemStack iconNow = this.icon.isEmpty() ? ball.copyWithCount(1) : this.icon;
+        if (!this.balls.isEmpty() && !this.matches(ball)) {
+            return this;   // 种类或档位不符
+        }
+        List<ItemStack> next = new ArrayList<>(this.balls);
+        // 一颗一个元素；装不下的部分留在原栈里（调用方靠返回值判断成没成）
+        int room = MAX_BALLS - next.size();
+        int add = Math.min(ball.getCount(), room);
+        for (int i = 0; i < add; i++) {
+            next.add(ball.copyWithCount(1));
+        }
+        return new BallClusterContents(iconNow, sortByLowest(next));
+    }
+
+    /**
+     * 取出耐久最低的那一颗，返回<b>取出后的新内容</b>（record 不可变）。
+     *
+     * <p>取出的那颗由 {@link #lowest()} 拿 —— 它就是 {@code balls} 的第 0 个，
+     * 所以「取最低」这件事在这里是免费的。</p>
+     */
+    public BallClusterContents withoutLowest() {
+        if (this.balls.isEmpty()) {
+            return this;
+        }
+        List<ItemStack> next = new ArrayList<>(this.balls);
+        next.remove(0);
+        return new BallClusterContents(next.isEmpty() ? ItemStack.EMPTY : this.icon, next);
+    }
+
+    /**
+     * 按「剩余耐久」升序排。
+     *
+     * <p>口径与 {@link BallItem} 一致：读 {@code TOUGHNESS_LEFT} 组件，
+     * <b>没带组件 = 满耐久</b>（排在最后）。</p>
+     */
+    private static List<ItemStack> sortByLowest(List<ItemStack> list) {
+        List<ItemStack> out = new ArrayList<>(list);
+        out.sort(Comparator.comparingInt(BallClusterContents::toughnessLeft));
+        return out;
+    }
+
+    /**
+     * 一颗球还剩几次 —— 没带组件时返回上限（代表满耐久）。
+     *
+     * <p>这里**不**返回 {@code Integer.MAX_VALUE}：满耐久的球应该在排序里排最后，
+     * 而不是排最前。「取最低」取的是快坏的那颗，不是刚出炉的。</p>
+     */
+    private static int toughnessLeft(ItemStack stack) {
+        Integer left = stack.get(ModComponents.TOUGHNESS_LEFT.get());
+        if (left != null) {
+            return left;
+        }
+        return Math.max(0, BallBehavior.profileFor(stack).toughness());
+    }
+}

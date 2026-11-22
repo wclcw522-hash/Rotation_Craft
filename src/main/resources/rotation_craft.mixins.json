@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "package": "com.mcmodworkspace.moreballs.mixin",
+  "package": "com.mcmodworkspace.rotationcraft.mixin",
   "mixins": [
     "CrossbowItemMixin",
     "AbstractContainerMenuMixin",
@@ -10,7 +10,7 @@
     "StonecutterMenuMixin"
   ],
   "client": [
-    "LocalPlayerMixin"
+    "LocalPlayerMixin", "client.WolfRenderStateMixin", "client.WolfRendererMixin", "client.WolfModelMixin"
   ],
   "injectors": {
     "defaultRequire": 1
